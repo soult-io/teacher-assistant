@@ -1,0 +1,26 @@
+{
+  "name": "@teacher-assistant/pwa",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Offline-first installable PWA (React + Vite + vite-plugin-pwa). App shell + NON-PII reference precache only; student-linked data is served exclusively from the local encrypted store, never the HTTP cache. Scaffold only — TRACK/PLAN/differentiation UI lands per the Phase-1+ specs.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -p tsconfig.json && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo \"(no unit tests in the app shell yet — logic lives in packages/domain-core)\" && exit 0"
+  },
+  "dependencies": {
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "@types/react-dom": "^19.1.0",
+    "@vitejs/plugin-react": "^5.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^7.1.0",
+    "vite-plugin-pwa": "^1.0.3"
+  }
+}

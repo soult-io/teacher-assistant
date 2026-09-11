@@ -1,0 +1,16 @@
+{
+  "name": "@teacher-assistant/ferpa-guard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "FERPA-guard static-check suite (M14). Fails the build on privacy regressions: student payload in logs/URLs/telemetry (Item-2d), the structural IC-export guard (Item-3a), any free-text on the para surface, non-de-identified LLM egress. The ferpa-privacy-reviewer owns the invariants; this is where they are mechanically enforced from day one.",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "~26.2.0",
+    "typescript": "~5.9.3",
+    "vitest": "~4.1.10"
+  }
+}

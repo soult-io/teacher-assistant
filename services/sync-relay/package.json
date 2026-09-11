@@ -1,0 +1,23 @@
+{
+  "name": "@teacher-assistant/sync-relay",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M2 sync-relay: authenticated append-only encrypted-update log + fetch, keyed by opaque doc-id. NEVER decrypts — stores/serves ciphertext blobs it cannot read. Scaffold only (health endpoint); the relay lands with the Phase-0 M2 spec.",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo \"(no tests yet — sync-relay is a scaffold)\" && exit 0"
+  },
+  "dependencies": {
+    "@teacher-assistant/schema": "workspace:*",
+    "fastify": "~5.12.0"
+  },
+  "devDependencies": {
+    "@types/node": "~26.2.0",
+    "tsx": "~4.23.12",
+    "typescript": "~5.9.3"
+  }
+}

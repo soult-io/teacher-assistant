@@ -1,0 +1,44 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+# vite-plugin-pwa dev artifacts
+apps/pwa/dev-dist/
+
+# Env & secrets — no personal config in the app repo. Deploy env + real secrets
+# live in the stack repo (stack-lexington-teacher-assistant) / the host. Only the
+# template is tracked. Under D1, no key material is ever committed anywhere.
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Test / coverage
+coverage/
+.vitest/
+
+# E2E (Playwright artifacts)
+e2e/.state/
+e2e/test-results/
+e2e/playwright-report/
+
+# Local data
+pgdata/
+.claude/

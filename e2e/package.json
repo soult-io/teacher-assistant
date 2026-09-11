@@ -1,0 +1,16 @@
+{
+  "name": "@teacher-assistant/e2e",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Playwright browser E2E. Scaffold: a smoke spec proving the built PWA shell renders. The real suites (offline capture + reconnect convergence, two-device merge, para scoped-cache + no-free-text, structural IC-export guard) land per the Phase-0/1 specs.",
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "@types/node": "~26.2.0",
+    "typescript": "~5.9.3"
+  }
+}

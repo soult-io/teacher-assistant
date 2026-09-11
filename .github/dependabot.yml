@@ -1,0 +1,29 @@
+# Dependency update automation.
+version: 2
+updates:
+  # pnpm workspace — the root manifest + lockfile cover the whole monorepo.
+  - package-ecosystem: npm
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+      production-dependencies:
+        dependency-type: production
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+
+  # One entry per Dockerfile (base-image updates for the four deployable images).
+  - package-ecosystem: docker
+    directories:
+      - "/apps/pwa"
+      - "/services/sync-relay"
+      - "/services/content-api"
+      - "/services/diff-orchestrator"
+    schedule:
+      interval: weekly
