@@ -17,7 +17,7 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm -r --filter @teacher-assistant/pwa... run build
 
 ## ---- runtime: unprivileged nginx serving the static shell ----
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.31-alpine AS runtime
 COPY apps/pwa/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/pwa/dist /usr/share/nginx/html
 EXPOSE 8080
