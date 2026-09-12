@@ -44,8 +44,10 @@ jobs:
       - name: Typecheck (all workspaces)
         run: pnpm -r run typecheck
 
-      - name: Unit tests (domain-core)
-        run: pnpm --filter @teacher-assistant/domain-core run test
+      # All workspace tests (schema, crypto, auth, domain-core, ferpa-guard, …).
+      # Build ran above, so cross-package imports resolve to dist.
+      - name: Unit tests (all workspaces)
+        run: pnpm -r run test
 
   # Build the four deployable images. Validates the Dockerfiles on every PR;
   # pushes sha-<commit> + latest only from main (the stack repo pins by sha/tag).

@@ -2,7 +2,7 @@
   "name": "@teacher-assistant/schema",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared TypeScript types + validators. CO-OWNED with the data-model-integration agent (entity fields, IC/Toddle export formats). Scaffold only — concrete entities land with the data-model spec.",
+  "description": "Shared TypeScript entity types + the encrypted-vs-cleartext classification + the opaque-id contract. CO-OWNED with the data-model-integration agent (entity fields, IC/Toddle export formats) — implements architecture/data-model.md.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,9 +15,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"(no tests yet — @teacher-assistant/schema is a scaffold)\" && exit 0"
+    "test": "vitest run"
   },
   "devDependencies": {
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "~4.1.10"
   }
 }

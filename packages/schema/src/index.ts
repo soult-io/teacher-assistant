@@ -1,17 +1,18 @@
-// @teacher-assistant/schema — shared types + validators.
+// @teacher-assistant/schema — shared entity types + the privacy classification.
 //
-// CO-OWNED with the data-model-integration agent: the concrete entity schema
-// (goals, data points, weeks/day-blocks, MYP scores, baseline points, arc/iep
-// dates, para observations) and the IC/Toddle export field formats are defined
-// by their data-model spec, not here. This is a SCAFFOLD — it exists so other
-// packages can import it from day one.
+// CO-OWNED with the data-model-integration agent: the concrete entity fields and
+// the IC/Toddle export formats come from their `architecture/data-model.md`.
+// This package implements that spec as TypeScript types + the machine-readable
+// encrypted-vs-cleartext map the FERPA-guard suite and the crypto layer read.
 //
-// FERPA discipline (M14): every id that crosses the wire or reaches a log/URL is
-// a random opaque identifier. No initials, period names, or student payload ever
-// appear in an id. The branded type below marks that contract at the type level.
+// FERPA discipline (data-model §10.2): every id that crosses the wire or reaches
+// a log/URL is a random opaque identifier — never derived from initials, period
+// names, or student payload. See ids.ts for the contract.
 
-/** A random, opaque, PII-free identifier (e.g. a UUIDv4). Never derived from student data. */
-export type OpaqueId = string & { readonly __brand: "OpaqueId" };
+export * from "./ids.js";
+export * from "./classification.js";
+export * from "./enums.js";
+export * from "./entities.js";
 
-/** Placeholder — replaced by the data-model-integration entity schema. */
-export const SCHEMA_SCAFFOLD_VERSION = 0 as const;
+/** Schema revision. Bumped as the data-model spec lands in this package. */
+export const SCHEMA_VERSION = 1 as const;

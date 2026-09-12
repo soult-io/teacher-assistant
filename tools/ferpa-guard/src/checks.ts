@@ -39,11 +39,15 @@ export interface PatternHit {
   readonly text: string;
 }
 
-/** Return every line across `files` matching `pattern`. Empty = clean. */
-export function scanForPattern(files: readonly string[], pattern: RegExp): PatternHit[] {
+/** Scan each file's lines for `pattern`, applying `transform` to file content first. */
+function scanLines(
+  files: readonly string[],
+  pattern: RegExp,
+  transform: (src: string) => string,
+): PatternHit[] {
   const hits: PatternHit[] = [];
   for (const file of files) {
-    const lines = readFileSync(file, "utf8").split("\n");
+    const lines = transform(readFileSync(file, "utf8")).split("\n");
     for (let i = 0; i < lines.length; i++) {
       const text = lines[i] ?? "";
       // Fresh lastIndex each test — pattern may be /g.
@@ -56,6 +60,11 @@ export function scanForPattern(files: readonly string[], pattern: RegExp): Patte
   return hits;
 }
 
+/** Return every line across `files` matching `pattern`. Empty = clean. */
+export function scanForPattern(files: readonly string[], pattern: RegExp): PatternHit[] {
+  return scanLines(files, pattern, (src) => src);
+}
+
 /** True if `file` contains `needle` (substring). */
 export function fileContains(file: string, needle: string): boolean {
   try {
@@ -63,4 +72,20 @@ export function fileContains(file: string, needle: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Strip `/* *\/` block comments and `//` line comments from TS source, so a
+ * static scan for a risky CODE pattern is not tripped by prose that legitimately
+ * discusses it (the service scaffolds, for instance, mention "initials" and
+ * "goal text" in their privacy comments). The `[^:]` guard keeps `https://` URLs
+ * intact rather than treating `//` inside them as a comment.
+ */
+export function stripComments(src: string): string {
+  return src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
+}
+
+/** Like scanForPattern, but matches against comment-stripped code only. */
+export function scanCodeForPattern(files: readonly string[], pattern: RegExp): PatternHit[] {
+  return scanLines(files, pattern, stripComments);
 }
