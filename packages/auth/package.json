@@ -1,8 +1,8 @@
 {
-  "name": "@teacher-assistant/crypto",
+  "name": "@teacher-assistant/auth",
   "version": "0.0.0",
   "private": true,
-  "description": "M0 crypto/keyring core: key hierarchy (master key + per-period DEKs + device keypairs), XChaCha20-Poly1305 record AEAD, X25519 key wrapping, Argon2id paper-recovery wrap, OOB-QR device + para enrollment, DEK rotation/revocation. Client-side only — the server never receives an unwrapped key.",
+  "description": "M0-AUTH (H-PUB-1): passkeys/WebAuthn as the PRIMARY factor (no password path), rate-limiting + lockout (H-PUB-5), and the binding that a verified passkey auth unlocks the device-held wrapped keys. Framework-agnostic; the sync-relay (M2) consumes it.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -18,8 +18,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@teacher-assistant/schema": "workspace:*",
-    "libsodium-wrappers-sumo": "0.8.4"
+    "@simplewebauthn/server": "14.0.1",
+    "@teacher-assistant/crypto": "workspace:*",
+    "@teacher-assistant/schema": "workspace:*"
   },
   "devDependencies": {
     "typescript": "~5.9.3",
