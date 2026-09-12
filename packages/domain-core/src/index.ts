@@ -37,3 +37,8 @@ export * from "./arc-window.js";
 // M8 — auto progress-statement + trend engine (phase1-spec §5, design §G R3-3).
 export * from "./trend.js";
 export * from "./auto-statement.js";
+
+// M13 — para role surface: capture + teacher-validation + administer-label
+// (phase1-spec §6, field-split §1.4/§2/§3, DECISIONS D-ARCH-FERPA-M13).
+export * from "./para-administer-label.js";
+export * from "./para-capture.js";

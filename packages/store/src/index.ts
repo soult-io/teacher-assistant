@@ -22,3 +22,15 @@ export {
   buildToScoreQueue,
   buildValidationQueue,
 } from "./projections.js";
+
+// M13 — the para-visible projection (the `3p/para-visible` doc model, Period-DEK
+// fields only; field-split §1/§3, DECISIONS D-ARCH-FERPA-M13).
+export {
+  type ParaRosterMember,
+  type ParaAdministerSource,
+  type ParaVisibleRosterEntry,
+  type ParaVisibleAdministerEntry,
+  type ParaVisibleDoc,
+  type ParaVisibleInput,
+  buildParaVisibleProjection,
+} from "./para-projection.js";

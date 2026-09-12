@@ -25,6 +25,7 @@ import type {
   OpaqueId,
   ProgressDataPoint,
 } from "@teacher-assistant/schema";
+import { bucketBy } from "./group.js";
 
 /** A week is "excused" for a goal only for these ⊘ reasons (design §A.2). Behavior/no_time are documented but not excused. */
 const EXCUSED_REASONS: ReadonlySet<NoDataReason> = new Set<NoDataReason>([
@@ -189,13 +190,7 @@ function groupByKey(
   rows: readonly DashboardRow[],
   keyOf: (r: DashboardRow) => string,
 ): DashboardGroup[] {
-  const groups = new Map<string, DashboardRow[]>();
-  for (const row of rows) {
-    const key = keyOf(row);
-    const bucket = groups.get(key) ?? [];
-    bucket.push(row);
-    groups.set(key, bucket);
-  }
+  const groups = bucketBy(rows, keyOf);
   return [...groups.keys()]
     .sort(compareCodePoints)
     .map((key) => ({ key, rows: owesFirst(groups.get(key) ?? []) }));
