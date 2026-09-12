@@ -12,20 +12,15 @@
 //   M8  auto progress-statement + trend engine       (Phase 1)
 //   consistency-window mastery observation, validators
 //
-// Scaffold only below.
-
-/**
- * Deterministic code-point string comparator. Use this for any output ordering
- * (diff-friendly tables, dedup tiebreaks) — never String.prototype.localeCompare,
- * which is locale-dependent and non-deterministic across hosts (banned by the
- * vendored GritQL biome plugin).
- */
-export function compareCodePoints(a: string, b: string): number {
-  if (a < b) {
-    return -1;
-  }
-  return a > b ? 1 : 0;
-}
+export * from "./comparators.js";
 
 // M4 — the shared instructional-weeks primitive (architecture §3, data-model §5).
 export * from "./instructional-weeks.js";
+
+// M5 — goal-tracker + progress monitoring domain logic (phase1-spec §2).
+export * from "./value.js";
+export * from "./data-point.js";
+export * from "./consistency.js";
+export * from "./owes.js";
+export * from "./goal-validation.js";
+export * from "./goal-detail.js";

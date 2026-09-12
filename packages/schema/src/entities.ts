@@ -12,6 +12,7 @@ import type {
   AccommodationSubtype,
   ArcDateFlag,
   BaselineSource,
+  ColorToken,
   BlockType,
   DataPointState,
   DenominatorModel,
@@ -34,13 +35,7 @@ import type { OpaqueId, Timestamp } from "./ids.js";
 /** ISO calendar date, `YYYY-MM-DD` (admin dates, arc/iep dates). Distinct from the epoch Timestamp. */
 export type IsoDate = string & { readonly __brand: "IsoDate" };
 
-/**
- * A fixed per-student identity colour token (data-model §1.2, design §E.2).
- * `[→ DMI]` the exact closed member list (`--s-ab`…`--s-rt`, palette excludes
- * status hues green/amber/red) lives in design §E.2 and is not enumerated in the
- * data-model — typed as the token string until DMI supplies the members.
- */
-export type ColorToken = string & { readonly __brand: "ColorToken" };
+// `ColorToken` is now the closed six-hue enum (design §E.2) — see enums.ts.
 
 /** Audit revision entry (data-model §2.4 `{who, when, old→new}`). */
 export interface Revision {

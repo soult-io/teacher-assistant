@@ -15,6 +15,7 @@
 import {
   compareCodePoints,
   isCalendarInstructional,
+  isDueInWeek,
   isoWeekId,
 } from "@teacher-assistant/domain-core";
 import type {
@@ -76,11 +77,10 @@ export interface WeeklyDashboardInput {
  * calendar break week there are no collectable goals, so the dashboard is empty
  * and owes are zero.
  *
- * Phase-0 cadence: every active goal is treated as due each instructional week
- * (the MVP default `weekly`, data-model §2.1). Per-`frequency` owes cadence for
- * `twice_monthly`/`monthly` goals (so they do not read as owing every week) is a
- * tracked M5 follow-on — the goal-tracker owns frequency-driven owes. An
- * in-progress point (queued/incomplete/pending) is surfaced by the to-score /
+ * Owes cadence is per-goal `frequency` (M5 `isDueInWeek`): weekly/daily are due
+ * every instructional week, monthly/twice_monthly only on their cadence week — a
+ * goal not due this week and with no point this week is omitted (it does not owe).
+ * An in-progress point (queued/incomplete/pending) is surfaced by the to-score /
  * validation queues; with only such a point a goal still "owes" a completed
  * score, consistent with the locked three-state model (no in-progress state).
  */
@@ -99,6 +99,13 @@ export function buildWeeklyDashboard(input: WeeklyDashboardInput): WeeklyDashboa
     const weekPoints = input.points.filter(
       (p) => p.goal_id === goal.goal_id && isoWeekId(p.admin_date) === week,
     );
+    // Per-goal frequency drives owes (M5): a goal not due this week and with no
+    // point this week is simply not on the board — it does not owe. (weekly/daily
+    // are due every instructional week, so the Phase-0 behaviour is unchanged.)
+    const due = isDueInWeek(goal.frequency, week, input.isNonInstructional);
+    if (!due && weekPoints.length === 0) {
+      continue;
+    }
     const scored = weekPoints.some((p) => p.state === "scored");
     const noData = weekPoints.find((p) => p.state === "no_data");
 
