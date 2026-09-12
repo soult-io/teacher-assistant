@@ -26,3 +26,6 @@ export function compareCodePoints(a: string, b: string): number {
   }
   return a > b ? 1 : 0;
 }
+
+// M4 — the shared instructional-weeks primitive (architecture §3, data-model §5).
+export * from "./instructional-weeks.js";
