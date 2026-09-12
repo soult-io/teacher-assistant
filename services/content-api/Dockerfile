@@ -3,7 +3,7 @@
 # ghcr.io/nsoult-agentic/teacher-assistant-content-apie stack).
 
 ## ---- build: install workspace deps, build this service + its workspace deps ----
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 RUN npm install -g pnpm@11.17.0
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
@@ -15,7 +15,7 @@ RUN pnpm -r --filter @teacher-assistant/content-api... run build
 RUN pnpm deploy --legacy --filter @teacher-assistant/content-api --prod /prod/app
 
 ## ---- runtime: node:22-alpine, non-root, healthcheck on /health ----
-FROM node:22-alpine AS runtime
+FROM node:26-alpine AS runtime
 ENV NODE_ENV=production \
     PORT=8932 \
     SECRETS_DIR=/run/secrets
