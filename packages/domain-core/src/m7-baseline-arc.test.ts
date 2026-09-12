@@ -117,6 +117,9 @@ describe("ARC adoption locks the baseline + flips active (§2.5)", () => {
     expect(adopted.baseline_value).toBeCloseTo(70);
     expect(adopted.baseline_source).toBe("computed_from_baseline_points");
     expect(adopted.revisions).toHaveLength(1);
+    // F3: the criterion is finalized at adoption — the audit revision records it.
+    const adoptionNew = adopted.revisions[0]?.new as { criterion_confirmed?: boolean } | undefined;
+    expect(adoptionNew?.criterion_confirmed).toBe(true);
     // Baseline points are separate entities — adoption never discards them.
     expect(pts).toHaveLength(3);
   });
@@ -144,17 +147,19 @@ describe("ARC adoption locks the baseline + flips active (§2.5)", () => {
 });
 
 describe("ARC dates + baseline window (§2.1)", () => {
-  it("baseline window = arc_date − 6 INSTRUCTIONAL weeks (M4 primitive, not calendar weeks)", () => {
-    const goal = makeGoal({ arcDate: iso("2026-10-05") }); // W41
-    expect(computeBaselineWindowStart(goal, noBreaks)).toBe("2026-08-31"); // W36 Monday
+  it("baseline window = a FULL 6 INSTRUCTIONAL weeks BEFORE the ARC week (exclusive, SME ruling B)", () => {
+    const goal = makeGoal({ arcDate: iso("2026-10-05") }); // W41 — NOT counted
+    // 6 instructional weeks before W41 = W35 Monday (the ARC week is excluded).
+    expect(computeBaselineWindowStart(goal, noBreaks)).toBe("2026-08-24");
   });
 
   it("editing arc_date recomputes the window, retains points, and flags the move", () => {
     const goal = makeGoal({ arcDate: iso("2026-10-05") });
     const points = [baselinePoint(goal, 8, newOpaqueId())]; // held separately — must survive
-    const earlier = editArcDate(goal, iso("2026-09-28"), noBreaks); // W40
+    const earlier = editArcDate(goal, iso("2026-09-28"), noBreaks); // W40 — excluded
     expect(earlier.alert).toBe("compressed");
-    expect(earlier.goal.baseline_window_start).toBe("2026-08-24"); // W35 Monday, recomputed
+    // 6 instructional weeks before W40 = W34 Monday.
+    expect(earlier.goal.baseline_window_start).toBe("2026-08-17");
     expect(earlier.goal.arc_date).toBe("2026-09-28");
     expect(points).toHaveLength(1); // points never discarded on a date shift
 

@@ -6,7 +6,7 @@
 // (they are separate entities — nothing here discards them).
 
 import type { IEPGoal, IsoDate, OpaqueId } from "@teacher-assistant/schema";
-import { baselineWindowStart, isoWeekStart } from "./instructional-weeks.js";
+import { baselineWindowStart, isoWeekId, isoWeekStart } from "./instructional-weeks.js";
 
 /** Default baseline lead (data-model §2.1: arc_date − ~6 instructional weeks). */
 export const DEFAULT_BASELINE_LEAD_WEEKS = 6;
@@ -19,20 +19,21 @@ function toIsoDate(d: Date): IsoDate {
  * The Monday (ISO date) that starts the baseline window for an arc date — the
  * single point of truth for the week-id→date conversion this module is built on.
  *
- * NOTE [→ SME confirm]: the M4 walk-back counts the ARC week itself as the first
- * of the `leadWeeks` instructional weeks, so the window start is `arc_date −
- * (leadWeeks − 1)` instructional weeks (a 6-week window INCLUSIVE of the ARC
- * week). The spec says "~6 instructional weeks" (approximate); whether the intended
- * lead is inclusive or exclusive of the ARC week is a domain call to confirm at
- * acceptance — flipping to exclusive is a one-line change (step back one week
- * before counting).
+ * The ARC week is EXCLUDED (ky-sped-lbd-sdi-sme ruling B): the meeting week is not
+ * a collection week — the baseline must already be in hand to present at the ARC —
+ * so the window opens a FULL `leadWeeks` instructional weeks BEFORE the ARC week.
+ * We do this locally by starting the M4 walk-back from the week BEFORE the ARC
+ * week; M4's `baselineWindowStart` (which counts its start week as the first) is
+ * left unchanged for any other consumer.
  */
 function windowStartFor(
   arcDate: IsoDate,
   leadWeeks: number,
   isNonInstructional: (weekId: string) => boolean,
 ): IsoDate {
-  return toIsoDate(isoWeekStart(baselineWindowStart(arcDate, leadWeeks, isNonInstructional)));
+  const weekBeforeArc = isoWeekStart(isoWeekId(arcDate));
+  weekBeforeArc.setUTCDate(weekBeforeArc.getUTCDate() - 7);
+  return toIsoDate(isoWeekStart(baselineWindowStart(weekBeforeArc, leadWeeks, isNonInstructional)));
 }
 
 /**

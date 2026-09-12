@@ -77,6 +77,10 @@ export function adoptGoal(
       status: "active",
       baseline_value: estimate.value,
       baseline_source: "computed_from_baseline_points",
+      // F3: the (previously provisional) criterion is FINALIZED at ARC adoption.
+      // Recorded as a distinct flag (not the `criterion_level` key) so the F4
+      // quarterly clamp does not read adoption as a criterion CHANGE.
+      criterion_confirmed: true,
     },
   };
   return {
