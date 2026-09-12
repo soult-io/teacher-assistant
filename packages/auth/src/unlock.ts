@@ -4,6 +4,10 @@
 // wrapped MK / Period DEK) into an in-memory keyring. Auth GATES decryption; it
 // never holds plaintext keys server-side.
 //
+// The gate takes the actual `VerifiedAuthenticationResponse` from
+// finishAuthentication (not a bare boolean the caller could fabricate), and
+// refuses unless its `verified` flag is true.
+//
 // Enrollment is deliberately NOT reachable from here: there is no function that
 // turns an auth result into an enrollment grant. A new device is added only by a
 // trusted device approving its OOB-QR request (crypto's approveDeviceEnrollment /
@@ -19,6 +23,7 @@ import {
   ParaKeyring,
   TeacherKeyring,
 } from "@teacher-assistant/crypto";
+import type { VerifiedAuthenticationResponse } from "@simplewebauthn/server";
 
 /** Thrown when a keyring unlock is attempted without a verified passkey authentication. */
 export class AuthRequiredError extends Error {
@@ -29,8 +34,8 @@ export class AuthRequiredError extends Error {
 }
 
 export interface TeacherUnlockInput {
-  /** MUST be the `verified` flag from finishAuthentication — the auth gate. */
-  readonly authenticationVerified: boolean;
+  /** The result of finishAuthentication — must carry `verified: true`. */
+  readonly authentication: VerifiedAuthenticationResponse;
   /** This device's keypair (available once the passkey/OS unlock succeeds). */
   readonly deviceKeypair: DeviceKeypair;
   /** The locally-persisted enrollment grant wrapping the master key. */
@@ -38,14 +43,14 @@ export interface TeacherUnlockInput {
 }
 
 export interface ParaUnlockInput {
-  readonly authenticationVerified: boolean;
+  readonly authentication: VerifiedAuthenticationResponse;
   readonly deviceKeypair: DeviceKeypair;
   readonly grant: ParaEnrollmentGrant;
 }
 
 /** Unlock the teacher keyring after a verified passkey auth. Throws AuthRequiredError otherwise. */
 export function unlockTeacherKeyring(input: TeacherUnlockInput): TeacherKeyring {
-  if (!input.authenticationVerified) {
+  if (!input.authentication.verified) {
     throw new AuthRequiredError();
   }
   const { mk, masterScopeTag } = completeDeviceEnrollment(input.deviceKeypair, input.grant);
@@ -54,7 +59,7 @@ export function unlockTeacherKeyring(input: TeacherUnlockInput): TeacherKeyring 
 
 /** Unlock the para keyring (its single Period DEK) after a verified passkey auth. */
 export function unlockParaKeyring(input: ParaUnlockInput): ParaKeyring {
-  if (!input.authenticationVerified) {
+  if (!input.authentication.verified) {
     throw new AuthRequiredError();
   }
   return new ParaKeyring([completeParaEnrollment(input.deviceKeypair, input.grant)]);

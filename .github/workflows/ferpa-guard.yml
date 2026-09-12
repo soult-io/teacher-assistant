@@ -36,11 +36,11 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # The suite imports the real crypto layer to prove the key-scope + MK
-      # invariants behaviourally, so its workspace deps (crypto → schema) must be
-      # built to dist first.
-      - name: Build guard dependencies (crypto → schema)
-        run: pnpm --filter "@teacher-assistant/crypto..." run build
+      # The suite imports the real crypto layer AND the real relay (buildApp) to
+      # prove the key-scope/MK (M0) and relay-authz/identity-clean (M1/M2)
+      # invariants behaviourally, so workspace deps must be built to dist first.
+      - name: Build workspaces (guard deps resolve to dist)
+        run: pnpm -r run build
 
       - name: FERPA-guard checks (static + behavioural hard stops)
         run: pnpm --filter @teacher-assistant/ferpa-guard run test

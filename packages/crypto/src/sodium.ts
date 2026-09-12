@@ -102,6 +102,27 @@ export function sealOpen(sealed: Uint8Array, kp: SodiumKeyPair): Uint8Array {
   return s().crypto_box_seal_open(sealed, kp.publicKey, kp.privateKey);
 }
 
+/** An Ed25519 signing keypair (device auth to the relay — NOT a key-wrapping key). */
+export interface SodiumSignKeyPair {
+  readonly publicKey: Uint8Array;
+  readonly privateKey: Uint8Array;
+}
+
+/** Generate an Ed25519 signing keypair. */
+export function signKeypair(): SodiumSignKeyPair {
+  const kp = s().crypto_sign_keypair();
+  return { publicKey: kp.publicKey, privateKey: kp.privateKey };
+}
+
+/** Detached Ed25519 signature over `message`. */
+export function signDetached(message: Uint8Array, privateKey: Uint8Array): Uint8Array {
+  return s().crypto_sign_detached(message, privateKey);
+}
+
+// Signature VERIFICATION lives only in the sync-relay (services/sync-relay/
+// sodium-verify.ts), which uses libsodium directly — the crypto package is the
+// client key layer and never needs to verify a request signature.
+
 /** Argon2id salt length (16 bytes). */
 export function pwhashSaltBytes(): number {
   return s().crypto_pwhash_SALTBYTES;

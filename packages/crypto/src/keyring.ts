@@ -11,7 +11,7 @@
 import type { RecordEnvelope, ScopeTag } from "@teacher-assistant/schema";
 import type { MasterKey, PeriodKey } from "./keys.js";
 import { decryptWithKey, encryptWithKey } from "./records.js";
-import { sealTo } from "./sodium.js";
+import { aeadDecrypt, aeadEncrypt, sealTo } from "./sodium.js";
 
 /** Thrown when a keyring is asked to use a scope it does not hold (the para boundary). */
 export class NoKeyForScopeError extends Error {
@@ -69,6 +69,21 @@ export class Keyring {
   /** Seal (wrap) a scope's key to a device public key. Throws if the scope is absent. */
   sealScopeKeyToDevice(scopeTag: ScopeTag, devicePublicKey: Uint8Array): Uint8Array {
     return sealTo(this.#keyFor(scopeTag), devicePublicKey);
+  }
+
+  /**
+   * Encrypt an opaque CRDT update under a scope's key, binding caller-supplied
+   * context (e.g. the opaque doc id) as AEAD additional data so a blob cannot be
+   * replayed under a different stream. Throws NoKeyForScopeError if the scope is
+   * not held — the para boundary applies to sync updates too.
+   */
+  sealUpdate(scopeTag: ScopeTag, contextAad: Uint8Array, plaintext: Uint8Array): Uint8Array {
+    return aeadEncrypt(this.#keyFor(scopeTag), plaintext, contextAad);
+  }
+
+  /** Decrypt an opaque CRDT update. Throws if the scope is absent or the AAD/tag mismatch. */
+  openUpdate(scopeTag: ScopeTag, contextAad: Uint8Array, blob: Uint8Array): Uint8Array {
+    return aeadDecrypt(this.#keyFor(scopeTag), blob, contextAad);
   }
 
   /** Keys are withheld from serialisation — only opaque scope tags are exposed. */
