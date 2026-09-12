@@ -28,3 +28,8 @@ export * from "./goal-detail.js";
 // M6a — IEP % → Infinite Campus export + F4 quarterly summary (phase1-spec §4).
 export * from "./quarterly.js";
 export * from "./ic-export.js";
+
+// M7 — baseline / proposed-goal track + ARC/IEP dates (phase1-spec §3).
+export * from "./baseline.js";
+export * from "./lifecycle.js";
+export * from "./arc-window.js";
