@@ -1,0 +1,40 @@
+name: ferpa-guard
+
+# Dedicated FERPA-guard gate (M14). Kept SEPARATE from ci.yml on purpose: the
+# privacy invariants (identity-clean sync/logs/telemetry/URLs — Item-2d; the
+# structural IC-export guard — Item-3a; no free-text on the para surface;
+# de-identified LLM egress) are the most regression-prone surface in the whole
+# system (architecture §6 R3), and they get their own required check so a red
+# FERPA gate is unmissable. The ferpa-privacy-reviewer owns these invariants;
+# this workflow enforces them mechanically from day one.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ferpa-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: FERPA-guard static checks
+        run: pnpm --filter @teacher-assistant/ferpa-guard run test

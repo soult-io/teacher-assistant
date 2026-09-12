@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# A newer run on the same ref cancels a stale in-progress one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/teacher-assistant
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint + format (biome + vendored GritQL plugin)
+        run: pnpm lint
+
+      # Build BEFORE typecheck: cross-package imports resolve to dist/*.d.ts,
+      # which must exist first.
+      - name: Build all workspaces
+        run: pnpm -r run build
+
+      - name: Typecheck (all workspaces)
+        run: pnpm -r run typecheck
+
+      - name: Unit tests (domain-core)
+        run: pnpm --filter @teacher-assistant/domain-core run test
+
+  # Build the four deployable images. Validates the Dockerfiles on every PR;
+  # pushes sha-<commit> + latest only from main (the stack repo pins by sha/tag).
+  build-images:
+    needs: [verify]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: pwa
+            dockerfile: apps/pwa/Dockerfile
+          - name: sync-relay
+            dockerfile: services/sync-relay/Dockerfile
+          - name: content-api
+            dockerfile: services/content-api/Dockerfile
+          - name: diff-orchestrator
+            dockerfile: services/diff-orchestrator/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and push on main)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:sha-${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

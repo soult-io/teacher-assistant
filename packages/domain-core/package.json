@@ -1,0 +1,27 @@
+{
+  "name": "@teacher-assistant/domain-core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Pure, PII-free domain logic: instructional-weeks primitive (M4), grading engines (M6), trend/statement (M8), consistency-window, validators. Heavily unit-tested. Scaffold only — modules land per the Phase-0/1 specs.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@teacher-assistant/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "~4.1.10"
+  }
+}

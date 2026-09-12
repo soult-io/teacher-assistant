@@ -1,0 +1,24 @@
+{
+  "name": "teacher-assistant",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Teacher Assistant — offline-first PWA for LBD special-ed planning + IEP goal tracking. D1 client-side E2E encryption; server stores ciphertext only. See docs/ARCHITECTURE.md.",
+  "license": "AGPL-3.0-or-later",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@11.17.0",
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "test": "pnpm -r run test",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "biome check",
+    "format": "biome format --write",
+    "e2e": "pnpm -r run build && pnpm --filter @teacher-assistant/e2e e2e",
+    "ferpa-guard": "pnpm --filter @teacher-assistant/ferpa-guard test"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.8"
+  }
+}

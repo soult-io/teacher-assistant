@@ -1,0 +1,26 @@
+{
+  "name": "@teacher-assistant/crypto",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M0 crypto/keyring core: key hierarchy (master key + per-period DEKs + device keypairs), AEAD, key wrapping, device enrollment (QR), paper recovery code, para-scoped key issuance + rotation. Scaffold only — the crypto module lands with the Phase-0 M0 spec.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo \"(no tests yet — @teacher-assistant/crypto is a scaffold; M0 spec follows)\" && exit 0"
+  },
+  "dependencies": {
+    "@teacher-assistant/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3"
+  }
+}

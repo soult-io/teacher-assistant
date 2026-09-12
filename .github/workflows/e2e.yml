@@ -1,0 +1,51 @@
+name: e2e
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20   # fail fast on hangs — never sit on the 6h default
+    # Official Playwright image matching the lockfile version: chromium + its
+    # system libraries are baked in, removing the flaky per-run apt/CDN fetches.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (PWA + workspace deps)
+        run: pnpm -r run build
+
+      - name: Verify Playwright chromium
+        run: pnpm --filter @teacher-assistant/e2e exec playwright install chromium
+
+      - name: E2E (Playwright)
+        run: pnpm --filter @teacher-assistant/e2e e2e
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-report
+          path: e2e/playwright-report/
+          retention-days: 7
