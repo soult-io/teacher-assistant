@@ -60,6 +60,12 @@ export function consistencyWindow(
   points: readonly ProgressDataPoint[],
 ): ConsistencyResult {
   const required = goal.criterion_consistency.n_probes;
+  // MVP is %-only (design C1). The %-vs-criterion window is defined ONLY for the
+  // percent model; a non-% goal (rubric/count/duration) gets no coerced window —
+  // it never reports met / a mastery candidate (its window is out of MVP scope).
+  if (goal.denominator_model !== "percent_correct_over_total") {
+    return { run: 0, required, met: false, excludedMismatches: 0 };
+  }
   const probes = scoredProbesInOrder(goal, points);
   const excludedMismatches = points.filter(
     (p) => p.goal_id === goal.goal_id && p.state === "scored" && p.denominator_mismatch === true,

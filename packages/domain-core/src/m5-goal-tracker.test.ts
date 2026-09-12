@@ -3,6 +3,7 @@
 
 import {
   asTimestamp,
+  type DenominatorModel,
   type Frequency,
   type GoalStatus,
   type IEPGoal,
@@ -21,6 +22,7 @@ import {
   canBeginMonitoring,
   captureScoredPoint,
   computeValue,
+  ConstructIntegrityError,
   consistencyWindow,
   isDueInWeek,
   observeMastery,
@@ -39,6 +41,7 @@ function makeGoal(
     nProbes: number;
     withBaseline: boolean;
     circumstance: string;
+    model: DenominatorModel;
   }>,
 ): IEPGoal {
   const withBaseline = over?.withBaseline ?? true;
@@ -53,7 +56,7 @@ function makeGoal(
     method_general: "cbm",
     method_tool: "probe",
     frequency: over?.frequency ?? "weekly",
-    denominator_model: "percent_correct_over_total",
+    denominator_model: over?.model ?? "percent_correct_over_total",
     accom_mod: "none",
     setting_default: "math_resource",
     valid_settings: ["math_resource"],
@@ -359,5 +362,113 @@ describe("goal detail read model (R3 D2/D3)", () => {
     expect(detail.consistency.met).toBe(true); // 2 consecutive ≥80
     expect(detail.masteryCandidate).not.toBeNull();
     expect(detail.quarterlySummary).toBeNull();
+  });
+});
+
+describe("SME PASS-WITH-CHANGES regressions (M5 PR#15)", () => {
+  function scored(goal: IEPGoal, date: string, numerator: number): ProgressDataPoint {
+    return {
+      data_point_id: newOpaqueId(),
+      goal_id: goal.goal_id,
+      student_id: goal.student_id,
+      admin_date: iso(date),
+      entry_ts: asTimestamp(0),
+      state: "scored",
+      numerator,
+      denominator_used: 10,
+      computed_value: numerator / 10,
+      setting: "math_resource",
+      scorer: "teacher",
+      revisions: [],
+    };
+  }
+
+  it("#1 a non-% goal never yields a %-coerced window or mastery candidate", () => {
+    const rubric = makeGoal({ model: "rubric_score", nProbes: 2 });
+    const pts = [scored(rubric, "2026-09-07", 8), scored(rubric, "2026-09-14", 9)];
+    const r = consistencyWindow(rubric, pts);
+    expect(r.met).toBe(false);
+    expect(r.run).toBe(0);
+    expect(observeMastery(rubric, pts)).toBeNull();
+  });
+
+  it("#2 a goal with n_probes < 2 cannot begin monitoring", () => {
+    const check = canBeginMonitoring(makeGoal({ nProbes: 1 }));
+    expect(check.ok).toBe(false);
+    expect(check.missing).toContain("criterion_consistency");
+  });
+
+  it("#3 capture rejects a probe that doesn't match the goal (construct-integrity)", () => {
+    const goal = makeGoal({ circumstance: "given a 10-item probe" });
+    const mismatched: ProbeDefinition = {
+      probe_definition_id: newOpaqueId(),
+      goal_id: goal.goal_id,
+      expected_denominator: 10,
+      condition: "given a reading passage",
+    };
+    expect(() =>
+      captureScoredPoint({
+        goalId: goal.goal_id,
+        studentId: goal.student_id,
+        adminDate: iso("2026-09-07"),
+        entryTs: asTimestamp(0),
+        numerator: 8,
+        denominatorUsed: 10,
+        setting: "math_resource",
+        scorer: "teacher",
+        construct: { goal, probe: mismatched },
+      }),
+    ).toThrow(ConstructIntegrityError);
+
+    const matching: ProbeDefinition = { ...mismatched, condition: "Given a 10-item probe" };
+    const p = captureScoredPoint({
+      goalId: goal.goal_id,
+      studentId: goal.student_id,
+      adminDate: iso("2026-09-07"),
+      entryTs: asTimestamp(0),
+      numerator: 8,
+      denominatorUsed: 10,
+      setting: "math_resource",
+      scorer: "teacher",
+      construct: { goal, probe: matching },
+    });
+    expect(p.probe_condition_id).toBe(matching.probe_definition_id);
+  });
+
+  it("#4 a scored → no_data [Fix] carries no residual score", () => {
+    const goal = makeGoal();
+    const p = scored(goal, "2026-09-07", 8);
+    const cleared = applyEdit(
+      p,
+      { state: "no_data", no_data_reason: "absent" },
+      "teacher",
+      asTimestamp(1),
+    );
+    expect(cleared.state).toBe("no_data");
+    expect(cleared.no_data_reason).toBe("absent");
+    expect(cleared.numerator).toBeUndefined();
+    expect(cleared.denominator_used).toBeUndefined();
+    expect(cleared.computed_value).toBeUndefined();
+  });
+
+  it("#5 a behavior ⊘ increments behaviorCount only (soft flag, not excused/no_time)", () => {
+    const goal = makeGoal();
+    const detail = buildGoalDetail(goal, [
+      {
+        data_point_id: newOpaqueId(),
+        goal_id: goal.goal_id,
+        student_id: goal.student_id,
+        admin_date: iso("2026-09-07"),
+        entry_ts: asTimestamp(0),
+        state: "no_data",
+        no_data_reason: "behavior",
+        setting: "math_resource",
+        scorer: "teacher",
+        revisions: [],
+      },
+    ]);
+    expect(detail.behaviorCount).toBe(1);
+    expect(detail.excusedCount).toBe(0);
+    expect(detail.noTimeCount).toBe(0);
   });
 });

@@ -24,7 +24,9 @@ export function canBeginMonitoring(goal: IEPGoal): GoalActivationCheck {
   if (goal.baseline_source === undefined) {
     missing.push("baseline_source");
   }
-  if (goal.criterion_consistency.n_probes <= 0) {
+  // "Consistency" is inherently multi-probe: a window of 1 is not a consistency
+  // window, so a goal cannot begin monitoring with n_probes < 2 (SME ruling).
+  if (goal.criterion_consistency.n_probes < 2) {
     missing.push("criterion_consistency");
   }
   if (goal.criterion_level <= 0) {

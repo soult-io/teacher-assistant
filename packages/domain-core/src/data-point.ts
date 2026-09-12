@@ -5,17 +5,29 @@
 // overwrites; the original probe denominator is retained on a mismatch.
 
 import {
+  type IEPGoal,
   type IsoDate,
   newOpaqueId,
   type NoDataReason,
   type OpaqueId,
+  type ProbeDefinition,
   type ProgressDataPoint,
   type Revision,
   type Scorer,
   type Setting,
   type Timestamp,
 } from "@teacher-assistant/schema";
+import { probeMatchesGoal } from "./goal-validation.js";
 import { computedRatio, isDenominatorMismatch } from "./value.js";
+
+/** Thrown when a probe that does not match the goal is used to record progress (construct-integrity). */
+export class ConstructIntegrityError extends Error {
+  constructor(goalId: OpaqueId) {
+    // Opaque id only — identity-clean.
+    super(`probe does not match goal ${goalId}; it cannot be recorded as progress`);
+    this.name = "ConstructIntegrityError";
+  }
+}
 
 export interface ScoredPointInput {
   readonly goalId: OpaqueId;
@@ -29,12 +41,27 @@ export interface ScoredPointInput {
   /** The probe's expected total; a mismatch is flagged + the original retained (never hard-blocked). */
   readonly expectedDenominator?: number;
   readonly probeConditionId?: OpaqueId;
+  /**
+   * The goal + probe this point is recorded against. When present, the
+   * construct-integrity guard is ENFORCED: a probe that does not match the goal's
+   * circumstance throws ConstructIntegrityError (it is never logged as progress),
+   * and the point's probe_condition_id is taken from the probe.
+   */
+  readonly construct?: { readonly goal: IEPGoal; readonly probe: ProbeDefinition };
   readonly setting: Setting;
   readonly scorer: Scorer;
 }
 
 /** Capture a scored data point. Flags (does not block) a denominator mismatch and retains the original. */
 export function captureScoredPoint(input: ScoredPointInput): ProgressDataPoint {
+  // Construct-integrity enforcement (design §B): a non-matching probe is refused.
+  if (
+    input.construct !== undefined &&
+    !probeMatchesGoal(input.construct.goal, input.construct.probe)
+  ) {
+    throw new ConstructIntegrityError(input.goalId);
+  }
+  const probeConditionId = input.construct?.probe.probe_definition_id ?? input.probeConditionId;
   const mismatch =
     input.expectedDenominator !== undefined &&
     isDenominatorMismatch(input.expectedDenominator, input.denominatorUsed);
@@ -54,7 +81,7 @@ export function captureScoredPoint(input: ScoredPointInput): ProgressDataPoint {
     ...(input.expectedDenominator !== undefined
       ? { denominator_original: input.expectedDenominator, denominator_mismatch: mismatch }
       : {}),
-    ...(input.probeConditionId !== undefined ? { probe_condition_id: input.probeConditionId } : {}),
+    ...(probeConditionId !== undefined ? { probe_condition_id: probeConditionId } : {}),
   };
 }
 
@@ -139,6 +166,20 @@ export function applyEdit(
   }
   const revision: Revision = { who, when, old, new: { ...changes } };
   const merged = { ...point, ...changes };
+
+  // A scored → ⊘ edit must carry NO residual value: a ⊘ is not a score of 0, so
+  // drop numerator / denominator / computed value / mismatch flags (design §A.2).
+  if (merged.state === "no_data") {
+    const {
+      numerator: _n,
+      denominator_used: _d,
+      computed_value: _c,
+      denominator_mismatch: _m,
+      denominator_original: _o,
+      ...cleared
+    } = merged;
+    return { ...cleared, revisions: [...point.revisions, revision] };
+  }
 
   const derived: { computed_value?: number; denominator_mismatch?: boolean } = {};
   if (

@@ -39,6 +39,8 @@ export interface GoalDetail {
   readonly noTimeCount: number;
   /** Excused ⊘ count (absent/testing/no_school). */
   readonly excusedCount: number;
+  /** Behavior ⊘ count — a soft flag (watch pattern), neither excused nor a fidelity gap (§A.2). */
+  readonly behaviorCount: number;
   /** The full edit-audit trail across the goal's points (who/when/old→new). */
   readonly revisions: readonly Revision[];
   /** Non-null when the consistency window is met (observed, not closed). */
@@ -78,10 +80,13 @@ export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoin
 
   let noTimeCount = 0;
   let excusedCount = 0;
+  let behaviorCount = 0;
   for (const p of mine) {
     if (p.state === "no_data") {
       if (p.no_data_reason === "no_time") {
         noTimeCount += 1;
+      } else if (p.no_data_reason === "behavior") {
+        behaviorCount += 1;
       } else if (p.no_data_reason !== undefined && EXCUSED.has(p.no_data_reason)) {
         excusedCount += 1;
       }
@@ -97,6 +102,7 @@ export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoin
     consistency: consistencyWindow(goal, mine),
     noTimeCount,
     excusedCount,
+    behaviorCount,
     revisions,
     masteryCandidate: observeMastery(goal, mine),
     quarterlySummary: null,
