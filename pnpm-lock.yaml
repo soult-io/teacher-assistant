@@ -109,6 +109,22 @@ importers:
         specifier: ~4.1.10
         version: 4.1.11(@types/node@26.2.0)(vite@7.3.6(@types/node@26.2.0)(terser@5.51.2)(tsx@4.23.13))
 
+  packages/store:
+    dependencies:
+      '@teacher-assistant/domain-core':
+        specifier: workspace:*
+        version: link:../domain-core
+      '@teacher-assistant/schema':
+        specifier: workspace:*
+        version: link:../schema
+    devDependencies:
+      typescript:
+        specifier: ~5.9.3
+        version: 5.9.3
+      vitest:
+        specifier: ~4.1.10
+        version: 4.1.11(@types/node@26.2.0)(vite@7.3.6(@types/node@26.2.0)(terser@5.51.2)(tsx@4.23.13))
+
   packages/sync:
     dependencies:
       '@teacher-assistant/crypto':
@@ -205,6 +221,9 @@ importers:
       '@teacher-assistant/schema':
         specifier: workspace:*
         version: link:../../packages/schema
+      '@teacher-assistant/store':
+        specifier: workspace:*
+        version: link:../../packages/store
       '@teacher-assistant/sync-relay':
         specifier: workspace:*
         version: link:../../services/sync-relay

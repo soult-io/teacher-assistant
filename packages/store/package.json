@@ -1,0 +1,28 @@
+{
+  "name": "@teacher-assistant/store",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M3 local store / repository + projections: over already-decrypted in-memory records, builds the weekly dashboard (three states × three grouping lenses), owes-by-week/period/student, to-score + validation queues, and the segregated baseline view. A proposed/baseline goal NEVER reaches the active weekly dashboard. Client-side only.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@teacher-assistant/domain-core": "workspace:*",
+    "@teacher-assistant/schema": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.3",
+    "vitest": "~4.1.10"
+  }
+}
