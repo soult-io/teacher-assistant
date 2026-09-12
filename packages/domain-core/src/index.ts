@@ -33,3 +33,7 @@ export * from "./ic-export.js";
 export * from "./baseline.js";
 export * from "./lifecycle.js";
 export * from "./arc-window.js";
+
+// M8 — auto progress-statement + trend engine (phase1-spec §5, design §G R3-3).
+export * from "./trend.js";
+export * from "./auto-statement.js";

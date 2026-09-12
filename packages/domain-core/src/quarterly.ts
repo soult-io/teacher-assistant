@@ -10,7 +10,8 @@ import { compareCodePoints } from "./comparators.js";
 import { isoWeekId } from "./instructional-weeks.js";
 import { computeValue } from "./value.js";
 
-const WINDOW = 5;
+/** The F4 most-recent-N window size — one reporting period (data-model §6.1). */
+export const QUARTERLY_WINDOW = 5;
 
 export interface QuarterlySummary {
   /** Scored points averaged (≤ 5; fewer if fewer exist — never zero-padded). */
@@ -96,7 +97,7 @@ export function computeQuarterlySummary(
   const comparable = scored.filter((p) => p.denominator_mismatch !== true);
 
   // Most-recent-5 comparable points by admin-date (the tail of the ascending list).
-  const window = comparable.slice(Math.max(0, comparable.length - WINDOW));
+  const window = comparable.slice(Math.max(0, comparable.length - QUARTERLY_WINDOW));
   const n = window.length;
 
   if (n === 0) {
