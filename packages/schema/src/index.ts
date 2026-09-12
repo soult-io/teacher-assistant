@@ -13,6 +13,7 @@ export * from "./ids.js";
 export * from "./classification.js";
 export * from "./enums.js";
 export * from "./entities.js";
+export * from "./sync-protocol.js";
 
 /** Schema revision. Bumped as the data-model spec lands in this package. */
 export const SCHEMA_VERSION = 1 as const;

@@ -9,9 +9,8 @@
 // asserts both the structural (no PII-seeded id in source) and behavioural
 // (two generated ids always differ) forms of this rule.
 
-// Web Crypto is a global in browsers and in Node ≥ 20. Declared minimally so this
-// package depends on neither the DOM nor the node type libs.
-declare const crypto: { randomUUID(): string };
+// Web Crypto (`crypto.randomUUID`) is a standard global in browsers and Node ≥ 20
+// (typed via the DOM lib in this package's tsconfig).
 
 /** A random, opaque, PII-free identifier (UUIDv4). Never derived from student data. */
 export type OpaqueId = string & { readonly __brand: "OpaqueId" };

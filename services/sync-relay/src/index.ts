@@ -1,45 +1,27 @@
-// sync-relay (M2) — SCAFFOLD.
+// sync-relay (M2) entrypoint. Builds the relay over an in-memory store and binds
+// 0.0.0.0 so the Lexington NPM can reach it by container name; host/public
+// exposure is controlled at the compose + NPM layer (loopback bind + reverse
+// proxy, posture B), never in the app. The server only ever holds ciphertext.
 //
-// Role: an authenticated, append-only relay of opaque encrypted-update blobs,
-// keyed by opaque doc-id. It NEVER decrypts, merges, indexes, or computes — the
-// CRDT merge is entirely client-side and commutative, so a dumb authenticated
-// relay is sufficient (architecture §1.3). The only server-visible metadata is
-// blob sizes, timestamps, and which device pubkey may fetch which opaque stream.
-//
-// Locked invariants the M2 implementation must hold (delivered by the Phase-0
-// M2 spec — NOT implemented here):
-//   - never decrypts; stores/serves ciphertext it cannot read
-//   - ACL keyed on opaque ids + device public keys
-//   - logs/metrics carry ZERO student payload (no initials, goal text, or any
-//     PII) — errors reference opaque ids only (FERPA Item-2d)
-//   - deploy posture B (D-ARCH-3): reachable over public HTTPS via the Lexington
-//     NPM with hardened auth (passkeys/strong auth, rate-limiting). The server
-//     still only ever holds ciphertext.
+// The in-memory store is the Phase-0 backing that proves the protocol; the
+// durable Postgres ciphertext-blob store is a deploy-time implementation of the
+// same RelayStore interface (see store.ts).
 
-import Fastify from "fastify";
+import { buildApp } from "./app.js";
+import { sodiumReady } from "./sodium-verify.js";
+import { InMemoryRelayStore } from "./store.js";
 
 const PORT = Number(process.env.SYNC_RELAY_PORT ?? process.env.PORT ?? 8931);
 
-// Logger is on, but no request/response BODY is ever logged: bodies are
-// ciphertext + opaque ids by construction, and we keep it that way as the code
-// grows (FERPA Item-2d is the most regression-prone surface — see M14).
-const app = Fastify({ logger: true, disableRequestLogging: false });
+async function main(): Promise<void> {
+  await sodiumReady();
+  const app = buildApp(new InMemoryRelayStore());
+  const addr = await app.listen({ host: "0.0.0.0", port: PORT });
+  app.log.info(`sync-relay listening on ${addr}`);
+}
 
-app.get("/health", async () => ({ status: "ok", service: "sync-relay" }));
-
-// Real relay routes (push/fetch of opaque encrypted updates) land with the M2
-// spec. Explicit 501 so the surface is discoverable but inert in the scaffold.
-app.post("/sync/:docId", async (_req, reply) => {
-  reply.code(501).send({ error: "not_implemented", detail: "sync-relay M2 not yet built" });
+main().catch((err) => {
+  // Identity-clean: the error carries no student payload (the relay never sees any).
+  console.error(err);
+  process.exit(1);
 });
-
-// Bind 0.0.0.0 so the Lexington NPM can resolve this container by name over the
-// shared docker network. Host/public exposure is controlled at the compose +
-// NPM layer (loopback host bind + reverse proxy), not in the app.
-app
-  .listen({ host: "0.0.0.0", port: PORT })
-  .then((addr) => app.log.info(`sync-relay listening on ${addr}`))
-  .catch((err) => {
-    app.log.error(err);
-    process.exit(1);
-  });

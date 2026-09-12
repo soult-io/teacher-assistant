@@ -1,8 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // Isomorphic (browser + Node); DOM provides the standard Web globals
-    // TextEncoder + crypto this package uses.
+    // Isomorphic client; DOM provides TextEncoder/TextDecoder + fetch types.
     "lib": ["ES2022", "DOM"],
     "outDir": "dist",
     "rootDir": "src",

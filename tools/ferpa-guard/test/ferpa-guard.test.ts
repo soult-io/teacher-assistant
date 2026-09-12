@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collectFiles, fileContains, scanForPattern } from "../src/checks.js";
+import { collectFiles, fileContains, scanCodeForPattern, scanForPattern } from "../src/checks.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -37,7 +37,8 @@ describe("FERPA-guard (M14) — enforced from day one", () => {
   // the crypto package at all — decryption is exclusively client-side.
   it("no-decrypt: sync-relay does not import @teacher-assistant/crypto", () => {
     const relayFiles = collectFiles(join(repoRoot, "services", "sync-relay"), [".ts"]);
-    const hits = scanForPattern(relayFiles, /@teacher-assistant\/crypto/);
+    // Comment-stripped: a comment that merely explains the rule must not trip it.
+    const hits = scanCodeForPattern(relayFiles, /@teacher-assistant\/crypto/);
     expect(hits, JSON.stringify(hits, null, 2)).toEqual([]);
   });
 

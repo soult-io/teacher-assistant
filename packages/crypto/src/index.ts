@@ -22,6 +22,7 @@ export {
   type DeviceKeypair,
 } from "./keys.js";
 export { recordAad, encryptWithKey, decryptWithKey } from "./records.js";
+export { generateSigningKeypair, sign, type DeviceSigningKeypair } from "./signing.js";
 export { Keyring, TeacherKeyring, ParaKeyring, NoKeyForScopeError } from "./keyring.js";
 export {
   generateRecoveryCode,

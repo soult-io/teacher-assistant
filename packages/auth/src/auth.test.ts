@@ -13,6 +13,7 @@ import {
   newScopeTag,
   type RecordEnvelope,
 } from "@teacher-assistant/schema";
+import type { VerifiedAuthenticationResponse } from "@simplewebauthn/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import { PROD_RP, QA_RP, rpConfigForHost } from "./config.js";
 import { AuthThrottle } from "./throttle.js";
@@ -89,12 +90,17 @@ describe("auth unlocks device-held wrapped keys", () => {
     const { request, verificationCode } = createEnrollmentRequest(device);
     const grant = approveDeviceEnrollment(trusted, request, verificationCode);
 
+    // A real caller passes the VerifiedAuthenticationResponse from finishAuthentication;
+    // here we stand in a minimal one carrying just the `verified` flag the gate reads.
+    const verified = { verified: true } as unknown as VerifiedAuthenticationResponse;
+    const unverified = { verified: false } as unknown as VerifiedAuthenticationResponse;
+
     expect(() =>
-      unlockTeacherKeyring({ authenticationVerified: false, deviceKeypair: device, grant }),
+      unlockTeacherKeyring({ authentication: unverified, deviceKeypair: device, grant }),
     ).toThrow(AuthRequiredError);
 
     const keyring = unlockTeacherKeyring({
-      authenticationVerified: true,
+      authentication: verified,
       deviceKeypair: device,
       grant,
     });
