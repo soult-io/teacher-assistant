@@ -5,7 +5,7 @@
 // change and a mismatched point is excluded + surfaced. A DIFFERENT IC
 // destination than the weekly value — never overwrites it.
 
-import type { IEPGoal, IsoDate, ProgressDataPoint } from "@teacher-assistant/schema";
+import type { IEPGoal, IsoDate, ProgressDataPoint, Revision } from "@teacher-assistant/schema";
 import { compareCodePoints } from "./comparators.js";
 import { isoWeekId } from "./instructional-weeks.js";
 import { computeValue } from "./value.js";
@@ -19,22 +19,54 @@ export interface QuarterlySummary {
   readonly average: number | null;
   /** Admin-date range the averaged points span, or null if none. */
   readonly dateRange: { readonly start: IsoDate; readonly end: IsoDate } | null;
-  /** ⊘ (no-data) points spanned by the window — shown so the gap is explained. */
+  /** Distinct no-data WEEKS spanned by the window — shown so the gap is explained. */
   readonly noDataCountSpanned: number;
   /** True if mismatched points were excluded (the window isn't single-denominator). */
   readonly mixedDenominator: boolean;
   readonly excludedMismatches: number;
+  /** True when the window was clamped at a criterion-level / denominator-model change (§F.F4). */
+  readonly clampedAtChange: boolean;
   readonly label: "quarterly progress summary";
 }
 
 export interface QuarterlyOptions {
   /**
    * The admin date of the most recent criterion-level or denominator-model change
-   * for this goal (from the goal's edit history). The window clamps to points on
-   * or after it, so the average never crosses that boundary. Omit when no such
-   * change exists (the MVP case).
+   * for this goal (derive with clampAfterFromRevisions). The window clamps to
+   * points on or after it, so the average never crosses that boundary. Omit when
+   * no such change exists.
    */
   readonly clampAfter?: IsoDate;
+}
+
+/** Keys whose change invalidates averaging across the boundary (§F.F4 / §G). */
+const CLAMP_KEYS = ["criterion_level", "denominator_model"] as const;
+
+function revisionTouchesClampKey(rev: Revision): boolean {
+  const keysOf = (o: unknown): string[] =>
+    typeof o === "object" && o !== null ? Object.keys(o) : [];
+  const changed = new Set([...keysOf(rev.old), ...keysOf(rev.new)]);
+  return CLAMP_KEYS.some((k) => changed.has(k));
+}
+
+/**
+ * Derive the F4 clamp boundary from a goal's edit history: the admin date of the
+ * most recent revision that changed the criterion level or denominator model, so
+ * the quarterly average never blends points from before that change with points
+ * after it (the report-card-indefensible figure §F.F4 forbids). Returns undefined
+ * when the goal has no such change (the MVP case).
+ */
+export function clampAfterFromRevisions(goal: IEPGoal): IsoDate | undefined {
+  let latest: number | undefined;
+  for (const rev of goal.revisions) {
+    if (revisionTouchesClampKey(rev) && (latest === undefined || rev.when > latest)) {
+      latest = rev.when;
+    }
+  }
+  if (latest === undefined) {
+    return undefined;
+  }
+  return new Date(latest).toISOString().slice(0, 10) as IsoDate;
 }
 
 /**
@@ -76,6 +108,7 @@ export function computeQuarterlySummary(
       noDataCountSpanned: 0,
       mixedDenominator: mismatched.length > 0,
       excludedMismatches: mismatched.length,
+      clampedAtChange: clampAfter !== undefined,
       label: "quarterly progress summary",
     };
   }
@@ -106,6 +139,7 @@ export function computeQuarterlySummary(
     noDataCountSpanned: noDataWeeks.size,
     mixedDenominator: excludedMismatches > 0,
     excludedMismatches,
+    clampedAtChange: clampAfter !== undefined,
     label: "quarterly progress summary",
   };
 }

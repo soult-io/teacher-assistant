@@ -16,7 +16,11 @@ import type {
 } from "@teacher-assistant/schema";
 import { compareCodePoints } from "./comparators.js";
 import { isoWeekId } from "./instructional-weeks.js";
-import { computeQuarterlySummary, type QuarterlySummary } from "./quarterly.js";
+import {
+  clampAfterFromRevisions,
+  computeQuarterlySummary,
+  type QuarterlySummary,
+} from "./quarterly.js";
 import { percentCorrect } from "./value.js";
 
 /** One IC weekly monitoring row — a scored value, or a ⊘ row that explains the gap (never a fabricated 0). */
@@ -45,14 +49,19 @@ export interface IcGoalExport {
 
 /**
  * The structural export guard: a goal is IC-exportable ONLY if it is active AND
- * baselined AND carries a consistency criterion. A proposed/baseline goal (or one
- * missing a baseline) returns false and is therefore unreachable by buildIcExport.
+ * baselined AND carries a consistency criterion AND is a PERCENT goal. A
+ * proposed/baseline goal, one missing a baseline, or a NON-% goal (rubric/count/
+ * duration) returns false and is therefore unreachable by buildIcExport — so the
+ * %-engine weekly block can never silently coerce a non-% measure into a percent
+ * (req-sped-sdi #1; "no %↔rubric coercion").
  */
 export function isIcExportable(goal: IEPGoal): boolean {
   return (
     goal.status === "active" &&
+    goal.denominator_model === "percent_correct_over_total" &&
     goal.baseline_value !== undefined &&
     goal.baseline_source !== undefined &&
+    goal.criterion_level > 0 &&
     goal.criterion_consistency.n_probes >= 2
   );
 }
@@ -122,11 +131,16 @@ export function buildIcExport(
 ): IcGoalExport[] {
   return goals.filter(isIcExportable).map((goal) => {
     const mine = points.filter((p) => p.goal_id === goal.goal_id);
+    const clampAfter = clampAfterFromRevisions(goal);
     return {
       goalId: goal.goal_id,
       studentId: goal.student_id,
       weekly: weeklyRows(mine),
-      quarterly: computeQuarterlySummary(goal, mine),
+      quarterly: computeQuarterlySummary(
+        goal,
+        mine,
+        clampAfter !== undefined ? { clampAfter } : {},
+      ),
       draftStatement: null,
     };
   });

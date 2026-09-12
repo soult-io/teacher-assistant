@@ -18,7 +18,11 @@ import {
   type MasteryCandidate,
   observeMastery,
 } from "./consistency.js";
-import { computeQuarterlySummary, type QuarterlySummary } from "./quarterly.js";
+import {
+  clampAfterFromRevisions,
+  computeQuarterlySummary,
+  type QuarterlySummary,
+} from "./quarterly.js";
 import { computeValue } from "./value.js";
 
 export interface TrendPoint {
@@ -61,6 +65,7 @@ const EXCUSED: ReadonlySet<NoDataReason> = new Set<NoDataReason>([
 /** Build the Goal Detail read model for a goal from its (decrypted) points. */
 export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoint[]): GoalDetail {
   const mine = points.filter((p) => p.goal_id === goal.goal_id);
+  const clampAfter = clampAfterFromRevisions(goal);
 
   const trend: TrendPoint[] = mine
     .filter((p) => p.state === "scored")
@@ -106,6 +111,10 @@ export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoin
     behaviorCount,
     revisions,
     masteryCandidate: observeMastery(goal, mine),
-    quarterlySummary: computeQuarterlySummary(goal, mine),
+    quarterlySummary: computeQuarterlySummary(
+      goal,
+      mine,
+      clampAfter !== undefined ? { clampAfter } : {},
+    ),
   };
 }

@@ -3,19 +3,34 @@
 
 import {
   asTimestamp,
+  type DenominatorModel,
   type GoalStatus,
   type IEPGoal,
   type IsoDate,
   newOpaqueId,
   type NoDataReason,
   type ProgressDataPoint,
+  type Revision,
 } from "@teacher-assistant/schema";
 import { describe, expect, it } from "vitest";
-import { buildIcExport, computeQuarterlySummary, isIcExportable } from "./index.js";
+import {
+  buildIcExport,
+  clampAfterFromRevisions,
+  computeQuarterlySummary,
+  isIcExportable,
+} from "./index.js";
 
 const iso = (s: string): IsoDate => s as IsoDate;
 
-function makeGoal(over?: Partial<{ status: GoalStatus; withBaseline: boolean }>): IEPGoal {
+function makeGoal(
+  over?: Partial<{
+    status: GoalStatus;
+    withBaseline: boolean;
+    model: DenominatorModel;
+    criterion: number;
+    revisions: readonly Revision[];
+  }>,
+): IEPGoal {
   const withBaseline = over?.withBaseline ?? true;
   return {
     goal_id: newOpaqueId(),
@@ -23,18 +38,18 @@ function makeGoal(over?: Partial<{ status: GoalStatus; withBaseline: boolean }>)
     goal_text: "synthetic",
     behavior: "b",
     circumstance: "c",
-    criterion_level: 80,
+    criterion_level: over?.criterion ?? 80,
     criterion_consistency: { n_probes: 4, phrase: "4 consecutive probes" },
     method_general: "cbm",
     method_tool: "probe",
     frequency: "weekly",
-    denominator_model: "percent_correct_over_total",
+    denominator_model: over?.model ?? "percent_correct_over_total",
     accom_mod: "none",
     setting_default: "math_resource",
     valid_settings: ["math_resource"],
     status: over?.status ?? "active",
     created_ts: asTimestamp(0),
-    revisions: [],
+    revisions: over?.revisions ?? [],
     ...(withBaseline ? { baseline_value: 40, baseline_source: "eval" as const } : {}),
   };
 }
@@ -177,5 +192,69 @@ describe("STRUCTURAL IC-export guard (FERPA Item-3a)", () => {
       [scored(proposed, "2026-09-08", 9), scored(active, "2026-09-08", 8)],
     );
     expect(exports.map((e) => e.goalId)).toEqual([active.goal_id]); // proposed absent
+  });
+});
+
+describe("SME PASS-WITH-CHANGES regressions (M6a PR#16)", () => {
+  it("Change 1: clampAfterFromRevisions derives the boundary from a criterion/denominator change", () => {
+    const critRev: Revision = {
+      who: "arc",
+      when: asTimestamp(Date.UTC(2026, 8, 10)), // 2026-09-10
+      old: { criterion_level: 70 },
+      new: { criterion_level: 80 },
+    };
+    expect(clampAfterFromRevisions(makeGoal({ revisions: [critRev] }))).toBe("2026-09-10");
+
+    const denomRev: Revision = {
+      who: "arc",
+      when: asTimestamp(Date.UTC(2026, 8, 5)),
+      old: { denominator_model: "rubric_score" },
+      new: { denominator_model: "percent_correct_over_total" },
+    };
+    expect(clampAfterFromRevisions(makeGoal({ revisions: [denomRev] }))).toBe("2026-09-05");
+
+    // An unrelated edit (e.g. a point fix) does not clamp.
+    const unrelated: Revision = {
+      who: "teacher",
+      when: asTimestamp(0),
+      old: { numerator: 7 },
+      new: { numerator: 9 },
+    };
+    expect(clampAfterFromRevisions(makeGoal({ revisions: [unrelated] }))).toBeUndefined();
+  });
+
+  it("Change 1: the F4 average clamps at a mid-window criterion change (never blends across it)", () => {
+    const goal = makeGoal({
+      revisions: [
+        {
+          who: "arc",
+          when: asTimestamp(Date.UTC(2026, 8, 10)),
+          old: { criterion_level: 70 },
+          new: { criterion_level: 80 },
+        },
+      ],
+    });
+    const [exp] = buildIcExport(
+      [goal],
+      [
+        scored(goal, "2026-09-01", 4), // pre-change (40%) — must be excluded
+        scored(goal, "2026-09-15", 9), // post-change
+        scored(goal, "2026-09-22", 10),
+      ],
+    );
+    expect(exp?.quarterly.n).toBe(2);
+    expect(exp?.quarterly.average).toBeCloseTo(95); // (90+100)/2, not blended with 40
+    expect(exp?.quarterly.clampedAtChange).toBe(true);
+    expect(exp?.quarterly.dateRange?.start).toBe("2026-09-15");
+  });
+
+  it("Change 2: a non-% active+baselined goal is excluded from the %-engine export (no coercion)", () => {
+    const rubric = makeGoal({ model: "rubric_score" });
+    expect(isIcExportable(rubric)).toBe(false);
+    expect(buildIcExport([rubric], [scored(rubric, "2026-09-08", 3)])).toEqual([]);
+  });
+
+  it("minor: a goal with criterion_level 0 is not exportable", () => {
+    expect(isIcExportable(makeGoal({ criterion: 0 }))).toBe(false);
   });
 });
