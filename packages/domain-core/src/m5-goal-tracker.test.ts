@@ -361,7 +361,9 @@ describe("goal detail read model (R3 D2/D3)", () => {
     expect(detail.noTimeCount).toBe(1);
     expect(detail.consistency.met).toBe(true); // 2 consecutive ≥80
     expect(detail.masteryCandidate).not.toBeNull();
-    expect(detail.quarterlySummary).toBeNull();
+    // The F4 quarterly slot is now filled (M6a): 2 scored points averaged.
+    expect(detail.quarterlySummary.n).toBe(2);
+    expect(detail.quarterlySummary.average).toBeCloseTo(85);
   });
 });
 

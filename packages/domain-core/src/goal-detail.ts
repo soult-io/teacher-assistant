@@ -18,6 +18,7 @@ import {
   type MasteryCandidate,
   observeMastery,
 } from "./consistency.js";
+import { computeQuarterlySummary, type QuarterlySummary } from "./quarterly.js";
 import { computeValue } from "./value.js";
 
 export interface TrendPoint {
@@ -45,8 +46,8 @@ export interface GoalDetail {
   readonly revisions: readonly Revision[];
   /** Non-null when the consistency window is met (observed, not closed). */
   readonly masteryCandidate: MasteryCandidate | null;
-  /** Filled by M6a (F4 quarterly 5-point summary); null until then. */
-  readonly quarterlySummary: null;
+  /** The F4 quarterly 5-point summary (M6a). */
+  readonly quarterlySummary: QuarterlySummary;
 }
 
 // Excused ⊘ reasons (design §A.2). `no_time` is the fidelity gap (counted
@@ -105,6 +106,6 @@ export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoin
     behaviorCount,
     revisions,
     masteryCandidate: observeMastery(goal, mine),
-    quarterlySummary: null,
+    quarterlySummary: computeQuarterlySummary(goal, mine),
   };
 }

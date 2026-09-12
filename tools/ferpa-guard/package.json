@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@teacher-assistant/crypto": "workspace:*",
+    "@teacher-assistant/domain-core": "workspace:*",
     "@teacher-assistant/schema": "workspace:*",
     "@teacher-assistant/store": "workspace:*",
     "@teacher-assistant/sync-relay": "workspace:*"
