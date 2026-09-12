@@ -19,7 +19,7 @@ jobs:
     container:
       image: mcr.microsoft.com/playwright:v1.62.0-noble
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
