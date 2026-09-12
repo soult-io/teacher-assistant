@@ -9,6 +9,14 @@ type Member<T extends readonly string[]> = T[number];
 
 // ── Identity / roster ──────────────────────────────────────────────────────
 
+/**
+ * Fixed per-student identity colour tokens (data-model §1.2, design §E.2) — the
+ * six locked hues. The palette excludes the status hues (green/amber/red). A
+ * token is assigned per student; it carries no PII on its own.
+ */
+export const COLOR_TOKENS = ["--s-ab", "--s-cd", "--s-ef", "--s-gh", "--s-jm", "--s-rt"] as const;
+export type ColorToken = Member<typeof COLOR_TOKENS>;
+
 /** Class-period instructional format (data-model §1.3). Drives the day template. */
 export const PERIOD_FORMATS = ["blended_resource", "sdi_only_strategies", "co_teach"] as const;
 export type PeriodFormat = Member<typeof PERIOD_FORMATS>;
