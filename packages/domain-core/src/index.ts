@@ -24,3 +24,7 @@ export * from "./consistency.js";
 export * from "./owes.js";
 export * from "./goal-validation.js";
 export * from "./goal-detail.js";
+
+// M6a — IEP % → Infinite Campus export + F4 quarterly summary (phase1-spec §4).
+export * from "./quarterly.js";
+export * from "./ic-export.js";

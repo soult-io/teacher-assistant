@@ -218,6 +218,9 @@ importers:
       '@teacher-assistant/crypto':
         specifier: workspace:*
         version: link:../../packages/crypto
+      '@teacher-assistant/domain-core':
+        specifier: workspace:*
+        version: link:../../packages/domain-core
       '@teacher-assistant/schema':
         specifier: workspace:*
         version: link:../../packages/schema
