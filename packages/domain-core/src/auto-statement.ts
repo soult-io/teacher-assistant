@@ -276,15 +276,21 @@ export function computeAutoStatement(
     p.probe_condition_id !== options.expectedConditionId;
 
   // Condition comparability gates the DISPLAYED average AND the trend — one dataset,
-  // so the reported figure and the on-track determination can never diverge. (The
-  // denominator-mismatch exclusion is left to computeQuarterlySummary, which excludes
-  // and surfaces it.) A condition-mismatched point is dropped from both.
+  // so the reported figure and the on-track determination can never diverge. A
+  // condition-mismatched point is dropped from both.
   const conditionOk = points.filter((p) => p.goal_id === goal.goal_id && !isConditionMismatch(p));
+  // §G R3-3 step 4: M8 HARD-excludes EVERY denominator-mismatched point regardless
+  // of the teacher's F-2 disposition — "counted" is for the consistency window +
+  // the F4 report card, NOT the IC progress statement. So the displayed average is
+  // computed over the SAME hard-excluded set as the trend/gate below and can never
+  // blend an off-basis point (the disposition is deliberately not read here).
+  const statementBasis = conditionOk.filter((p) => p.denominator_mismatch !== true);
 
-  // Display figures reuse the M6a F4 quarterly over that set (the number shown on the IC card).
+  // Display figures reuse the M6a F4 quarterly over that hard-excluded set (the
+  // number shown on the IC card).
   const quarterly = computeQuarterlySummary(
     goal,
-    conditionOk,
+    statementBasis,
     clampAfter === undefined ? {} : { clampAfter },
   );
   const avgRecent = quarterly.average === null ? null : round(quarterly.average);

@@ -102,10 +102,9 @@ export function computeQuarterlySummary(
 
   // Averageable = not-mismatched OR teacher-elected "counted" (clamp already applied).
   const comparable = scored.filter(inComputedMath);
-  // Mismatched points NOT averaged (resolved-excluded + pending).
-  const notAveraged = scored.filter(
-    (p) => p.denominator_mismatch === true && !isCountedOffBasis(p),
-  );
+  // Mismatched points NOT averaged (resolved-excluded + pending) — the complement
+  // of inComputedMath (a clean point is always in the math).
+  const notAveraged = scored.filter((p) => !inComputedMath(p));
 
   // Most-recent-5 comparable points by admin-date (the tail of the ascending list).
   const window = comparable.slice(Math.max(0, comparable.length - QUARTERLY_WINDOW));

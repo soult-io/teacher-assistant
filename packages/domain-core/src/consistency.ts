@@ -108,9 +108,9 @@ export function consistencyWindow(
   );
   const countedOffBasis = clampedScored.filter(isCountedOffBasis).length;
   const unresolvedMismatches = clampedScored.filter(isUnresolvedMismatch).length;
-  const excludedMismatches = clampedScored.filter(
-    (p) => p.denominator_mismatch === true && !isCountedOffBasis(p),
-  ).length;
+  // "Not counted" = a mismatched point that is excluded or still pending — exactly
+  // the complement of inComputedMath (a clean point is always in the math).
+  const excludedMismatches = clampedScored.filter((p) => !inComputedMath(p)).length;
 
   let run = 0;
   let windowMetDate: ProgressDataPoint["admin_date"] | undefined;

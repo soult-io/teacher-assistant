@@ -185,7 +185,8 @@ export function applyEdit(
   const merged = { ...point, ...changes };
 
   // A scored → ⊘ edit must carry NO residual value: a ⊘ is not a score of 0, so
-  // drop numerator / denominator / computed value / mismatch flags (design §A.2).
+  // drop numerator / denominator / computed value / mismatch flags — and the F-2
+  // disposition, which no longer applies with no denominator (design §A.2 / §B).
   if (merged.state === "no_data") {
     const {
       numerator: _n,
@@ -193,6 +194,8 @@ export function applyEdit(
       computed_value: _c,
       denominator_mismatch: _m,
       denominator_original: _o,
+      mismatch_window_disposition: _mwd,
+      mismatch_acknowledged: _ma,
       ...cleared
     } = merged;
     return { ...cleared, revisions: [...point.revisions, revision] };
@@ -211,5 +214,13 @@ export function applyEdit(
       );
     }
   }
-  return { ...merged, ...derived, revisions: [...point.revisions, revision] };
+
+  const next = { ...merged, ...derived, revisions: [...point.revisions, revision] };
+  // A corrective [Fix] that CLEARS the mismatch drops the now-stale F-2 disposition
+  // (a matched point has nothing to elect on) — no dangling counted/excluded state.
+  if (derived.denominator_mismatch === false) {
+    const { mismatch_window_disposition: _mwd, mismatch_acknowledged: _ma, ...resolved } = next;
+    return resolved;
+  }
+  return next;
 }

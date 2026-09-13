@@ -14,6 +14,7 @@ import {
 } from "@teacher-assistant/schema";
 import { describe, expect, it } from "vitest";
 import {
+  applyEdit,
   buildGoalDetail,
   captureScoredPoint,
   computeAutoStatement,
@@ -207,6 +208,19 @@ describe("REQUIRED-2: a counted point does NOT clear the M8 ≥8 gate or enter t
     expect(consistencyWindow(goal, withCounted).countedOffBasis).toBe(1);
     expect(computeQuarterlySummary(goal, withCounted).countedOffBasis).toBe(1);
   });
+
+  it("M8's DISPLAYED average also hard-excludes the counted point (§G R3-3 step 4)", () => {
+    // 8 clean points all at 80, plus a most-recent COUNTED point at 100.
+    const clean80 = ["09-07", "09-14", "09-21", "09-28", "10-05", "10-12", "10-19", "10-26"].map(
+      (d) => pt(goal, `2026-${d}`, 80),
+    );
+    const points = [...clean80, pt(goal, "2026-11-02", 100, counted)];
+    const stmt = computeAutoStatement(goal, "AB", points, { isNonInstructional: noBreaks });
+    expect(stmt?.variant).not.toBe("indeterminate"); // 8 clean clear the gate
+    // The F4 window is the 5 most-recent CLEAN points (all 80) — the counted 100
+    // is NOT blended in (would be 84 if it were).
+    expect(stmt?.slots.avgRecent).toBe(80);
+  });
 });
 
 describe("REQUIRED-3: clamp runs BEFORE disposition (a counted point across a model change is still dropped)", () => {
@@ -273,5 +287,28 @@ describe("an excluded point is out of the math but retained (audit)", () => {
     expect(buildGoalDetail(goal, points).trend).toHaveLength(1);
     const kept = points[1];
     expect(kept?.denominator_original).toBe(90); // never overwritten — visible in audit
+  });
+});
+
+describe("a corrective [Fix] that clears the mismatch drops the stale disposition", () => {
+  it("applyEdit restoring the probe total clears counted/acknowledged", () => {
+    const counted = captureScoredPoint({
+      goalId: newOpaqueId(),
+      studentId: newOpaqueId(),
+      adminDate: iso("2026-09-14"),
+      entryTs: asTimestamp(0),
+      numerator: 5,
+      denominatorUsed: 6,
+      expectedDenominator: 5,
+      mismatchWindowDisposition: "counted",
+      setting: "math_resource",
+      scorer: "teacher",
+    });
+    expect(counted.mismatch_window_disposition).toBe("counted");
+
+    const fixed = applyEdit(counted, { denominator_used: 5 }, "teacher", asTimestamp(1));
+    expect(fixed.denominator_mismatch).toBe(false); // mismatch resolved
+    expect(fixed.mismatch_window_disposition).toBeUndefined(); // stale election dropped
+    expect(fixed.mismatch_acknowledged).toBeUndefined();
   });
 });
