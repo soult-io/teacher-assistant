@@ -11,6 +11,8 @@ export interface SessionRecords {
   readonly records: DecryptedRecords;
   /** Capture a write (a DocMutator built via data/writes.ts) then refresh the records. */
   apply(mutator: DocMutator): Promise<void>;
+  /** Re-read the master records without a write (e.g. after a two-doc validate that bypassed apply). */
+  refresh(): void;
 }
 
 export function useSessionRecords(session: Session): SessionRecords {
@@ -22,5 +24,6 @@ export function useSessionRecords(session: Session): SessionRecords {
     },
     [session],
   );
-  return { records, apply };
+  const refresh = useCallback(() => setRecords(session.readRecords()), [session]);
+  return { records, apply, refresh };
 }

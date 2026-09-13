@@ -21,8 +21,15 @@ import type {
   OpaqueId,
   ProbeDefinition,
   ProgressDataPoint,
+  Setting,
   Student,
+  Timestamp,
 } from "@teacher-assistant/schema";
+import type {
+  ParaVisibleAdministerEntry,
+  ParaVisibleDoc,
+  ParaVisibleRosterEntry,
+} from "@teacher-assistant/store";
 import type { Doc as YDoc } from "yjs";
 
 const STUDENTS = "students";
@@ -33,6 +40,17 @@ const PROBES = "probes";
 const OBSERVATIONS = "observations";
 const BASELINE_POINTS = "baseline_points";
 const CATALOG = "catalog";
+
+// --- The `{period}/para-visible` doc (D1). A SEPARATE Yjs doc/stream under the
+// Period DEK — never the master scope. Its maps hold ONLY Period-DEK fields: the
+// teacher publishes the projection (roster/administer/settingPicklist) into it,
+// the para writes pending points into it, and the teacher writes consume-tombstones.
+// No goal_text / criterion / validated record can be represented here (D1/C-3).
+const PARA_ROSTER = "para_roster";
+const PARA_ADMINISTER = "para_administer";
+const PARA_META = "para_meta"; // periodId + settingPicklist (single-value doc metadata)
+const PARA_PENDING = "para_pending"; // para-written pending points (state pending/no_data)
+const PARA_TOMBSTONES = "para_tombstones"; // teacher-written consume markers (D3)
 
 /**
  * A NON-PII curriculum-catalog row (data-model §10, CLEARTEXT) keyed by goal id —
@@ -157,4 +175,85 @@ export function isEmpty(doc: YDoc): boolean {
   return (
     doc.getMap(STUDENTS).size === 0 && doc.getMap(GOALS).size === 0 && doc.getMap(POINTS).size === 0
   );
+}
+
+// ------------------------------------------------------------------
+// The para-visible doc (Period-DEK scope). Read/written by a SEPARATE stream
+// from the master doc — the confidentiality boundary is the key on that stream.
+// ------------------------------------------------------------------
+
+/** A consume-marker the teacher writes to the para doc when a pending point is validated (D3). */
+export interface ParaTombstone {
+  readonly dataPointId: OpaqueId;
+  readonly consumedTs: Timestamp;
+}
+
+/** The decrypted, in-memory shape of the `{period}/para-visible` doc. */
+export interface ParaDocRecords {
+  /** The scoped period, or null before the teacher has published a projection. */
+  readonly periodId: OpaqueId | null;
+  readonly roster: readonly ParaVisibleRosterEntry[];
+  readonly administer: readonly ParaVisibleAdministerEntry[];
+  readonly settingPicklist: readonly Setting[];
+  /** Para-written pending points (state pending/no_data), awaiting teacher validation. */
+  readonly pending: readonly ProgressDataPoint[];
+  readonly tombstones: readonly ParaTombstone[];
+}
+
+/** Read the para-visible doc out of its own (Period-DEK) stream. */
+export function readParaVisible(doc: YDoc): ParaDocRecords {
+  const meta = doc.getMap<OpaqueId | Setting[]>(PARA_META);
+  return {
+    periodId: (meta.get("periodId") as OpaqueId | undefined) ?? null,
+    roster: [...doc.getMap<ParaVisibleRosterEntry>(PARA_ROSTER).values()],
+    administer: [...doc.getMap<ParaVisibleAdministerEntry>(PARA_ADMINISTER).values()],
+    settingPicklist: (meta.get("settingPicklist") as Setting[] | undefined) ?? [],
+    pending: [...doc.getMap<ProgressDataPoint>(PARA_PENDING).values()],
+    tombstones: [...doc.getMap<ParaTombstone>(PARA_TOMBSTONES).values()],
+  };
+}
+
+/**
+ * Publish (materialize) the para-visible projection into the para doc (D2). A
+ * deterministic, idempotent DIFF: absent roster/administer keys are removed and
+ * present ones set, so re-running with unchanged master state is a no-op. Writes
+ * ONLY the projection (catalog + opaque refs); it structurally cannot carry an MK
+ * field — its input type is ParaVisibleDoc. Never touches pending/tombstones.
+ */
+export function writeParaVisibleProjection(doc: YDoc, projection: ParaVisibleDoc): void {
+  const roster = doc.getMap<ParaVisibleRosterEntry>(PARA_ROSTER);
+  const keepRoster = new Set(projection.roster.map((r) => r.studentId));
+  for (const key of [...roster.keys()]) {
+    if (!keepRoster.has(key as OpaqueId)) {
+      roster.delete(key);
+    }
+  }
+  for (const r of projection.roster) {
+    roster.set(r.studentId, r);
+  }
+
+  const administer = doc.getMap<ParaVisibleAdministerEntry>(PARA_ADMINISTER);
+  const keepAdminister = new Set(projection.administer.map((a) => a.goalId));
+  for (const key of [...administer.keys()]) {
+    if (!keepAdminister.has(key as OpaqueId)) {
+      administer.delete(key);
+    }
+  }
+  for (const a of projection.administer) {
+    administer.set(a.goalId, a);
+  }
+
+  const meta = doc.getMap<OpaqueId | Setting[]>(PARA_META);
+  meta.set("periodId", projection.periodId);
+  meta.set("settingPicklist", [...projection.settingPicklist]);
+}
+
+/** Upsert a para-written pending point into the para doc (M13 capture). Keyed by data_point_id. */
+export function upsertParaPending(doc: YDoc, point: ProgressDataPoint): void {
+  doc.getMap<ProgressDataPoint>(PARA_PENDING).set(point.data_point_id, point);
+}
+
+/** Write the teacher's consume-marker for a validated pending point (D3 tombstone). */
+export function setParaTombstone(doc: YDoc, dataPointId: OpaqueId, consumedTs: Timestamp): void {
+  doc.getMap<ParaTombstone>(PARA_TOMBSTONES).set(dataPointId, { dataPointId, consumedTs });
 }

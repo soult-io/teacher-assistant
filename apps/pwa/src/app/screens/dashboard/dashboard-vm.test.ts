@@ -14,8 +14,11 @@ import {
 const NOW = new Date("2026-09-14T12:00:00Z");
 
 function fixture() {
-  const seed = buildSyntheticSeed(NOW);
-  const lk = buildLookups(seed);
+  const full = buildSyntheticSeed(NOW);
+  const seed = full.master;
+  // The para pending live in the para doc; the dashboard marks rows from that queue.
+  const paraPendingGoalIds = new Set(full.paraPending.map((p) => p.goal_id));
+  const lk = buildLookups(seed, paraPendingGoalIds);
   const dash = buildWeeklyDashboard({
     goals: seed.goals,
     points: seed.points,

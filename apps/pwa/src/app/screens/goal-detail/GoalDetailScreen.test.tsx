@@ -7,7 +7,7 @@ import { GoalDetailScreen } from "./GoalDetailScreen.js";
 const NOW = new Date("2026-09-14T12:00:00Z");
 
 function renderDetail(goalText: string, over?: Partial<Parameters<typeof GoalDetailScreen>[0]>) {
-  const records = buildSyntheticSeed(NOW);
+  const records = buildSyntheticSeed(NOW).master;
   const goal = records.goals.find((g) => g.goal_text === goalText);
   if (goal === undefined) {
     throw new Error(`no synthetic goal ${goalText}`);

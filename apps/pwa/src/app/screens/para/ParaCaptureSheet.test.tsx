@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import * as Y from "yjs";
-import { readRecords } from "../../../data/repository.js";
+import { readParaVisible } from "../../../data/repository.js";
 import type { DocMutator } from "../../../data/session.js";
 import { ParaCaptureSheet, type ParaCaptureTarget } from "./ParaCaptureSheet.js";
 
@@ -15,12 +15,12 @@ const target: ParaCaptureTarget = {
   expectedDenominator: 5,
 };
 
-/** Apply the committed mutator to a fresh doc and return the single written point. */
+/** Apply the committed mutator to a fresh PARA doc and return the single pending point. */
 function applyMutator(mutator: DocMutator) {
   const doc = new Y.Doc();
   doc.transact(() => mutator(doc));
-  const points = readRecords(doc).points;
-  return points[0];
+  // The para capture writes into the para doc's pending map (Period-DEK scope), never master.
+  return readParaVisible(doc).pending[0];
 }
 
 function renderSheet() {

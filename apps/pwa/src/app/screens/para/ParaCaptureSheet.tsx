@@ -31,7 +31,7 @@ import { Avatar } from "../../../design/Avatar.js";
 import { isoDateOf } from "../../../data/date.js";
 import type { DocMutator } from "../../../data/session.js";
 import { paraCaptureMutator } from "../../../data/writes.js";
-import { OBS_LABEL } from "./labels.js";
+import { OBS_LABEL, SETTING_LABEL } from "./labels.js";
 
 const ACCOM_LABEL: Readonly<Record<AccommodationSubtype, string>> = {
   Calculator: "Calculator",
@@ -45,11 +45,6 @@ const REASON_LABEL: Readonly<Record<ParaNoDataReason, string>> = {
   absent: "Absent",
   behavior: "Behavior",
   no_time: "No time",
-};
-const SETTING_LABEL: Readonly<Record<Setting, string>> = {
-  math_resource: "Resource",
-  gen_ed: "Gen-ed",
-  home_scored: "Home",
 };
 
 /** The para admin target the sheet opens against — all opaque/Period-DEK, no PII. */

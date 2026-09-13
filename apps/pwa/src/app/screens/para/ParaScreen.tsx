@@ -1,27 +1,28 @@
-// U6 — the para surface (M13). A period-scoped aide screen: ONLY the para's one
-// class (the has_para period), rendered entirely from the `3p/para-visible`
-// projection (opaque ids + Period-DEK handles + the non-PII administer-label). No
-// goal definition, no trend/history/export, no other period is reachable here. Every
-// capture lands ⏳ pending for the teacher to validate.
+// U6 — the para surface (M13). A period-scoped aide screen rendered ENTIRELY from
+// the para device's own `{period}/para-visible` doc (opaque ids + Period-DEK handles
+// + the non-PII administer-label) — decrypted with a ParaKeyring that holds ONLY the
+// Period DEK. No goal definition, trend/history/export, or any other period is
+// reachable here by construction (the key boundary, not a filter). Every capture lands
+// ⏳ pending in this doc for the teacher to validate.
 
 import { useState } from "react";
-import type { DecryptedRecords } from "../../../data/repository.js";
+import type { ParaDocRecords } from "../../../data/repository.js";
 import type { DocMutator } from "../../../data/session.js";
 import { Avatar } from "../../../design/Avatar.js";
+import { StatusChip } from "../../../design/StatusChip.js";
+import { STATUS_CHIPS } from "../../../design/glyphs.js";
 import { ParaCaptureSheet, type ParaCaptureTarget } from "./ParaCaptureSheet.js";
-import { buildParaVisible, paraPeriodId } from "./para-vm.js";
 
 export interface ParaScreenProps {
-  readonly records: DecryptedRecords;
+  readonly paraRecords: ParaDocRecords;
   readonly now: Date;
-  readonly apply: (mutator: DocMutator) => Promise<void>;
+  readonly capturePara: (mutator: DocMutator) => Promise<void>;
 }
 
-export function ParaScreen({ records, now, apply }: ParaScreenProps) {
+export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
   const [target, setTarget] = useState<ParaCaptureTarget | null>(null);
-  const periodId = paraPeriodId(records);
 
-  if (periodId === null) {
+  if (paraRecords.periodId === null) {
     return (
       <div className="para">
         <div className="banner info">No period is assigned to a para on this device.</div>
@@ -29,36 +30,40 @@ export function ParaScreen({ records, now, apply }: ParaScreenProps) {
     );
   }
 
-  const doc = buildParaVisible(records, periodId);
-  const initialsById = new Map(doc.roster.map((r) => [r.studentId, r.initials]));
-  // A goal already has a para entry awaiting validation (⏳): its Score is disabled.
+  const initialsById = new Map(paraRecords.roster.map((r) => [r.studentId, r.initials]));
+  // A goal already has a para entry awaiting validation (⏳) — its Score is a pending
+  // tag instead. Derived from THIS doc: a pending point not yet consumed by a tombstone.
+  const consumed = new Set(paraRecords.tombstones.map((t) => t.dataPointId));
   const pendingGoalIds = new Set(
-    records.points
-      .filter((p) => p.scorer === "para" && p.validated_by === undefined)
-      .map((p) => p.goal_id),
+    paraRecords.pending.filter((p) => !consumed.has(p.data_point_id)).map((p) => p.goal_id),
   );
 
   const commit = async (mutator: DocMutator) => {
-    await apply(mutator);
+    await capturePara(mutator);
     setTarget(null);
   };
 
   return (
     <div className="para">
       <div className="banner info">
-        Math 81 Resource · scoped to this class only — no other students, no trends, no export.
+        3rd period · Math 81 Resource · para: JT · scoped to this class only — no other students, no
+        trends, no export.
       </div>
       <h1>Your students today</h1>
       <div className="sub">Enter scores; the teacher confirms each one before it counts.</div>
 
-      {doc.administer.length === 0 ? (
+      {paraRecords.administer.length === 0 ? (
         <div className="card">No probes to administer for this class right now.</div>
       ) : (
-        doc.administer.map((row) => {
+        paraRecords.administer.map((row) => {
           const initials = initialsById.get(row.studentId) ?? "??";
           const pending = pendingGoalIds.has(row.goalId);
           return (
             <div className="row" key={`${row.goalId}-${row.probeDefinitionId}`}>
+              <StatusChip
+                chip={pending ? STATUS_CHIPS.pending : STATUS_CHIPS.owes}
+                label={pending ? "pending" : "to score"}
+              />
               <Avatar initials={initials} />
               <div className="rowmain">
                 <span className="rowtitle">{row.administerLabel}</span>
@@ -100,7 +105,7 @@ export function ParaScreen({ records, now, apply }: ParaScreenProps) {
       {target !== null ? (
         <ParaCaptureSheet
           target={target}
-          settingPicklist={doc.settingPicklist}
+          settingPicklist={paraRecords.settingPicklist}
           now={now}
           onCommit={commit}
           onClose={() => setTarget(null)}

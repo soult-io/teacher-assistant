@@ -3,17 +3,17 @@ import { describe, expect, it } from "vitest";
 import { App } from "./App.js";
 import type { BootstrapOptions } from "./data/session.js";
 import { buildSyntheticSeed } from "./data/synthetic-seed.js";
-import { makeFakeSession } from "./test/fake-session.js";
+import { makeFakeParaSession, makeFakeSession } from "./test/fake-session.js";
 
-// A crypto-free bootstrap that still exercises the real write path (M5 mutators
-// over a Yjs doc). The seed uses the app's pinned `now`, so its week matches the
-// dashboard's evaluation week.
+// A crypto-free two-doc device that still exercises the real write path (the M5/M13
+// mutators + the two-doc validate coordinator over Yjs docs). The seed uses the app's
+// pinned `now`, so its week matches the dashboard's evaluation week.
 function bootstrap(options: BootstrapOptions) {
   return Promise.resolve(makeFakeSession(buildSyntheticSeed(options.now)));
 }
 
 async function unlock() {
-  render(<App bootstrap={bootstrap} />);
+  render(<App bootstrap={bootstrap} bootstrapPara={makeFakeParaSession} />);
   fireEvent.click(screen.getByTestId("unlock"));
   await screen.findByTestId("header-line");
 }

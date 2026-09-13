@@ -234,12 +234,21 @@ function classPeriod(label: string, hasPara: boolean): ClassPeriod {
   };
 }
 
+/** The synthetic caseload split by DOC/KEY tier: the teacher-MK master, and the para pending. */
+export interface SyntheticSeed {
+  /** The master (MK-scope) records — students, goals, validated/teacher points, catalog, … */
+  readonly master: DecryptedRecords;
+  /** The para-written pending points — seeded into the {period}/para-visible (Period-DEK) doc. */
+  readonly paraPending: readonly ProgressDataPoint[];
+}
+
 /**
- * Build a fresh synthetic record set. The dashboard for `now` shows: 2 scored,
- * 1 excused (⊘ absent), 2 owes, and the proposed goal excluded — a live read
- * across all three states.
+ * Build a fresh synthetic caseload, split by tier (D1): the MK-scope `master` and the
+ * Period-DEK `paraPending`. The dashboard for `now` shows: 2 scored, 1 excused
+ * (⊘ absent), 2 owes, and the proposed goal excluded — a live read across all three
+ * states — plus 2 para captures awaiting validation in the para doc.
  */
-export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
+export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   const adminDate = isoDateOf(now);
   const createdTs = asTimestamp(now.getTime());
 
@@ -374,11 +383,15 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
     //    from the dashboard via the ↗ trend button; < 8 points → INDETERMINATE.
     scoredPoint(abTwoStep, weeksBefore(now, 2), 2), // 40%
     scoredPoint(abTwoStep, weeksBefore(now, 1), 3), // 60%
-    // ── M13 para captures awaiting teacher validation (3rd period = P2). Both on OWES
-    //    goals so the header is unchanged: a clean one (with witnessed observation
-    //    chips) and a denominator-MISMATCH one (the para entered the real total; it
-    //    routes to the queue flagged for the teacher to resolve). The ⊘ path is
-    //    exercised through the para capture flow itself, not seeded.
+  ];
+
+  // ── M13 para captures awaiting teacher validation (3rd period = P2). These live in
+  //    the {period}/para-visible doc (Period-DEK scope), NEVER the master `points` map —
+  //    the confidentiality boundary is the key. Both on OWES goals so the header is
+  //    unchanged: a clean one (with witnessed observation chips) and a denominator-
+  //    MISMATCH one (the para entered the real total; it routes to the queue flagged for
+  //    the teacher to resolve). The ⊘ path is exercised through the para capture flow.
+  const paraPending: ProgressDataPoint[] = [
     pendingParaPoint(abTwoStep, adminDate, 3, { observations: ["Independent"] }),
     pendingParaPoint(cdFractions, adminDate, 5, {
       denominatorUsed: 6, // ≠ assigned 5 → off-basis, teacher resolves on validation
@@ -430,5 +443,15 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
 
   // No mastery observation seeded — a mastery-eligible run (cdFractions) surfaces
   // the teacher's Acknowledge action on Goal Detail; acknowledging writes one.
-  return { students, goals, points, periods, probes, observations: [], baselinePoints, catalog };
+  const master: DecryptedRecords = {
+    students,
+    goals,
+    points,
+    periods,
+    probes,
+    observations: [],
+    baselinePoints,
+    catalog,
+  };
+  return { master, paraPending };
 }

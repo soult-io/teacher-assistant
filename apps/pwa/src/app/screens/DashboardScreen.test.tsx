@@ -7,7 +7,8 @@ import { buildLookups } from "./dashboard/dashboard-vm.js";
 const NOW = new Date("2026-09-14T12:00:00Z");
 
 function renderDashboard() {
-  const records = buildSyntheticSeed(NOW);
+  const seed = buildSyntheticSeed(NOW);
+  const records = seed.master;
   const lk = buildLookups(records);
   const handlers = {
     onNewGoal: vi.fn(),
@@ -18,7 +19,17 @@ function renderDashboard() {
     onOpenDetail: vi.fn(),
     apply: vi.fn().mockResolvedValue(undefined),
   };
-  render(<DashboardScreen records={records} lk={lk} now={NOW} {...handlers} />);
+  // The para pending count now comes from the para doc (D3), passed by App; the seed
+  // ships 2 para captures awaiting validation.
+  render(
+    <DashboardScreen
+      records={records}
+      lk={lk}
+      now={NOW}
+      paraPendingCount={seed.paraPending.length}
+      {...handlers}
+    />,
+  );
   return handlers;
 }
 

@@ -6,7 +6,7 @@ import { BaselineScreen } from "./BaselineScreen.js";
 const NOW = new Date("2026-09-14T12:00:00Z");
 
 function renderBaseline() {
-  const records = buildSyntheticSeed(NOW);
+  const records = buildSyntheticSeed(NOW).master;
   const initialsById = new Map(records.students.map((s) => [s.student_id, s.initials]));
   const handlers = {
     onBack: vi.fn(),

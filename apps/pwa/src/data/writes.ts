@@ -18,7 +18,6 @@ import {
   captureScoredPoint,
   type MasteryCandidate,
   recordNoData,
-  validateParaPoint,
 } from "@teacher-assistant/domain-core";
 import type {
   BaselinePoint,
@@ -39,6 +38,7 @@ import {
   upsertBaselinePoint,
   upsertGoal,
   upsertObservation,
+  upsertParaPending,
   upsertPoint,
   upsertProbe,
   upsertStudent,
@@ -186,19 +186,11 @@ export function adoptGoalMutator(
  * only upserts it. It is NOT a record — it awaits teacher validation.
  */
 export function paraCaptureMutator(point: ProgressDataPoint): DocMutator {
-  return (doc) => upsertPoint(doc, point);
-}
-
-/**
- * Teacher validation of a para pending point (M13, C-4): validateParaPoint promotes
- * it to the canonical record (pending→scored, stamped validated_by/ts; a ⊘ stays
- * no_data) — the ONLY thing written back. Trend/history/exports are never produced
- * here. In this single-doc app the validated record replaces the pending point by id
- * (the two-doc split of validated→MK / tombstone→para is the crypto-envelope's job).
- */
-export function validateParaMutator(pending: ProgressDataPoint, when: Timestamp): DocMutator {
-  const { validated } = validateParaPoint(pending, { who: "teacher", when });
-  return (doc) => upsertPoint(doc, validated);
+  // The para writes into the {period}/para-visible doc's pending map (Period-DEK
+  // scope) — NEVER the master `points` map. It is not a record; the teacher's
+  // two-doc validate (session.validatePara) promotes it → master and tombstones it
+  // here (C-4). The single-doc shortcut is gone: the boundary is the key, not a flag.
+  return (doc) => upsertParaPending(doc, point);
 }
 
 /**

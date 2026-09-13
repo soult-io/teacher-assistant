@@ -66,10 +66,12 @@ function ScoreEntry({
   target,
   onCommit,
   toNoData,
+  onValidateEdit,
 }: {
   readonly target: SheetTarget;
   readonly onCommit: (m: DocMutator) => void;
   readonly toNoData: () => void;
+  readonly onValidateEdit?: (edit: ParaFixEdit) => void;
 }) {
   const existing: ProgressDataPoint | undefined = target.existingPoint;
   const [correct, setCorrect] = useState<number>(existing?.numerator ?? 0);
@@ -97,6 +99,12 @@ function ScoreEntry({
   const save = (election?: MismatchElection) => {
     const entryTs = asTimestamp(Date.now());
     const withElection = election !== undefined ? { election } : {};
+    // Para [Fix]: the corrected values are promoted to a validated master record by
+    // the session (+ a para tombstone), never written as a plain master edit here.
+    if (onValidateEdit !== undefined) {
+      onValidateEdit({ numerator: correct, denominatorUsed: denom });
+      return;
+    }
     if (existing !== undefined) {
       // A queued placeholder is completed by a fresh mismatch-aware capture that
       // replaces it; an already-scored point is corrected by an audited [Fix].
@@ -289,14 +297,27 @@ function NoDataEntry({
   );
 }
 
+/** A teacher [Fix] of a para pending point: correct the values, promoting it → validated (D3). */
+export interface ParaFixEdit {
+  readonly numerator: number;
+  readonly denominatorUsed: number;
+}
+
 export function QuickScoreSheet({
   target,
   onCommit,
   onClose,
+  onValidateEdit,
 }: {
   readonly target: SheetTarget;
   readonly onCommit: (mutator: DocMutator) => void;
   readonly onClose: () => void;
+  /**
+   * Present ONLY when the sheet was opened to [Fix] a para pending point: Save routes
+   * the corrected values here (the session promotes them → master + tombstones the para
+   * doc) instead of a plain master edit. The No-data path is unavailable in this mode.
+   */
+  readonly onValidateEdit?: (edit: ParaFixEdit) => void;
 }) {
   const [mode, setMode] = useState<"score" | "nodata">("score");
 
@@ -320,7 +341,12 @@ export function QuickScoreSheet({
       <div className="sheet open" role="dialog" aria-label="score entry">
         <div className="grip" />
         {mode === "score" ? (
-          <ScoreEntry target={target} onCommit={onCommit} toNoData={() => setMode("nodata")} />
+          <ScoreEntry
+            target={target}
+            onCommit={onCommit}
+            toNoData={() => setMode("nodata")}
+            {...(onValidateEdit !== undefined ? { onValidateEdit } : {})}
+          />
         ) : (
           <NoDataEntry target={target} onCommit={onCommit} toScore={() => setMode("score")} />
         )}

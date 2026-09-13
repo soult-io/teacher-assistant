@@ -4,15 +4,22 @@
 // foreign-realm Uint8Array (jsdom's TextEncoder produces one). fake-indexeddb is
 // still installed globally by the setup file, so IndexedDbPersistence works here.
 import { AuthRequiredError } from "@teacher-assistant/auth";
-import { asTimestamp } from "@teacher-assistant/schema";
+import {
+  generateMasterKey,
+  generatePeriodKey,
+  ParaKeyring,
+  sodiumReady,
+  TeacherKeyring,
+} from "@teacher-assistant/crypto";
+import { asTimestamp, newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
 import { buildWeeklyDashboard, renderHeader } from "@teacher-assistant/store";
-import { InMemoryPersistence } from "@teacher-assistant/sync";
+import { EncryptedStream, InMemoryPersistence } from "@teacher-assistant/sync";
 import type { VerifiedAuthenticationResponse } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import { isoDateOf } from "./date.js";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
-import { bootstrapTeacherSession } from "./session.js";
+import { bootstrapParaSession, bootstrapTeacherSession } from "./session.js";
 import { scoreMutator } from "./writes.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
@@ -31,10 +38,13 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     expect(session.role).toBe("teacher");
     expect(session.records.students).toHaveLength(4);
     expect(session.records.goals).toHaveLength(6);
-    // 25 points: the current-week mix (2 scored, 1 no-data, 1 pending-para) PLUS
-    // the prior-week Goal Detail histories (U4) — which never touch THIS week's
-    // dashboard (the projection filters to the asOf ISO week; asserted below).
-    expect(session.records.points).toHaveLength(26);
+    // 24 MASTER points: the current-week mix (2 scored, 1 no-data) PLUS the prior-week
+    // Goal Detail histories (U4). The 2 para captures do NOT live here — they are in the
+    // Period-DEK para doc (asserted via readParaQueue below), NOT the master points map.
+    expect(session.records.points).toHaveLength(24);
+    expect(session.records.points.some((p) => p.scorer === "para")).toBe(false);
+    // The two seeded para captures await validation in the para doc (master-truth queue).
+    expect(session.readParaQueue()).toHaveLength(2);
     expect(session.records.periods).toHaveLength(2);
     expect(session.records.probes).toHaveLength(6); // one per active goal + the proposed goal's
 
@@ -90,6 +100,45 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     });
     expect(dash.header.scored).toBe(3);
     expect(dash.header.owe).toBe(1);
+  });
+
+  it("enters a para-device session that reads ONLY the para doc (roster/administer/pending)", async () => {
+    const persistence = new InMemoryPersistence();
+    const teacher = await bootstrapTeacherSession({ persistence, now: NOW });
+    const para = await bootstrapParaSession(teacher.paraHandoff);
+
+    expect(para.role).toBe("para");
+    expect(para.paraRecords.roster.length).toBeGreaterThan(0); // the published 3rd-period roster
+    expect(para.paraRecords.pending).toHaveLength(2); // the two seeded para captures
+    // The para doc is the projection ONLY: no goal-definition fields are representable.
+    const keys = new Set(Object.keys(para.paraRecords));
+    expect(keys.has("goals")).toBe(false);
+    expect(keys.has("points")).toBe(false);
+    // Every pending point is a para capture that is NOT yet validated (C-4).
+    for (const p of para.paraRecords.pending) {
+      expect(p.scorer).toBe("para");
+      expect(p.validated_by).toBeUndefined();
+    }
+  });
+
+  it("SECURITY INVARIANT: a ParaKeyring cannot open the master stream (key boundary, #9)", async () => {
+    await sodiumReady();
+    // A master stream sealed under MK, carrying a plaintext marker.
+    const masterScope = newScopeTag();
+    const masterKeyring = new TeacherKeyring(masterScope, generateMasterKey());
+    const docId = newOpaqueId();
+    const masterStream = new EncryptedStream(docId, masterScope, masterKeyring);
+    masterStream.transact((doc) => doc.getMap("m").set("k", "Two-step equations"));
+    const masterSnapshot = masterStream.encryptedSnapshot();
+
+    // A para keyring holds ONLY a Period DEK — never the master scope key.
+    const paraKeyring = new ParaKeyring([generatePeriodKey(newScopeTag())]);
+    // Attempting to open the master ciphertext with the para keyring fails closed:
+    // key possession, not a filter, is the boundary — zero plaintext crosses.
+    const paraOnMaster = new EncryptedStream(docId, masterScope, paraKeyring);
+    expect(() => paraOnMaster.integrateRemote(masterSnapshot)).toThrow();
+    // The master content never materialized in the para stream's doc.
+    expect(JSON.stringify(paraOnMaster.doc.toJSON())).not.toContain("Two-step equations");
   });
 
   it("refuses to unlock without a verified passkey authentication (M0-AUTH gate)", async () => {

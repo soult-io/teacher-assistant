@@ -62,6 +62,8 @@ export interface DashboardScreenProps {
   readonly onBaseline: () => void;
   /** Open the teacher para-validation queue (U6). */
   readonly onValidate: () => void;
+  /** Count of para pending points awaiting validation — from the para doc (D3), not master. */
+  readonly paraPendingCount: number;
   readonly onOpenScore: (target: SheetTarget) => void;
   /** Open Goal Detail for a goal (trend + history) — reachable from every row. */
   readonly onOpenDetail: (goalId: OpaqueId) => void;
@@ -77,6 +79,7 @@ export function DashboardScreen(props: DashboardScreenProps) {
     onToScore,
     onBaseline,
     onValidate,
+    paraPendingCount,
     onOpenScore,
     onOpenDetail,
     apply,
@@ -107,7 +110,7 @@ export function DashboardScreen(props: DashboardScreenProps) {
   const scoredPointByGoal = new Map(
     records.points.filter((p) => p.state === "scored").map((p) => [p.goal_id, p]),
   );
-  const pendingCount = dashboard.rows.filter((r) => lk.pendingGoalIds.has(r.goalId)).length;
+  const pendingCount = paraPendingCount;
   const groups = groupDashboard(dashboard.rows, lens);
 
   const toggleLater = useCallback(

@@ -1,16 +1,17 @@
 // U6 — teacher-side para-validation queue (M13, design §A.5 F1). Every para entry
-// lands ⏳ pending and becomes an ARC-auditable record ONLY when the teacher
-// validates it here. The queue is ITEMIZED: each row shows every value the para
-// entered (correct/total, %, date, setting, observations, off-basis flag) and is
-// individually Confirmable/Fixable — never a collapsed "confirm all" with hidden
-// values (§A.5). Validation routes through validateParaMutator (the engine writes
-// only the validated record + a tombstone; no trend/history is produced).
+// lands ⏳ pending in the {period}/para-visible doc and becomes an ARC-auditable
+// record ONLY when the teacher validates it. The `queue` is DERIVED FROM MASTER TRUTH
+// by the teacher session (a para pending point with no validated record in master),
+// ordered deterministically. Each row is ITEMIZED — every value the para entered
+// (correct/total, %, date, SETTING, observations, off-basis flag) is shown, and each
+// is individually Confirm/Fix-able — never a collapsed "confirm all" with hidden
+// values (§A.5). Validation routes through the session's two-doc coordinator: the
+// validated record → master, a tombstone → the para doc; no trend/history is produced.
 
-import { orderPendingForValidation } from "@teacher-assistant/domain-core";
 import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { Avatar } from "../../../design/Avatar.js";
-import { OBS_LABEL } from "./labels.js";
+import { OBS_LABEL, SETTING_LABEL } from "./labels.js";
 
 function valueLine(p: ProgressDataPoint): string {
   const parts: string[] = [];
@@ -21,6 +22,8 @@ function valueLine(p: ProgressDataPoint): string {
     parts.push(`${p.numerator}/${p.denominator_used} = ${pct}%`);
   }
   parts.push(p.admin_date);
+  // §A.5: the teacher must see the SETTING the para recorded to validate honestly.
+  parts.push(SETTING_LABEL[p.setting]);
   const obs = (p.para_observations ?? []).map((o) => OBS_LABEL[o] ?? o);
   const accoms = p.accommodation_subtypes ?? [];
   if (obs.length > 0) {
@@ -33,7 +36,8 @@ function valueLine(p: ProgressDataPoint): string {
 }
 
 export interface ValidationQueueScreenProps {
-  readonly records: { readonly points: readonly ProgressDataPoint[] };
+  /** The pending para points to validate — already master-truth-filtered + ordered by the session. */
+  readonly queue: readonly ProgressDataPoint[];
   readonly initialsById: ReadonlyMap<string, string>;
   readonly goalTextById: ReadonlyMap<string, string>;
   readonly onConfirm: (pending: ProgressDataPoint) => void;
@@ -42,17 +46,13 @@ export interface ValidationQueueScreenProps {
 }
 
 export function ValidationQueueScreen({
-  records,
+  queue,
   initialsById,
   goalTextById,
   onConfirm,
   onFix,
   onBack,
 }: ValidationQueueScreenProps) {
-  const pending = orderPendingForValidation(
-    records.points.filter((p) => p.scorer === "para" && p.validated_by === undefined),
-  );
-
   return (
     <div className="validation-queue">
       <div className="backrow">
@@ -66,12 +66,12 @@ export function ValidationQueueScreen({
         shown; nothing counts until you OK it.
       </div>
 
-      {pending.length === 0 ? (
+      {queue.length === 0 ? (
         <div className="card" data-testid="queue-empty">
           Nothing awaiting your confirmation.
         </div>
       ) : (
-        pending.map((p) => {
+        queue.map((p) => {
           const initials = initialsById.get(p.student_id) ?? "??";
           return (
             <div className="row validate" key={p.data_point_id}>

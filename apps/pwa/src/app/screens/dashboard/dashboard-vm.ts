@@ -3,18 +3,13 @@
 // exist, their state, and the owes-first WITHIN-group ordering all come from
 // @teacher-assistant/store (buildWeeklyDashboard / groupDashboard). This module
 // only resolves opaque ids → display attributes (initials, goal text, period
-// label, scored %), marks the pending-para rows (buildValidationQueue), and
+// label, scored %), marks the pending-para rows (from the para-doc queue), and
 // orders the GROUPS for display (student cards owes-first then by initials;
 // period groups by label) — presentation sequencing of engine-grouped data.
 
 import { compareCodePoints } from "@teacher-assistant/domain-core";
 import type { NoDataReason, OpaqueId } from "@teacher-assistant/schema";
-import {
-  buildValidationQueue,
-  type DashboardGroup,
-  type DashboardRow,
-  type DashboardState,
-} from "@teacher-assistant/store";
+import type { DashboardGroup, DashboardRow, DashboardState } from "@teacher-assistant/store";
 import type { DecryptedRecords } from "../../../data/repository.js";
 
 /** Goal-definition display fields shown in the owes-row meta (from the goal entity). */
@@ -35,7 +30,7 @@ export interface RowVM {
   readonly periodLabel: string | null;
   readonly value: number | undefined;
   readonly noDataReason: NoDataReason | undefined;
-  /** Has an unvalidated para point awaiting the teacher's OK (buildValidationQueue). */
+  /** Has an unvalidated para point awaiting the teacher's OK (from the para-doc queue). */
   readonly pending: boolean;
   /** Glanceable mid-class context for owes rows: probe tool + mastery criterion. */
   readonly probe: string;
@@ -70,7 +65,16 @@ export interface Lookups {
   readonly periodByStudent: (studentId: OpaqueId) => OpaqueId | null;
 }
 
-export function buildLookups(records: DecryptedRecords): Lookups {
+/**
+ * Resolve dashboard display lookups from the MASTER records. `paraPendingGoalIds`
+ * marks goals that have a para capture awaiting validation — sourced from the para
+ * doc's master-truth queue (D3), NOT master points (the para pending no longer live
+ * in master), so an owes row still shows the ⏳ "awaiting your OK" cue.
+ */
+export function buildLookups(
+  records: DecryptedRecords,
+  paraPendingGoalIds: ReadonlySet<string> = new Set(),
+): Lookups {
   const initialsById = new Map(records.students.map((s) => [s.student_id, s.initials]));
   const goalTextById = new Map(records.goals.map((g) => [g.goal_id, g.goal_text]));
   const periodLabelById = new Map(records.periods.map((p) => [p.period_id, p.label]));
@@ -95,7 +99,7 @@ export function buildLookups(records: DecryptedRecords): Lookups {
       valueByGoal.set(p.goal_id, p.computed_value);
     }
   }
-  const pendingGoalIds = new Set(buildValidationQueue(records.points).map((e) => e.goalId));
+  const pendingGoalIds = paraPendingGoalIds;
   const probeByGoal = new Map(
     records.probes.map((p) => [
       p.goal_id,
