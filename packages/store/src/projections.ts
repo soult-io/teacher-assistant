@@ -146,9 +146,20 @@ export function buildWeeklyDashboard(input: WeeklyDashboardInput): WeeklyDashboa
   return { week, rows, header };
 }
 
-/** Render the locked header string (design §A.2). */
+/**
+ * Render the locked header string (design §A.2). The scored count always shows;
+ * the excused / owe segments are omitted when zero (prototype behaviour — a
+ * fully-scored week reads "4 of 4 collectable scored", not "· 0 excused · 0 owe").
+ */
 export function renderHeader(h: DashboardHeader): string {
-  return `${h.scored} of ${h.collectable} collectable scored · ${h.excused} excused · ${h.owe} owe`;
+  let out = `${h.scored} of ${h.collectable} collectable scored`;
+  if (h.excused > 0) {
+    out += ` · ${h.excused} excused`;
+  }
+  if (h.owe > 0) {
+    out += ` · ${h.owe} owe`;
+  }
+  return out;
 }
 
 // ── Grouping lenses (§E.4) ───────────────────────────────────────────────────

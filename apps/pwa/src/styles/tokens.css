@@ -1,0 +1,112 @@
+/*
+ * Design tokens — ported verbatim from design/prototype-p0.html (the v2 TRACK +
+ * round-3 UI Niah validated). The palette is theme-aware in three states:
+ *   - bare :root                       → light (default)
+ *   - :root[data-theme="dark"]         → explicit dark (toggle wins)
+ *   - :root[data-theme="light"]        → explicit light (toggle wins)
+ *   - @media (prefers-color-scheme:dark):root:not([data-theme="light"]) → system dark
+ *
+ * The six --s-* student identity hues are LOCKED (design §E.2): fixed per
+ * student, deliberately NOT green/amber/red (those are the status hues). Both
+ * light and dark values are defined so the monogram avatars read in either theme.
+ */
+
+:root {
+  --bg: #e9edf3;
+  --surface: #ffffff;
+  --surface-2: #f4f6f9;
+  --text: #1a1f2b;
+  --text-dim: #586074;
+  --border: #d7dce6;
+  --border-strong: #c2cad8;
+  --accent: #2563d9;
+  --accent-ink: #ffffff;
+  --accent-soft: #e8f0ff;
+  --owes: #b56a00;
+  --owes-bg: #fff4e0;
+  --owes-line: #e7a63a;
+  --logged: #137a41;
+  --logged-bg: #e6f5ec;
+  --nodata: #5f6675;
+  --nodata-bg: #eceef2;
+  --mastery: #8a6300;
+  --mastery-bg: #fbf1d4;
+  --pending: #6a35c9;
+  --pending-bg: #efe7fb;
+  --danger: #b5271b;
+  --shadow: 0 6px 24px rgba(24, 33, 52, 0.14);
+  --radius: 16px;
+  /* student identity hues — fixed per student, deliberately NOT green/amber/red */
+  --s-ab: #0f766e;
+  --s-cd: #4338ca;
+  --s-ef: #0369a1;
+  --s-gh: #6d28d9;
+  --s-jm: #a21caf;
+  --s-rt: #0e7490;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0e1320;
+  --surface: #182234;
+  --surface-2: #1f2b40;
+  --text: #e9eef6;
+  --text-dim: #9aa7bd;
+  --border: #2c3a52;
+  --border-strong: #3a4a66;
+  --accent: #5f9dff;
+  --accent-ink: #0a1120;
+  --accent-soft: #1b2740;
+  --owes: #f0b552;
+  --owes-bg: #3a2c12;
+  --owes-line: #f0b552;
+  --logged: #54d38c;
+  --logged-bg: #123726;
+  --nodata: #9aa7bd;
+  --nodata-bg: #232c3b;
+  --mastery: #f4d271;
+  --mastery-bg: #3a3111;
+  --pending: #bda2f7;
+  --pending-bg: #2a1f45;
+  --danger: #ff8072;
+  --shadow: 0 6px 26px rgba(0, 0, 0, 0.45);
+  --s-ab: #2dd4bf;
+  --s-cd: #818cf8;
+  --s-ef: #38bdf8;
+  --s-gh: #a78bfa;
+  --s-jm: #e879f9;
+  --s-rt: #22d3ee;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0e1320;
+    --surface: #182234;
+    --surface-2: #1f2b40;
+    --text: #e9eef6;
+    --text-dim: #9aa7bd;
+    --border: #2c3a52;
+    --border-strong: #3a4a66;
+    --accent: #5f9dff;
+    --accent-ink: #0a1120;
+    --accent-soft: #1b2740;
+    --owes: #f0b552;
+    --owes-bg: #3a2c12;
+    --owes-line: #f0b552;
+    --logged: #54d38c;
+    --logged-bg: #123726;
+    --nodata: #9aa7bd;
+    --nodata-bg: #232c3b;
+    --mastery: #f4d271;
+    --mastery-bg: #3a3111;
+    --pending: #bda2f7;
+    --pending-bg: #2a1f45;
+    --danger: #ff8072;
+    --shadow: 0 6px 26px rgba(0, 0, 0, 0.45);
+    --s-ab: #2dd4bf;
+    --s-cd: #818cf8;
+    --s-ef: #38bdf8;
+    --s-gh: #a78bfa;
+    --s-jm: #e879f9;
+    --s-rt: #22d3ee;
+  }
+}

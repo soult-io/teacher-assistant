@@ -135,6 +135,18 @@ describe("weekly dashboard — states, header, baseline exclusion", () => {
     expect(renderHeader(dash.header)).toBe("1 of 3 collectable scored · 1 excused · 1 owe");
   });
 
+  it("omits the excused/owe segments when their count is zero (design §A.2)", () => {
+    expect(renderHeader({ scored: 4, collectable: 4, excused: 0, owe: 0 })).toBe(
+      "4 of 4 collectable scored",
+    );
+    expect(renderHeader({ scored: 2, collectable: 4, excused: 0, owe: 2 })).toBe(
+      "2 of 4 collectable scored · 2 owe",
+    );
+    expect(renderHeader({ scored: 3, collectable: 3, excused: 1, owe: 0 })).toBe(
+      "3 of 3 collectable scored · 1 excused",
+    );
+  });
+
   it("assigns the three states correctly", () => {
     const byGoal = new Map(dash.rows.map((r) => [r.goalId, r]));
     expect(byGoal.get(g1.goal_id)?.state).toBe("has_point");

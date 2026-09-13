@@ -1,0 +1,64 @@
+// Local doc repository — the (de)serialisation seam between the encrypted CRDT
+// stream (@teacher-assistant/sync) and the typed domain entities the M3
+// projections consume (@teacher-assistant/store). It holds NO domain rules: it
+// only reads records out of / writes records into the Yjs doc. All monitoring
+// math lives in the engine; the UI reads these records and calls the engine.
+//
+// Convention (inherited by U2–U6): each entity kind is a top-level Y.Map keyed
+// by its opaque id → the whole entity object. Whole-entity values match the M1
+// stream granularity (one Period-DEK doc per period); per-field CRDT merge is a
+// later refinement, not needed for the single-writer synthetic seed.
+//
+// FERPA: the entities are plaintext IN MEMORY only. They reach disk exclusively
+// as the stream's ciphertext snapshot/updates via the PersistenceAdapter
+// (hard-stop #10/#11). This module never touches storage.
+
+import type { IEPGoal, ProgressDataPoint, Student } from "@teacher-assistant/schema";
+import type { Doc as YDoc } from "yjs";
+
+const STUDENTS = "students";
+const GOALS = "goals";
+const POINTS = "points";
+
+/** The decrypted, in-memory record set read out of one stream's doc. */
+export interface DecryptedRecords {
+  readonly students: readonly Student[];
+  readonly goals: readonly IEPGoal[];
+  readonly points: readonly ProgressDataPoint[];
+}
+
+/** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
+export function readRecords(doc: YDoc): DecryptedRecords {
+  return {
+    students: [...doc.getMap<Student>(STUDENTS).values()],
+    goals: [...doc.getMap<IEPGoal>(GOALS).values()],
+    points: [...doc.getMap<ProgressDataPoint>(POINTS).values()],
+  };
+}
+
+/**
+ * Write a record set into the doc, keyed by opaque id. Intended as the mutator
+ * body of `SyncEngine.capture()` so the change is encrypted + persisted as
+ * ciphertext; it must run inside a stream transaction, never against disk.
+ */
+export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
+  const students = doc.getMap<Student>(STUDENTS);
+  for (const student of records.students) {
+    students.set(student.student_id, student);
+  }
+  const goals = doc.getMap<IEPGoal>(GOALS);
+  for (const goal of records.goals) {
+    goals.set(goal.goal_id, goal);
+  }
+  const points = doc.getMap<ProgressDataPoint>(POINTS);
+  for (const point of records.points) {
+    points.set(point.data_point_id, point);
+  }
+}
+
+/** True when the doc holds no records yet (first run, before the synthetic seed). */
+export function isEmpty(doc: YDoc): boolean {
+  return (
+    doc.getMap(STUDENTS).size === 0 && doc.getMap(GOALS).size === 0 && doc.getMap(POINTS).size === 0
+  );
+}

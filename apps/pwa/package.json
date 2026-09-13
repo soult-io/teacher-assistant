@@ -2,25 +2,39 @@
   "name": "@teacher-assistant/pwa",
   "version": "0.0.0",
   "private": true,
-  "description": "Offline-first installable PWA (React + Vite + vite-plugin-pwa). App shell + NON-PII reference precache only; student-linked data is served exclusively from the local encrypted store, never the HTTP cache. Scaffold only — TRACK/PLAN/differentiation UI lands per the Phase-1+ specs.",
+  "description": "Offline-first installable PWA (React + Vite + vite-plugin-pwa). The TRACK UI renders the engine's M3 projections from the local encrypted store; student-linked data is served exclusively from that store, never the HTTP cache. App shell + design system + auth/unlock/sync bootstrap land in U1; the TRACK screens follow per the UI build spec.",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"(no unit tests in the app shell yet — logic lives in packages/domain-core)\" && exit 0"
+    "test": "vitest run"
   },
   "dependencies": {
+    "@teacher-assistant/auth": "workspace:*",
+    "@teacher-assistant/crypto": "workspace:*",
+    "@teacher-assistant/domain-core": "workspace:*",
+    "@teacher-assistant/schema": "workspace:*",
+    "@teacher-assistant/store": "workspace:*",
+    "@teacher-assistant/sync": "workspace:*",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "yjs": "13.6.32"
   },
   "devDependencies": {
+    "@simplewebauthn/server": "14.0.1",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
     "@vitejs/plugin-react": "^5.0.0",
+    "fake-indexeddb": "^6.0.0",
+    "jsdom": "^25.0.1",
     "typescript": "~5.9.3",
     "vite": "^7.1.0",
-    "vite-plugin-pwa": "^1.0.3"
+    "vite-plugin-pwa": "^1.0.3",
+    "vitest": "~4.1.10"
   }
 }
