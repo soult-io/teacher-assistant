@@ -1,0 +1,453 @@
+/*
+ * App-chrome + shared component styles — ported from design/prototype-p0.html.
+ * Selectors are kept identical to the prototype (.phone/.statusbar/.roleseg/
+ * .tabbar/.headline/.three/.row/.av/.chip …) so the design is faithful and
+ * U2–U6 reuse the same foundation. Only the chrome + the U1 dashboard slice are
+ * included here; per-screen styles land with their units.
+ */
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 16px;
+  line-height: 1.4;
+  padding: 1.2rem 0.6rem 2rem;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+/* centered phone frame */
+.phone {
+  width: 100%;
+  max-width: 26rem;
+  background: var(--bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 30px;
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  position: relative;
+  height: 52rem;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* frame chrome */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.9rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+.statusbar .grow {
+  flex: 1;
+}
+.offline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-weight: 600;
+  color: var(--owes);
+  background: var(--owes-bg);
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+}
+.online {
+  color: var(--logged);
+  background: var(--logged-bg);
+}
+.iconbtn {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+.roleseg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.roleseg button {
+  border: 0;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+.roleseg button.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.screen {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 0.9rem 0.9rem 1rem;
+}
+.screen::-webkit-scrollbar {
+  width: 0;
+}
+
+/* bottom nav */
+.tabbar {
+  display: flex;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.tabbar button {
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: var(--text-dim);
+  padding: 0.6rem 0 0.7rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+}
+.tabbar button .ic {
+  font-size: 1.15rem;
+  line-height: 1;
+}
+.tabbar button.on {
+  color: var(--accent);
+}
+
+h1 {
+  font-size: 1.15rem;
+  margin: 0.1rem 0 0.1rem;
+}
+h2 {
+  font-size: 1rem;
+  margin: 1rem 0 0.5rem;
+}
+.sub {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  margin: 0.1rem 0 0.7rem;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.85rem;
+  margin-bottom: 0.7rem;
+}
+
+/* three-state header */
+.headline {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem;
+  margin-bottom: 0.8rem;
+}
+.weeknav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+}
+.weeknav .wk {
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.three {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0.3rem 0 0.55rem;
+  flex-wrap: wrap;
+}
+.stat {
+  flex: 1;
+  min-width: 5rem;
+  border-radius: 12px;
+  padding: 0.5rem 0.55rem;
+  text-align: center;
+}
+.stat b {
+  display: block;
+  font-size: 1.35rem;
+  line-height: 1.1;
+}
+.stat span {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  font-weight: 700;
+  opacity: 0.9;
+}
+.stat.scored {
+  background: var(--logged-bg);
+  color: var(--logged);
+}
+.stat.excused {
+  background: var(--nodata-bg);
+  color: var(--nodata);
+}
+.stat.owe {
+  background: var(--owes-bg);
+  color: var(--owes);
+}
+
+.grouplabel {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.7rem 0.1rem 0.35rem;
+}
+.grouplabel .ln {
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.grouplabel span {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.grouplabel.owes span {
+  color: var(--owes);
+}
+
+/* goal row */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.7rem 0.75rem;
+  margin-bottom: 0.5rem;
+  color: var(--text);
+}
+.row.owes {
+  border-color: var(--owes-line);
+  background: var(--owes-bg);
+}
+.rowmain {
+  flex: 1;
+  min-width: 0;
+}
+.rowtitle {
+  display: block;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.rowmeta {
+  display: block;
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-top: 0.1rem;
+}
+.rowright {
+  text-align: right;
+  flex: none;
+}
+.rowval {
+  font-weight: 800;
+  font-size: 1rem;
+}
+.rowval.dim {
+  color: var(--text-dim);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+/* status chip glyphs (● ○ ⊘ ★ ⏳ ◐ ◷) */
+.chip {
+  font-size: 1.35rem;
+  width: 1.6rem;
+  text-align: center;
+  flex: none;
+}
+.chip.owes {
+  color: var(--owes);
+}
+.chip.logged {
+  color: var(--logged);
+}
+.chip.nodata {
+  color: var(--nodata);
+}
+.chip.mastery {
+  color: var(--mastery);
+}
+.chip.pending {
+  color: var(--pending);
+}
+.chip.incomplete {
+  color: var(--owes);
+}
+.chip.queued {
+  color: var(--accent);
+}
+
+/* student avatar — solid color monogram, fixed identity per student (LOCKED §E.1) */
+.av {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  font-size: 0.82rem;
+}
+.av.circle {
+  width: 2.3rem;
+  height: 2.3rem;
+  border-radius: 50%;
+  color: #fff;
+}
+.av.sm {
+  width: 1.5rem;
+  height: 1.5rem;
+  font-size: 0.62rem;
+  border-radius: 50%;
+  color: #fff;
+  vertical-align: middle;
+}
+.av.ab {
+  background: var(--s-ab);
+}
+.av.cd {
+  background: var(--s-cd);
+}
+.av.ef {
+  background: var(--s-ef);
+}
+.av.gh {
+  background: var(--s-gh);
+}
+.av.jm {
+  background: var(--s-jm);
+}
+.av.rt {
+  background: var(--s-rt);
+}
+.period {
+  display: inline-block;
+  font-size: 0.64rem;
+  font-weight: 800;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.03rem 0.3rem;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+
+/* buttons */
+button.btn {
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  padding: 0.85rem 1rem;
+  font-size: 0.95rem;
+  font-weight: 800;
+  cursor: pointer;
+  background: var(--surface-2);
+  color: var(--text);
+}
+button.btn.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+button.btn.wide {
+  width: 100%;
+}
+button.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* lock / unlock screen */
+.lock {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1.5rem 1.4rem;
+  gap: 0.4rem;
+}
+.lock .mark {
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 16px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.7rem;
+  margin-bottom: 0.4rem;
+}
+.lock .locknote {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  max-width: 18rem;
+  margin: 0.2rem 0 1rem;
+}
+.lock .err {
+  color: var(--danger);
+  font-size: 0.82rem;
+  font-weight: 700;
+  min-height: 1rem;
+}
+
+/* coming-soon stub (Plan tab) */
+.comingsoon {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border: 1px dashed var(--border-strong);
+  border-radius: 999px;
+  padding: 0.4rem 0.6rem;
+  cursor: default;
+}
+.stub {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  color: var(--text-dim);
+  text-align: center;
+  padding: 2rem 1.4rem;
+}
