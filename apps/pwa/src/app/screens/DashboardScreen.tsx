@@ -58,6 +58,8 @@ export interface DashboardScreenProps {
   readonly now: Date;
   readonly onNewGoal: () => void;
   readonly onToScore: () => void;
+  /** Open the segregated Baseline / proposed-goal track (U5). */
+  readonly onBaseline: () => void;
   readonly onOpenScore: (target: SheetTarget) => void;
   /** Open Goal Detail for a goal (trend + history) — reachable from every row. */
   readonly onOpenDetail: (goalId: OpaqueId) => void;
@@ -65,7 +67,8 @@ export interface DashboardScreenProps {
 }
 
 export function DashboardScreen(props: DashboardScreenProps) {
-  const { records, lk, now, onNewGoal, onToScore, onOpenScore, onOpenDetail, apply } = props;
+  const { records, lk, now, onNewGoal, onToScore, onBaseline, onOpenScore, onOpenDetail, apply } =
+    props;
   const [lens, setLens] = useState<DashboardLens>("owes_first");
   const today = isoDateOf(now);
 
@@ -225,6 +228,16 @@ export function DashboardScreen(props: DashboardScreenProps) {
         </button>
         <button type="button" className="btn wide" onClick={onToScore} data-testid="to-score">
           To-score ({queue.length})
+        </button>
+      </div>
+      <div className="btnrow" style={{ marginTop: "0.4rem" }}>
+        <button
+          type="button"
+          className="btn wide ghost"
+          onClick={onBaseline}
+          data-testid="baseline-track"
+        >
+          Baseline / proposed goals
         </button>
       </div>
     </div>

@@ -141,4 +141,61 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     // Queued point scored → the queue is empty.
     expect(await screen.findByTestId("queue-empty")).toBeInTheDocument();
   });
+
+  it("drafts a proposed goal that lands on the baseline track and never on the active dashboard", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
+    // Fill the KY components (DRAFT path is the default).
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "ZZ" } });
+    fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
+      target: { value: "count coins to a dollar" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("given a 5-item probe and a number line"), {
+      target: { value: "given a 5-item probe" },
+    });
+    fireEvent.change(screen.getByLabelText("criterion level"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("criterion consistency"), { target: { value: "4" } });
+    fireEvent.change(screen.getByPlaceholderText("curriculum probe"), {
+      target: { value: "coin probe" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Start baselining →" }));
+
+    // Lands on the segregated baseline/proposed track, showing the new proposed goal.
+    expect(await screen.findByText("Baseline / proposed goals")).toBeInTheDocument();
+    expect(screen.getAllByText(/count coins to a dollar/).length).toBeGreaterThan(0);
+
+    // Back on the active dashboard, the proposed goal is NOT a row (never mixed in).
+    fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
+    const body = (await screen.findByTestId("dashboard-body")).textContent ?? "";
+    expect(body).not.toContain("count coins to a dollar");
+  });
+
+  it("a VARIABLE-basis goal accepts any total with NO off-basis ack (F-2 escape valve)", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
+    fireEvent.click(screen.getByRole("button", { name: /Adopt an already-baselined/ }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "AB" } });
+    fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
+      target: { value: "read sight words" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("given a 5-item probe and a number line"), {
+      target: { value: "given a word list" },
+    });
+    fireEvent.change(screen.getByLabelText("criterion level"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("criterion consistency"), { target: { value: "4" } });
+    fireEvent.change(screen.getByPlaceholderText("curriculum probe"), {
+      target: { value: "word list" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Variable / custom" }));
+    fireEvent.change(screen.getByLabelText("baseline percent"), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Activate goal · begin monitoring" }));
+
+    // The new active goal is on the dashboard; open its score sheet.
+    fireEvent.click(await screen.findByRole("button", { name: /score .*read sight words/ }));
+    // Enter an off-basis total (7 ≠ the suggested 5) — a FIXED goal would gate Save
+    // behind the F-2 ack, but a variable-basis goal must not.
+    fireEvent.change(screen.getByLabelText("total items"), { target: { value: "7" } });
+    expect(screen.queryByTestId("mismatch-ack")).toBeNull();
+    expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
 });

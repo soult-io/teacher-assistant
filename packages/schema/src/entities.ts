@@ -15,6 +15,7 @@ import type {
   ColorToken,
   BlockType,
   DataPointState,
+  DenominatorBasis,
   DenominatorModel,
   Frequency,
   GoalStatus,
@@ -112,6 +113,13 @@ export interface IEPGoal {
   readonly method_tool: string;
   readonly frequency: Frequency;
   readonly denominator_model: DenominatorModel;
+  /**
+   * Off-basis policy (F-2 SME escape valve). Absent/"fixed" = the probe total is
+   * set and a differing entry trips the off-basis ack; "variable" = totals routinely
+   * vary, so every entered total is accepted and NO mismatch is ever flagged. A
+   * deliberate teacher choice at goal creation, never defaulted to "variable".
+   */
+  readonly denominator_basis?: DenominatorBasis;
   /** Mandatory before `active`, not to exist as `proposed`. */
   readonly baseline_value?: number;
   readonly baseline_source?: BaselineSource;

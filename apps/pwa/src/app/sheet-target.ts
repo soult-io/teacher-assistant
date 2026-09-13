@@ -14,6 +14,12 @@ export interface SheetTarget {
   readonly periodLabel: string | null;
   readonly probeLabel: string;
   readonly expectedDenominator: number;
+  /**
+   * The goal has a VARIABLE denominator basis (F-2 escape valve): the entered total
+   * is accepted as-is, so the sheet passes NO expected total to capture — no off-basis
+   * flag, no mismatch ack. `expectedDenominator` is only a suggested default here.
+   */
+  readonly variableBasis: boolean;
   /** Probe administration date — today for a direct score, the collected date from the queue. */
   readonly adminDate: IsoDate;
   /** Present when re-scoring a queued/bookmarked point (audited edit, same id). */
@@ -40,6 +46,7 @@ export function targetForRow(vm: RowVM, lk: Lookups, adminDate: IsoDate): SheetT
     periodLabel: vm.periodLabel,
     probeLabel: probe.label,
     expectedDenominator: probe.expectedDenominator,
+    variableBasis: lk.variableBasisGoals.has(vm.goalId),
     adminDate,
   };
 }
@@ -64,6 +71,7 @@ export function targetForGoal(
     periodLabel: periodLabelOf(goal.student_id, lk),
     probeLabel: probe.label,
     expectedDenominator: probe.expectedDenominator,
+    variableBasis: goal.denominator_basis === "variable",
     adminDate: existingPoint?.admin_date ?? today,
     ...(existingPoint !== undefined ? { existingPoint } : {}),
   };
@@ -80,6 +88,7 @@ export function targetForQueued(point: ProgressDataPoint, lk: Lookups): SheetTar
     periodLabel: periodLabelOf(point.student_id, lk),
     probeLabel: probe.label,
     expectedDenominator: probe.expectedDenominator,
+    variableBasis: lk.variableBasisGoals.has(point.goal_id),
     adminDate: point.admin_date,
     existingPoint: point,
   };

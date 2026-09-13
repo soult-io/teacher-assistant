@@ -75,6 +75,7 @@ function sampleRecords(): DecryptedRecords {
     periods: [period],
     probes: [probe],
     observations: [],
+    baselinePoints: [],
   };
 }
 

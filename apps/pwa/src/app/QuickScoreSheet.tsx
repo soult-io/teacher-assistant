@@ -77,7 +77,14 @@ function ScoreEntry({
     existing?.denominator_used ?? target.expectedDenominator,
   );
   const pct = denom > 0 ? Math.round((correct / denom) * 100) : 0;
-  const mismatch = denom !== target.expectedDenominator;
+  // A VARIABLE-basis goal (F-2 escape valve) never warns: the entered total is
+  // accepted as-is and NO expected total is passed to capture, so no off-basis flag.
+  const mismatch = !target.variableBasis && denom !== target.expectedDenominator;
+  // The expected total the engine checks against — undefined for a variable-basis
+  // goal, so captureScoredPoint/applyEdit never flag a mismatch.
+  const expectedForCapture = target.variableBasis ? undefined : target.expectedDenominator;
+  const expectedParam =
+    expectedForCapture !== undefined ? { expectedDenominator: expectedForCapture } : {};
 
   const setDenomSafe = (n: number) => {
     const d = Math.max(1, n);
@@ -100,13 +107,13 @@ function ScoreEntry({
               {
                 numerator: correct,
                 denominatorUsed: denom,
-                expectedDenominator: target.expectedDenominator,
+                ...expectedParam,
                 ...withElection,
               },
               entryTs,
             )
           : editMutator(existing, { numerator: correct, denominator_used: denom }, entryTs, {
-              expectedDenominator: target.expectedDenominator,
+              ...expectedParam,
               ...(election !== undefined ? { election } : {}),
             }),
       );
@@ -117,7 +124,7 @@ function ScoreEntry({
         ...contextOf(target),
         numerator: correct,
         denominatorUsed: denom,
-        expectedDenominator: target.expectedDenominator,
+        ...expectedParam,
         ...withElection,
       }),
     );

@@ -10,6 +10,7 @@
 
 import {
   asTimestamp,
+  type BaselinePoint,
   type ClassPeriod,
   type IEPGoal,
   type IsoDate,
@@ -162,6 +163,31 @@ function pendingParaPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number):
   };
 }
 
+/**
+ * A baseline point (M7) for a PROPOSED goal — segregated from monitoring points and
+ * never fed to IC. `probe_condition_id` is shared across a goal's baseline points so
+ * they read as comparable (deriveBaseline requires one condition).
+ */
+function baselinePoint(
+  goal: IEPGoal,
+  conditionId: OpaqueId,
+  adminDate: IsoDate,
+  numerator: number,
+): BaselinePoint {
+  return {
+    baseline_point_id: newOpaqueId(),
+    goal_id: goal.goal_id,
+    student_id: goal.student_id,
+    admin_date: adminDate,
+    entry_ts: asTimestamp(0),
+    numerator,
+    denominator_used: 5,
+    computed_value: numerator / 5,
+    probe_condition_id: conditionId,
+    scorer: "teacher",
+  };
+}
+
 /** The goal's assigned probe: expected total + condition (drives the M5 mismatch flag). */
 function probeFor(goal: IEPGoal): ProbeDefinition {
   return {
@@ -256,10 +282,18 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
     ...baselined(40),
     status: "active",
   };
-  // Proposed (baselining) — must NEVER reach the active weekly dashboard.
+  // Proposed (baselining) — must NEVER reach the active weekly dashboard. Carries an
+  // arc_date ~2 weeks out (so the baseline window is open + a reminder shows) and ≥3
+  // comparable baseline points (below) so the estimate + median-of-3 are exercised.
+  const ghProbeConditionId = newOpaqueId();
+  const ghArcDate = isoDateOf(new Date(now.getTime() + 14 * DAY_MS));
   const ghProposed: IEPGoal = {
     ...baseGoal(gh.student_id, "Add integers", createdTs),
     status: "proposed",
+    arc_date: ghArcDate,
+    arc_date_flag: "tentative",
+    // The assigned probe id doubles as the baseline points' comparable condition id.
+    probe_definition_id: ghProbeConditionId,
   };
 
   const goals: IEPGoal[] = [
@@ -330,8 +364,25 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
     efSciNotation,
     cdNumberLine,
   ].map(probeFor);
+  // ghProposed's assigned probe carries the SAME id as its baseline condition, so
+  // seeded + UI-added baseline points read as comparable (one condition).
+  probes.push({
+    probe_definition_id: ghProbeConditionId,
+    goal_id: ghProposed.goal_id,
+    expected_denominator: 5,
+    condition: ghProposed.circumstance,
+    label: "5-item probe",
+  });
+
+  // ghProposed's segregated baseline set (M7): 3 comparable points → a usable
+  // estimate exercising mean (33%) vs median-of-3 (40%). Never fed to IC.
+  const baselinePoints: BaselinePoint[] = [
+    baselinePoint(ghProposed, ghProbeConditionId, weeksBefore(now, 3), 1), // 20%
+    baselinePoint(ghProposed, ghProbeConditionId, weeksBefore(now, 2), 2), // 40%
+    baselinePoint(ghProposed, ghProbeConditionId, weeksBefore(now, 1), 2), // 40%
+  ];
 
   // No mastery observation seeded — a mastery-eligible run (cdFractions) surfaces
   // the teacher's Acknowledge action on Goal Detail; acknowledging writes one.
-  return { students, goals, points, periods, probes, observations: [] };
+  return { students, goals, points, periods, probes, observations: [], baselinePoints };
 }
