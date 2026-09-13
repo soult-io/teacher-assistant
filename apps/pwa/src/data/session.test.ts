@@ -36,7 +36,7 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     // dashboard (the projection filters to the asOf ISO week; asserted below).
     expect(session.records.points).toHaveLength(25);
     expect(session.records.periods).toHaveLength(2);
-    expect(session.records.probes).toHaveLength(5); // one per active goal
+    expect(session.records.probes).toHaveLength(6); // one per active goal + the proposed goal's
 
     const dashboard = buildWeeklyDashboard({
       goals: session.records.goals,

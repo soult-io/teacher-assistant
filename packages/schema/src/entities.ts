@@ -15,6 +15,7 @@ import type {
   ColorToken,
   BlockType,
   DataPointState,
+  DenominatorBasis,
   DenominatorModel,
   Frequency,
   GoalStatus,
@@ -112,10 +113,25 @@ export interface IEPGoal {
   readonly method_tool: string;
   readonly frequency: Frequency;
   readonly denominator_model: DenominatorModel;
+  /**
+   * Off-basis policy (F-2 SME escape valve). Absent/"fixed" = the probe total is
+   * set and a differing entry trips the off-basis ack; "variable" = totals routinely
+   * vary, so every entered total is accepted and NO mismatch is ever flagged. A
+   * deliberate teacher choice at goal creation, never defaulted to "variable".
+   */
+  readonly denominator_basis?: DenominatorBasis;
   /** Mandatory before `active`, not to exist as `proposed`. */
   readonly baseline_value?: number;
   readonly baseline_source?: BaselineSource;
   readonly accom_mod: AccomMod;
+  /**
+   * Optional descriptive accommodation/modification label ("read-aloud + extended
+   * time") — a teacher-authored, teacher-only reference attribute (encrypted at rest,
+   * never on the para path). It is DISPLAY-ONLY: the M8 auto-statement's condition
+   * phrase is driven solely by the `accom_mod` CATEGORY, never this free text (FERPA:
+   * the statement stays slot-only, never a narrative channel).
+   */
+  readonly accom_mod_detail?: string;
   readonly setting_default: Setting;
   /** Picklist the para may choose from; never free text. */
   readonly valid_settings: readonly Setting[];

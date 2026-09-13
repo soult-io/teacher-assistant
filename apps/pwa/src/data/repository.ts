@@ -14,6 +14,7 @@
 // (hard-stop #10/#11). This module never touches storage.
 
 import type {
+  BaselinePoint,
   ClassPeriod,
   IEPGoal,
   MasteryObservation,
@@ -30,6 +31,7 @@ const POINTS = "points";
 const PERIODS = "periods";
 const PROBES = "probes";
 const OBSERVATIONS = "observations";
+const BASELINE_POINTS = "baseline_points";
 
 /** The decrypted, in-memory record set read out of one stream's doc. */
 export interface DecryptedRecords {
@@ -42,6 +44,8 @@ export interface DecryptedRecords {
   readonly probes: readonly ProbeDefinition[];
   /** Teacher-acknowledged mastery windows (M5) — flagged for ARC; the goal stays open. */
   readonly observations: readonly MasteryObservation[];
+  /** Baseline points (M7) for proposed/baselining goals — segregated from monitoring points; never feed IC. */
+  readonly baselinePoints: readonly BaselinePoint[];
 }
 
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
@@ -53,12 +57,33 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     periods: [...doc.getMap<ClassPeriod>(PERIODS).values()],
     probes: [...doc.getMap<ProbeDefinition>(PROBES).values()],
     observations: [...doc.getMap<MasteryObservation>(OBSERVATIONS).values()],
+    baselinePoints: [...doc.getMap<BaselinePoint>(BASELINE_POINTS).values()],
   };
 }
 
 /** Upsert one monitoring point (M5 capture path). Keyed by opaque data_point_id. */
 export function upsertPoint(doc: YDoc, point: ProgressDataPoint): void {
   doc.getMap<ProgressDataPoint>(POINTS).set(point.data_point_id, point);
+}
+
+/** Upsert a goal entity (M5/M7 create + lifecycle: propose / adopt / arc-date edit). Keyed by goal id. */
+export function upsertGoal(doc: YDoc, goal: IEPGoal): void {
+  doc.getMap<IEPGoal>(GOALS).set(goal.goal_id, goal);
+}
+
+/** Upsert a roster student (M5 create — a new goal for initials not yet on the roster). Keyed by student id. */
+export function upsertStudent(doc: YDoc, student: Student): void {
+  doc.getMap<Student>(STUDENTS).set(student.student_id, student);
+}
+
+/** Upsert the goal's assigned probe (M5 create). Keyed by probe id. */
+export function upsertProbe(doc: YDoc, probe: ProbeDefinition): void {
+  doc.getMap<ProbeDefinition>(PROBES).set(probe.probe_definition_id, probe);
+}
+
+/** Upsert one baseline point (M7) for a proposed goal. Keyed by baseline_point_id. */
+export function upsertBaselinePoint(doc: YDoc, point: BaselinePoint): void {
+  doc.getMap<BaselinePoint>(BASELINE_POINTS).set(point.baseline_point_id, point);
 }
 
 /** Record a teacher-acknowledged mastery observation (flag for ARC). Keyed by observation id. */
@@ -100,6 +125,10 @@ export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
   const observations = doc.getMap<MasteryObservation>(OBSERVATIONS);
   for (const observation of records.observations) {
     observations.set(observation.observation_id, observation);
+  }
+  const baselinePoints = doc.getMap<BaselinePoint>(BASELINE_POINTS);
+  for (const baselinePoint of records.baselinePoints) {
+    baselinePoints.set(baselinePoint.baseline_point_id, baselinePoint);
   }
 }
 

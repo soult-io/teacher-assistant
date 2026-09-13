@@ -71,6 +71,16 @@ export type Scorer = Member<typeof SCORERS>;
 export const BASELINE_SOURCES = ["eval", "computed_from_baseline_points"] as const;
 export type BaselineSource = Member<typeof BASELINE_SOURCES>;
 
+/**
+ * Denominator basis (design §F.F5 / F-2 SME ruling). "fixed" = the probe has a set
+ * total, and a differing entered total trips the F-2 off-basis acknowledgment.
+ * "variable" = the teacher's probes routinely vary (3/5/12 items), so every entered
+ * total is accepted as-is and NO mismatch is flagged — the deliberate escape valve.
+ * Absent = fixed (back-compatible; the F-2 ack stays intact by default).
+ */
+export const DENOMINATOR_BASES = ["fixed", "variable"] as const;
+export type DenominatorBasis = Member<typeof DENOMINATOR_BASES>;
+
 export const ARC_DATE_FLAGS = ["tentative", "confirmed"] as const;
 export type ArcDateFlag = Member<typeof ARC_DATE_FLAGS>;
 

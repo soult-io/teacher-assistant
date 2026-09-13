@@ -2,13 +2,28 @@
 // ready, the record store + write surfaces. ReadyApp is split out so its
 // record/sheet hooks are unconditional (they need a live session).
 
+import { type BaselineMethod, editArcDate } from "@teacher-assistant/domain-core";
+import {
+  type BaselinePoint,
+  type IEPGoal,
+  type IsoDate,
+  newOpaqueId,
+  type OpaqueId,
+} from "@teacher-assistant/schema";
 import { useCallback, useMemo, useRef, useState } from "react";
-import type { OpaqueId } from "@teacher-assistant/schema";
 import { AppShell, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
 import { QuickScoreSheet } from "./app/QuickScoreSheet.js";
+import { BaselineScreen } from "./app/screens/baseline/BaselineScreen.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
 import { GoalDetailScreen } from "./app/screens/goal-detail/GoalDetailScreen.js";
+import {
+  assembleGoal,
+  makeStudent,
+  type NewGoalForm,
+  nowTs,
+} from "./app/screens/new-goal/assemble.js";
+import { NewGoalScreen } from "./app/screens/new-goal/NewGoalScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
 import { ToScoreScreen } from "./app/screens/ToScoreScreen.js";
 import { buildLookups } from "./app/screens/dashboard/dashboard-vm.js";
@@ -18,16 +33,23 @@ import { useSessionRecords } from "./app/useSessionRecords.js";
 import { useTheme, type ThemeControl } from "./app/useTheme.js";
 import { isNonInstructionalWeek } from "./data/calendar.js";
 import { isoDateOf } from "./data/date.js";
+import { hueClassForInitials } from "./design/hues.js";
 import {
   type BootstrapOptions,
   bootstrapTeacherSession,
   type Role,
   type Session,
 } from "./data/session.js";
-import { acknowledgeMasteryMutator } from "./data/writes.js";
+import {
+  acknowledgeMasteryMutator,
+  addBaselinePointMutator,
+  adoptGoalMutator,
+  createGoalMutator,
+  upsertGoalMutator,
+} from "./data/writes.js";
 
 type Phase = "locked" | "unlocking" | "ready";
-type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail";
+type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail" | "baseline";
 
 export interface AppProps {
   /** Injectable bootstrap (tests supply a crypto-free fake); defaults to the real pipeline. */
@@ -98,6 +120,66 @@ function ReadyApp({
     setTrackView("goal_detail");
   }, []);
 
+  // U5 create: resolve the student by initials (existing, else a new roster entry),
+  // assemble the goal + probe (engine gate ran in the form), persist, then land on
+  // the dashboard (adopt → active) or the baseline track (draft → proposed).
+  const submitNewGoal = useCallback(
+    (form: NewGoalForm) => {
+      const initials = form.initials.trim().toUpperCase();
+      const existing = records.students.find((s) => s.initials.toUpperCase() === initials);
+      // Resolve one student — an existing roster entry, or a freshly minted one.
+      const student =
+        existing ?? makeStudent(initials, `--s-${hueClassForInitials(initials)}` as const);
+      const assembled = assembleGoal(
+        form,
+        student.student_id,
+        nowTs(),
+        existing ? undefined : student,
+      );
+      void apply(createGoalMutator(assembled.goal, assembled.probe, assembled.student));
+      setTrackView(form.path === "adopt" ? "dashboard" : "baseline");
+    },
+    [apply, records.students],
+  );
+
+  // U5 baseline track handlers (M7). Baseline points share the goal's assigned probe
+  // id as their comparable condition; adoption + arc-date edits go through the engine.
+  const addBaselinePoint = useCallback(
+    (goal: IEPGoal, numerator: number, denominator: number) => {
+      const point: BaselinePoint = {
+        baseline_point_id: newOpaqueId(),
+        goal_id: goal.goal_id,
+        student_id: goal.student_id,
+        admin_date: today,
+        entry_ts: nowTs(),
+        numerator,
+        denominator_used: denominator,
+        computed_value: numerator / denominator,
+        probe_condition_id: goal.probe_definition_id ?? goal.goal_id,
+        scorer: "teacher",
+      };
+      void apply(addBaselinePointMutator(point));
+    },
+    [apply, today],
+  );
+
+  const adopt = useCallback(
+    (goal: IEPGoal, points: readonly BaselinePoint[], method: BaselineMethod) => {
+      void apply(adoptGoalMutator(goal, points, { who: "teacher", when: nowTs(), method }));
+      setTrackView("dashboard");
+    },
+    [apply],
+  );
+
+  const editArc = useCallback(
+    (goal: IEPGoal, newArcDate: string) => {
+      const result = editArcDate(goal, newArcDate as IsoDate, isNonInstructionalWeek);
+      void apply(upsertGoalMutator(result.goal));
+      return result.alert;
+    },
+    [apply],
+  );
+
   const commit = useCallback(
     async (mutator: Parameters<typeof apply>[0]) => {
       await apply(mutator);
@@ -111,11 +193,23 @@ function ReadyApp({
 
   const track = (() => {
     if (trackView === "new_goal") {
+      return <NewGoalScreen onSubmit={submitNewGoal} onBack={() => setTrackView("dashboard")} />;
+    }
+    if (trackView === "baseline") {
       return (
-        <StubScreen
-          title="New goal"
-          note="New-goal flow lands in U5"
+        <BaselineScreen
+          records={records}
+          initialsById={lk.initialsById}
+          periodLabelByStudent={(sid) => {
+            const pid = lk.periodByStudent(sid);
+            return pid !== null ? (lk.periodLabelById.get(pid) ?? null) : null;
+          }}
+          isNonInstructional={isNonInstructionalWeek}
           onBack={() => setTrackView("dashboard")}
+          onNewGoal={() => setTrackView("new_goal")}
+          onAddBaselinePoint={addBaselinePoint}
+          onAdopt={adopt}
+          onEditArcDate={editArc}
         />
       );
     }
@@ -155,6 +249,7 @@ function ReadyApp({
         now={now}
         onNewGoal={() => setTrackView("new_goal")}
         onToScore={() => setTrackView("toscore")}
+        onBaseline={() => setTrackView("baseline")}
         onOpenScore={setSheetTarget}
         onOpenDetail={openDetail}
         apply={apply}

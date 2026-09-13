@@ -12,6 +12,7 @@ function renderDashboard() {
   const handlers = {
     onNewGoal: vi.fn(),
     onToScore: vi.fn(),
+    onBaseline: vi.fn(),
     onOpenScore: vi.fn(),
     onOpenDetail: vi.fn(),
     apply: vi.fn().mockResolvedValue(undefined),

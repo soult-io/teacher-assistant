@@ -64,6 +64,8 @@ export interface Lookups {
     string,
     { readonly label: string; readonly expectedDenominator: number }
   >;
+  /** Goals with a VARIABLE denominator basis (F-2 escape valve) — the sheet skips the off-basis check. */
+  readonly variableBasisGoals: ReadonlySet<string>;
   readonly pendingGoalIds: ReadonlySet<string>;
   readonly periodByStudent: (studentId: OpaqueId) => OpaqueId | null;
 }
@@ -100,6 +102,9 @@ export function buildLookups(records: DecryptedRecords): Lookups {
       { label: p.label ?? "probe", expectedDenominator: p.expected_denominator },
     ]),
   );
+  const variableBasisGoals = new Set(
+    records.goals.filter((g) => g.denominator_basis === "variable").map((g) => g.goal_id),
+  );
 
   return {
     initialsById,
@@ -108,6 +113,7 @@ export function buildLookups(records: DecryptedRecords): Lookups {
     valueByGoal,
     metaByGoal,
     probeByGoal,
+    variableBasisGoals,
     pendingGoalIds,
     periodByStudent: (studentId) => membershipByStudent.get(studentId) ?? null,
   };

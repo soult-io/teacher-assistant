@@ -11,6 +11,8 @@
 
 import {
   acknowledgeMastery,
+  type AdoptOptions,
+  adoptGoal,
   applyEdit,
   bookmarkForLater,
   captureScoredPoint,
@@ -18,16 +20,28 @@ import {
   recordNoData,
 } from "@teacher-assistant/domain-core";
 import type {
+  BaselinePoint,
+  IEPGoal,
   IsoDate,
   MismatchDisposition,
   NoDataReason,
   OpaqueId,
+  ProbeDefinition,
   ProgressDataPoint,
   Setting,
+  Student,
   Timestamp,
 } from "@teacher-assistant/schema";
 import type { DocMutator } from "./session.js";
-import { deletePoint, upsertObservation, upsertPoint } from "./repository.js";
+import {
+  deletePoint,
+  upsertBaselinePoint,
+  upsertGoal,
+  upsertObservation,
+  upsertPoint,
+  upsertProbe,
+  upsertStudent,
+} from "./repository.js";
 
 /** The teacher is the scorer and the edit author (a role, never a student name — identity-clean). */
 const TEACHER = "teacher" as const;
@@ -119,6 +133,50 @@ export function bookmarkMutator(context: CaptureContext): DocMutator {
 /** Remove a score-later placeholder (un-flag a queued point). */
 export function unbookmarkMutator(dataPointId: OpaqueId): DocMutator {
   return (doc) => deletePoint(doc, dataPointId);
+}
+
+/**
+ * Create a new goal (M5/M7) — upsert the goal entity plus its assigned probe. The
+ * UI assembles both (a proposed goal to baseline, or an adopted-active goal with a
+ * baseline already in hand); this module holds no create rules (the baseline-mandatory
+ * gate is canBeginMonitoring, checked by the form before it calls this).
+ */
+export function createGoalMutator(
+  goal: IEPGoal,
+  probe: ProbeDefinition,
+  student?: Student,
+): DocMutator {
+  return (doc) => {
+    if (student !== undefined) {
+      upsertStudent(doc, student);
+    }
+    upsertGoal(doc, goal);
+    upsertProbe(doc, probe);
+  };
+}
+
+/** Persist a goal entity (M7 lifecycle: arc-date edit / confirm — the engine produced it). */
+export function upsertGoalMutator(goal: IEPGoal): DocMutator {
+  return (doc) => upsertGoal(doc, goal);
+}
+
+/** Add a baseline point (M7) to a proposed goal's segregated baseline set. */
+export function addBaselinePointMutator(point: BaselinePoint): DocMutator {
+  return (doc) => upsertBaselinePoint(doc, point);
+}
+
+/**
+ * ARC adoption (M7): lock the derived baseline into the goal and flip proposed →
+ * active via the engine (adoptGoal enforces the ≥3-comparable-point baseline gate),
+ * then persist the updated goal. Baseline points are separate entities — never discarded.
+ */
+export function adoptGoalMutator(
+  goal: IEPGoal,
+  baselinePoints: readonly BaselinePoint[],
+  options: AdoptOptions,
+): DocMutator {
+  const adopted = adoptGoal(goal, baselinePoints, options);
+  return (doc) => upsertGoal(doc, adopted);
 }
 
 /**
