@@ -225,8 +225,9 @@ function NoDataEntry({
         ))}
       </div>
       <div className="note">
-        Absent · Testing · No School = excused (pause the run). No time counts toward a fidelity
-        flag before an ARC.
+        Any no-data pauses your consistency run (never breaks it). Absent · Testing · No School are
+        excused. Behavior is logged as a pattern to watch. No time also counts toward a
+        delivery-fidelity flag before an ARC.
       </div>
       <div className="btnrow">
         <button type="button" className="btn wide" onClick={toScore}>

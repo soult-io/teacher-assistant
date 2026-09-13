@@ -44,6 +44,9 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
           }
           const initials = lk.initialsById.get(entry.studentId) ?? "??";
           const goalText = lk.goalTextById.get(entry.goalId) ?? "(goal)";
+          // §E.1: the period tag stays on the queue row (the Quick-Score header shows it too).
+          const periodId = lk.periodByStudent(entry.studentId);
+          const periodLabel = periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
           return (
             <button
               key={entry.dataPointId}
@@ -60,6 +63,7 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
                   {goalText} <span className="editpt">full editor ›</span>
                 </span>
                 <span className="rowmeta">
+                  {periodLabel !== null ? <span className="period">{periodLabel}</span> : null}{" "}
                   collected {entry.adminDate} <span className="locked">admin date</span>
                 </span>
               </div>
