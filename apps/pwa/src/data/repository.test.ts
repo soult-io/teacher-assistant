@@ -4,6 +4,7 @@ import {
   type IEPGoal,
   type IsoDate,
   newOpaqueId,
+  type ProbeDefinition,
   type ProgressDataPoint,
   type Student,
 } from "@teacher-assistant/schema";
@@ -60,7 +61,20 @@ function sampleRecords(): DecryptedRecords {
     day_template: [],
     has_para: true,
   };
-  return { students: [student], goals: [goal], points: [point], periods: [period] };
+  const probe: ProbeDefinition = {
+    probe_definition_id: newOpaqueId(),
+    goal_id: goal.goal_id,
+    expected_denominator: 5,
+    condition: "given a 5-item probe",
+    label: "5-item probe",
+  };
+  return {
+    students: [student],
+    goals: [goal],
+    points: [point],
+    periods: [period],
+    probes: [probe],
+  };
 }
 
 describe("doc repository (round-trips entities through the CRDT)", () => {
@@ -79,6 +93,7 @@ describe("doc repository (round-trips entities through the CRDT)", () => {
     expect(read.goals).toEqual(seed.goals);
     expect(read.points).toEqual(seed.points);
     expect(read.periods).toEqual(seed.periods);
+    expect(read.probes).toEqual(seed.probes);
   });
 
   it("survives a Yjs snapshot round-trip (persistence rehydrate path)", () => {

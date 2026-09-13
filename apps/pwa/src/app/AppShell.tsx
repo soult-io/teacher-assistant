@@ -18,10 +18,12 @@ export interface AppShellProps {
   readonly tab: Tab;
   readonly onTab: (tab: Tab) => void;
   readonly children: ReactNode;
+  /** Phone-level overlay (the Quick-Score bottom sheet + scrim), above the tab bar. */
+  readonly overlay?: ReactNode;
 }
 
 export function AppShell(props: AppShellProps) {
-  const { online, role, onRole, theme, onThemeCycle, tab, onTab, children } = props;
+  const { online, role, onRole, theme, onThemeCycle, tab, onTab, children, overlay } = props;
   return (
     <div className="phone" id="phone">
       <div className="statusbar">
@@ -88,6 +90,8 @@ export function AppShell(props: AppShellProps) {
           </button>
         </div>
       ) : null}
+
+      {overlay}
     </div>
   );
 }

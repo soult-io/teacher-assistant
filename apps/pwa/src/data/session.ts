@@ -31,15 +31,27 @@ import { unlockTeacherKeyring } from "@teacher-assistant/auth";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
 import { SyntheticPasskeyGateway } from "./passkey.js";
+import type { Doc as YDoc } from "yjs";
 import { type DecryptedRecords, isEmpty, readRecords, writeRecords } from "./repository.js";
 import { buildSyntheticSeed } from "./synthetic-seed.js";
 
 export type Role = "teacher" | "para";
 
+/** A mutation over the encrypted stream's CRDT doc (persisted as ciphertext). */
+export type DocMutator = (doc: YDoc) => void;
+
 export interface Session {
   readonly role: Role;
-  /** Decrypted, in-memory records the projections read. */
+  /** Decrypted, in-memory records the projections read (a snapshot at bootstrap). */
   readonly records: DecryptedRecords;
+  /**
+   * Apply a write to the local encrypted store (M5 capture path). The change is
+   * encrypted + persisted as ciphertext before resolving (offline-first); read
+   * the new state back with readRecords(). Student data stays in memory only.
+   */
+  capture(mutator: DocMutator): Promise<void>;
+  /** Re-read the decrypted records after a capture(). */
+  readRecords(): DecryptedRecords;
   /** Best-effort reconcile with the relay (offline-first: resolves false when unreachable). */
   sync(): Promise<boolean>;
 }
@@ -109,6 +121,8 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   return {
     role: "teacher",
     records: readRecords(stream.doc),
+    capture: (mutator) => engine.capture(mutator),
+    readRecords: () => readRecords(stream.doc),
     sync: async () => {
       try {
         await engine.sync();

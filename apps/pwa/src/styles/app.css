@@ -613,3 +613,233 @@ button.btn:disabled {
   text-align: center;
   padding: 2rem 1.4rem;
 }
+
+/* ── U3 Quick-Score sheet + No-Data + To-Score queue ── */
+
+/* bottom sheet */
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 15, 25, 0.45);
+  display: none;
+  z-index: 20;
+}
+.scrim.open {
+  display: block;
+}
+.sheet {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 21;
+  background: var(--surface);
+  border-top-left-radius: 22px;
+  border-top-right-radius: 22px;
+  padding: 0.6rem 1rem 1.3rem;
+  transform: translateY(102%);
+  transition: transform 0.22s ease;
+  max-height: 90%;
+  overflow-y: auto;
+  box-shadow: 0 -8px 30px rgba(0, 0, 0, 0.25);
+}
+.sheet.open {
+  transform: translateY(0);
+}
+.grip {
+  width: 2.6rem;
+  height: 0.3rem;
+  border-radius: 999px;
+  background: var(--border-strong);
+  margin: 0.2rem auto 0.7rem;
+}
+.whowhat {
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+.sheet-who {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.ctx {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  margin: 0.1rem 0 0.2rem;
+}
+.locked {
+  font-size: 0.68rem;
+  color: var(--nodata);
+  background: var(--nodata-bg);
+  border-radius: 6px;
+  padding: 0.05rem 0.35rem;
+  margin-left: 0.3rem;
+}
+
+/* score entry */
+.scorewrap {
+  text-align: center;
+  margin: 1rem 0 0.4rem;
+}
+.scorelabel {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.scoreline {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+}
+.stepbtn {
+  width: 3.4rem;
+  height: 3.4rem;
+  border-radius: 16px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 1.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.stepbtn:active {
+  background: var(--accent-soft);
+}
+.numin {
+  width: 4.2rem;
+  height: 3.4rem;
+  text-align: center;
+  font-size: 2rem;
+  font-weight: 800;
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+.ofwrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+.ofin {
+  width: 3.2rem;
+  height: 2.3rem;
+  text-align: center;
+  font-size: 1.1rem;
+  font-weight: 800;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+}
+.pct {
+  font-size: 2.6rem;
+  font-weight: 900;
+  margin: 0.5rem 0 0.2rem;
+}
+.pct small {
+  font-size: 1rem;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.sheet-later {
+  text-align: center;
+  margin-top: 0.4rem;
+}
+.reasonhead {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+.req {
+  color: var(--danger);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+/* no-data reason chips */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.6rem 0;
+}
+.rchip {
+  border: 1.5px solid var(--border-strong);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+.rchip.on {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: var(--accent);
+}
+
+/* to-score queue */
+.card.tight {
+  padding: 0.6rem 0.7rem;
+}
+.backrow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.3rem;
+}
+.back {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0.2rem 0;
+}
+.editpt {
+  font-size: 0.72rem;
+  color: var(--accent);
+  font-weight: 700;
+}
+button.qrow {
+  width: 100%;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* button resets for tappable row main / nested goal */
+button.rowmain {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+.gbtn {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* F-2 mismatch acknowledgment (gates Save on a genuine denominator mismatch) */
+.ack {
+  margin-top: 0.2rem;
+}

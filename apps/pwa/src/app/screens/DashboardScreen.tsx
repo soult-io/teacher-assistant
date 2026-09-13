@@ -1,33 +1,40 @@
-// Weekly Dashboard (U2) — the full owes-first list over the M3 store
-// projections, with the three grouping lenses (owes-first → by-period →
-// by-student), status chips, the pending-para note, and the score-later flag.
+// Weekly Dashboard (U2 + U3 writes) — the 3-lens owes-first list over the M3
+// store projections. U3 adds the write surfaces: tapping an owes row opens the
+// Quick-Score sheet; tapping a scored row opens it for an audited [Fix]; the ⚑
+// flag now WRITES a score-later bookmark (M5 queued point) — its "on" state is
+// the presence of that queued point; a "To-score (N)" button opens the queue.
 //
-// Grouping + within-group ordering come from @teacher-assistant/store
-// (buildWeeklyDashboard / groupDashboard / nextLens) — there is no app-local
-// ordering table. Score-later is local UI state in U2 (it marks the row); the
-// To-Score queue + editable entry it opens are U3. "+ New goal" routes to a stub
-// (the New-Goal flow is U5).
+// Grouping + within-group ordering come from the store; the app-local
+// dashboard-vm only resolves display + orders groups (see dashboard-vm.ts).
 
-import { type ReactElement, useCallback, useMemo, useState } from "react";
+import { asTimestamp, type ProgressDataPoint } from "@teacher-assistant/schema";
 import {
+  buildToScoreQueue,
   buildWeeklyDashboard,
   type DashboardLens,
   groupDashboard,
   nextLens,
   renderHeader,
 } from "@teacher-assistant/store";
+import { type ReactElement, useCallback, useMemo, useState } from "react";
+import { isoDateOf } from "../../data/date.js";
 import type { DecryptedRecords } from "../../data/repository.js";
+import type { DocMutator } from "../../data/session.js";
+import { bookmarkMutator, DEFAULT_SETTING, unbookmarkMutator } from "../../data/writes.js";
+import { type SheetTarget, targetForRow } from "../sheet-target.js";
 import { GoalRow } from "./dashboard/GoalRow.js";
-import { StudentCard } from "./dashboard/StudentCard.js";
 import {
-  buildLookups,
   buildStudentCards,
+  type Lookups,
   orderPeriodGroups,
   orderRowsByStudent,
   periodLabelOfGroup,
   type RowVM,
   toRowVM,
 } from "./dashboard/dashboard-vm.js";
+import { StudentCard } from "./dashboard/StudentCard.js";
+
+const SETTING = DEFAULT_SETTING;
 
 const LENS_LABEL: Readonly<Record<DashboardLens, string>> = {
   owes_first: "owes-first",
@@ -46,48 +53,92 @@ function SectionLabel({ text, owes = false }: { readonly text: string; readonly 
 
 export interface DashboardScreenProps {
   readonly records: DecryptedRecords;
+  readonly lk: Lookups;
   readonly now: Date;
   readonly onNewGoal: () => void;
+  readonly onToScore: () => void;
+  readonly onOpenScore: (target: SheetTarget) => void;
+  readonly apply: (mutator: DocMutator) => Promise<void>;
 }
 
-export function DashboardScreen({ records, now, onNewGoal }: DashboardScreenProps) {
+export function DashboardScreen(props: DashboardScreenProps) {
+  const { records, lk, now, onNewGoal, onToScore, onOpenScore, apply } = props;
   const [lens, setLens] = useState<DashboardLens>("owes_first");
-  const [scoreLater, setScoreLater] = useState<ReadonlySet<string>>(() => new Set());
+  const today = isoDateOf(now);
 
-  const toggleLater = useCallback((goalId: string) => {
-    setScoreLater((prev) => {
-      const next = new Set(prev);
-      if (next.has(goalId)) {
-        next.delete(goalId);
-      } else {
-        next.add(goalId);
-      }
-      return next;
-    });
-  }, []);
-
-  const lk = useMemo(() => buildLookups(records), [records]);
   const dashboard = useMemo(
     () =>
       buildWeeklyDashboard({
         goals: records.goals,
         points: records.points,
         asOf: now,
-        isNonInstructional: () => false, // U1/U2 synthetic: every week is instructional
+        isNonInstructional: () => false, // U1–U3 synthetic: every week is instructional
         periodByStudent: lk.periodByStudent,
       }),
     [records, now, lk],
   );
 
+  // Score-later state is now the DATA (M5 queued points), not local UI state.
+  const queue = buildToScoreQueue(records.points);
+  const queuedGoalIds = new Set(queue.map((e) => e.goalId));
+  const queuedPointByGoal = new Map(
+    records.points.filter((p) => p.state === "queued").map((p) => [p.goal_id, p]),
+  );
+  const scoredPointByGoal = new Map(
+    records.points.filter((p) => p.state === "scored").map((p) => [p.goal_id, p]),
+  );
   const pendingCount = dashboard.rows.filter((r) => lk.pendingGoalIds.has(r.goalId)).length;
   const groups = groupDashboard(dashboard.rows, lens);
 
-  const renderRow = (vm: RowVM) => (
+  const toggleLater = useCallback(
+    (vm: RowVM) => {
+      const queued = queuedPointByGoal.get(vm.goalId);
+      void (queued !== undefined
+        ? apply(unbookmarkMutator(queued.data_point_id))
+        : apply(
+            bookmarkMutator({
+              goalId: vm.goalId,
+              studentId: vm.studentId,
+              adminDate: today,
+              entryTs: asTimestamp(Date.now()),
+              setting: SETTING,
+            }),
+          ));
+    },
+    [apply, queuedPointByGoal, today],
+  );
+
+  const openScore = useCallback(
+    (vm: RowVM) => {
+      // Resolve any existing point for this goal/week: a scored row opens for a
+      // [Fix]; an owes row that already has a ⚑ queued placeholder opens THAT
+      // placeholder (so scoring completes it in place — never a duplicate point).
+      const existing: ProgressDataPoint | undefined =
+        vm.state === "has_point"
+          ? scoredPointByGoal.get(vm.goalId)
+          : queuedPointByGoal.get(vm.goalId);
+      if (existing !== undefined) {
+        onOpenScore({
+          ...targetForRow(vm, lk, today),
+          existingPoint: existing,
+          adminDate: existing.admin_date,
+        });
+        return;
+      }
+      if (vm.state === "owes") {
+        onOpenScore(targetForRow(vm, lk, today));
+      }
+    },
+    [onOpenScore, lk, today, scoredPointByGoal, queuedPointByGoal],
+  );
+
+  const renderRow = (vm: RowVM): ReactElement => (
     <GoalRow
       key={vm.goalId}
       vm={vm}
-      scoreLater={scoreLater.has(vm.goalId)}
+      scoreLater={queuedGoalIds.has(vm.goalId)}
       onScoreLater={toggleLater}
+      onOpenScore={openScore}
     />
   );
 
@@ -139,15 +190,15 @@ export function DashboardScreen({ records, now, onNewGoal }: DashboardScreenProp
             <StudentCard
               key={card.studentId}
               card={card}
-              scoreLater={scoreLater}
+              queuedGoalIds={queuedGoalIds}
               onScoreLater={toggleLater}
+              onOpenScore={openScore}
             />
           ))
         ) : lens === "by_period" ? (
           orderPeriodGroups(groups, lk).map((group) => (
             <div key={group.key}>
               <SectionLabel text={`Period ${periodLabelOfGroup(group, lk)}`} />
-              {/* Within a period: a student's goals adjacent + alphabetized (§E.4). */}
               {orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))).map(renderRow)}
             </div>
           ))
@@ -162,6 +213,9 @@ export function DashboardScreen({ records, now, onNewGoal }: DashboardScreenProp
       <div className="btnrow" style={{ marginTop: "0.9rem" }}>
         <button type="button" className="btn primary wide" onClick={onNewGoal}>
           + New goal
+        </button>
+        <button type="button" className="btn wide" onClick={onToScore} data-testid="to-score">
+          To-score ({queue.length})
         </button>
       </div>
     </div>
