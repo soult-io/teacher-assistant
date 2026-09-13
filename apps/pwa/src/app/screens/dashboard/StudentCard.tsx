@@ -1,15 +1,14 @@
 // A by-student dashboard card (design §E.4): the student's monogram avatar +
 // initials + period(s) + a to-do/done tally, with their goals nested under a
-// matching-hue colour rail. Status still dominates each nested row — the glyph
-// plus a status-coloured value (§E.3) — and owes rows carry the same score-later
-// ⚑ flag as the flat row (R3-2; U2 marks local state only).
+// matching-hue colour rail. Status dominates each nested row (glyph + a
+// status-coloured value, §E.3); owes/scored rows are tappable to score/[Fix], and
+// owes rows carry the score-later ⚑ flag — same behavior as the flat row.
 
 import { Avatar } from "../../../design/Avatar.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { hueClassForInitials } from "../../../design/hues.js";
 import { type RowVM, rowValueText, type StudentCardVM } from "./dashboard-vm.js";
 
-/** Status-coloured nested value (owes=amber, ⊘=grey, %=default) — status dominates. */
 function nestedValue(vm: RowVM) {
   const text = rowValueText(vm) ?? "owes";
   const tone = vm.state === "owes" ? " owes" : vm.state === "documented_no_data" ? " nodata" : "";
@@ -18,11 +17,61 @@ function nestedValue(vm: RowVM) {
 
 export interface StudentCardProps {
   readonly card: StudentCardVM;
-  readonly scoreLater: ReadonlySet<string>;
-  readonly onScoreLater: (goalId: string) => void;
+  readonly queuedGoalIds: ReadonlySet<string>;
+  readonly onScoreLater: (vm: RowVM) => void;
+  readonly onOpenScore: (vm: RowVM) => void;
 }
 
-export function StudentCard({ card, scoreLater, onScoreLater }: StudentCardProps) {
+function NestedGoal({
+  vm,
+  hue,
+  scoreLater,
+  onScoreLater,
+  onOpenScore,
+}: {
+  readonly vm: RowVM;
+  readonly hue: string;
+  readonly scoreLater: boolean;
+  readonly onScoreLater: (vm: RowVM) => void;
+  readonly onOpenScore: (vm: RowVM) => void;
+}) {
+  const tappable = vm.state === "owes" || vm.state === "has_point";
+  return (
+    <div className="sgoal">
+      <span className={`rail ${hue}`} />
+      <span className={`chip ${chipForDashboardState(vm.state).className}`} aria-hidden="true">
+        {chipForDashboardState(vm.state).glyph}
+      </span>
+      {tappable ? (
+        <button
+          type="button"
+          className="g tap gbtn"
+          aria-label={`score ${vm.goalText}`}
+          onClick={() => onOpenScore(vm)}
+        >
+          {vm.goalText}
+        </button>
+      ) : (
+        <span className="g">{vm.goalText}</span>
+      )}
+      {nestedValue(vm)}
+      {vm.state === "owes" ? (
+        <button
+          type="button"
+          className={`minibtn book${scoreLater ? " on" : ""}`}
+          title="Gave it — score later"
+          aria-label="Gave it, score later"
+          aria-pressed={scoreLater}
+          onClick={() => onScoreLater(vm)}
+        >
+          ⚑
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export function StudentCard({ card, queuedGoalIds, onScoreLater, onOpenScore }: StudentCardProps) {
   const hue = hueClassForInitials(card.initials);
   return (
     <div className="scard">
@@ -37,26 +86,14 @@ export function StudentCard({ card, scoreLater, onScoreLater }: StudentCardProps
         </span>
       </div>
       {card.rows.map((vm) => (
-        <div className="sgoal" key={vm.goalId}>
-          <span className={`rail ${hue}`} />
-          <span className={`chip ${chipForDashboardState(vm.state).className}`} aria-hidden="true">
-            {chipForDashboardState(vm.state).glyph}
-          </span>
-          <span className="g">{vm.goalText}</span>
-          {nestedValue(vm)}
-          {vm.state === "owes" ? (
-            <button
-              type="button"
-              className={`minibtn book${scoreLater.has(vm.goalId) ? " on" : ""}`}
-              title="Gave it — score later"
-              aria-label="Gave it, score later"
-              aria-pressed={scoreLater.has(vm.goalId)}
-              onClick={() => onScoreLater(vm.goalId)}
-            >
-              ⚑
-            </button>
-          ) : null}
-        </div>
+        <NestedGoal
+          key={vm.goalId}
+          vm={vm}
+          hue={hue}
+          scoreLater={queuedGoalIds.has(vm.goalId)}
+          onScoreLater={onScoreLater}
+          onOpenScore={onOpenScore}
+        />
       ))}
     </div>
   );

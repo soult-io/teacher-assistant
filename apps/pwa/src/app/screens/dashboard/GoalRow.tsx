@@ -1,6 +1,8 @@
 // A flat dashboard goal row (owes-first + by-period lenses). Status glyph +
-// monogram avatar + title/meta + value, plus the score-later flag on owes rows
-// and the pending-para note. All display data comes from the RowVM; no logic.
+// monogram avatar + title/meta + value. Owes and scored rows are tappable — owes
+// opens the Quick-Score sheet, scored opens it for an audited [Fix]. Owes rows
+// also carry the score-later ⚑ flag (writes an M5 bookmark). All data is on the
+// RowVM; the handlers are wired by DashboardScreen.
 
 import type { DashboardState } from "@teacher-assistant/store";
 import { Avatar } from "../../../design/Avatar.js";
@@ -23,31 +25,53 @@ function rightValue(vm: RowVM) {
   return <span className={`rowval${dim ? " dim" : ""}`}>{text}</span>;
 }
 
+function RowMain({ vm, scoreLater }: { readonly vm: RowVM; readonly scoreLater: boolean }) {
+  const isOwes = vm.state === "owes";
+  return (
+    <>
+      <span className="rowtitle">{vm.goalText}</span>
+      <span className="rowmeta">
+        {vm.periodLabel !== null ? <span className="period">{vm.periodLabel}</span> : null}
+        {/* Owes rows carry glanceable mid-class context: the probe + criterion. */}
+        {isOwes && vm.probe !== "" ? ` · ${vm.probe}` : null}
+        {isOwes && vm.criterion !== "" ? ` · ${vm.criterion}` : null}
+        {scoreLater ? <span className="laternote"> · ⚑ score later</span> : null}
+      </span>
+      {vm.pending ? <span className="pendnote">⏳ para point — awaiting your OK</span> : null}
+    </>
+  );
+}
+
 export interface GoalRowProps {
   readonly vm: RowVM;
   readonly scoreLater: boolean;
-  readonly onScoreLater: (goalId: string) => void;
+  readonly onScoreLater: (vm: RowVM) => void;
+  readonly onOpenScore: (vm: RowVM) => void;
 }
 
-export function GoalRow({ vm, scoreLater, onScoreLater }: GoalRowProps) {
+export function GoalRow({ vm, scoreLater, onScoreLater, onOpenScore }: GoalRowProps) {
   const chip = chipForDashboardState(vm.state);
   const isOwes = vm.state === "owes";
+  const tappable = vm.state === "owes" || vm.state === "has_point";
   const right = rightValue(vm);
   return (
     <div className={`row${isOwes ? " owes" : ""}`}>
       <StatusChip chip={chip} label={STATE_LABEL[vm.state]} />
       <Avatar initials={vm.initials} />
-      <div className="rowmain">
-        <span className="rowtitle">{vm.goalText}</span>
-        <span className="rowmeta">
-          {vm.periodLabel !== null ? <span className="period">{vm.periodLabel}</span> : null}
-          {/* Owes rows carry glanceable mid-class context: the probe + criterion. */}
-          {isOwes && vm.probe !== "" ? ` · ${vm.probe}` : null}
-          {isOwes && vm.criterion !== "" ? ` · ${vm.criterion}` : null}
-          {scoreLater ? <span className="laternote"> · ⚑ score later</span> : null}
-        </span>
-        {vm.pending ? <span className="pendnote">⏳ para point — awaiting your OK</span> : null}
-      </div>
+      {tappable ? (
+        <button
+          type="button"
+          className="rowmain tap"
+          aria-label={`score ${vm.goalText}`}
+          onClick={() => onOpenScore(vm)}
+        >
+          <RowMain vm={vm} scoreLater={scoreLater} />
+        </button>
+      ) : (
+        <div className="rowmain">
+          <RowMain vm={vm} scoreLater={scoreLater} />
+        </div>
+      )}
       {right !== null ? <div className="rowright">{right}</div> : null}
       {isOwes ? (
         <div className="rowactions">
@@ -57,7 +81,7 @@ export function GoalRow({ vm, scoreLater, onScoreLater }: GoalRowProps) {
             title="Gave it — score later"
             aria-label="Gave it, score later"
             aria-pressed={scoreLater}
-            onClick={() => onScoreLater(vm.goalId)}
+            onClick={() => onScoreLater(vm)}
           >
             ⚑
           </button>

@@ -1,16 +1,19 @@
-// App root — drives the unlock state machine (locked → unlocking → ready) and
-// holds the chrome state (role, tab, theme, online). On unlock it runs the U1
-// bootstrap (passkey → keyring → sync client → decrypt → project) and renders
-// the live dashboard from the synthetic seed. Offline-first: a best-effort sync
-// runs after unlock and never blocks render.
+// App root — the unlock state machine (locked → unlocking → ready) plus, once
+// ready, the record store + write surfaces. ReadyApp is split out so its
+// record/sheet hooks are unconditional (they need a live session).
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { AppShell, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
+import { QuickScoreSheet } from "./app/QuickScoreSheet.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
+import { ToScoreScreen } from "./app/screens/ToScoreScreen.js";
+import { buildLookups } from "./app/screens/dashboard/dashboard-vm.js";
+import { type SheetTarget, targetForQueued } from "./app/sheet-target.js";
 import { useOnline } from "./app/useOnline.js";
-import { useTheme } from "./app/useTheme.js";
+import { useSessionRecords } from "./app/useSessionRecords.js";
+import { useTheme, type ThemeControl } from "./app/useTheme.js";
 import {
   type BootstrapOptions,
   bootstrapTeacherSession,
@@ -19,6 +22,7 @@ import {
 } from "./data/session.js";
 
 type Phase = "locked" | "unlocking" | "ready";
+type TrackView = "dashboard" | "toscore" | "new_goal";
 
 export interface AppProps {
   /** Injectable bootstrap (tests supply a crypto-free fake); defaults to the real pipeline. */
@@ -31,17 +35,7 @@ export function App({ bootstrap = bootstrapTeacherSession }: AppProps = {}) {
   const [phase, setPhase] = useState<Phase>("locked");
   const [session, setSession] = useState<Session | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [role, setRole] = useState<Role>("teacher");
-  const [tab, setTab] = useState<Tab>("track");
-  // Within the Track tab: the dashboard, or the New-Goal stub (the flow is U5).
-  const [trackView, setTrackView] = useState<"dashboard" | "new_goal">("dashboard");
-  // Pin "now" once so the seed's week and the dashboard's evaluation week agree.
   const nowRef = useRef<Date>(new Date());
-
-  const onTab = useCallback((next: Tab) => {
-    setTrackView("dashboard");
-    setTab(next);
-  }, []);
 
   const unlock = useCallback(() => {
     setError(null);
@@ -66,23 +60,81 @@ export function App({ bootstrap = bootstrapTeacherSession }: AppProps = {}) {
       </div>
     );
   }
+  return <ReadyApp session={session} online={online} theme={theme} now={nowRef.current} />;
+}
 
-  const dashboardOrStub =
-    trackView === "new_goal" ? (
-      <StubScreen
-        title="New goal"
-        note="New-goal flow lands in U5"
-        onBack={() => setTrackView("dashboard")}
-      />
-    ) : (
+function ReadyApp({
+  session,
+  online,
+  theme,
+  now,
+}: {
+  readonly session: Session;
+  readonly online: boolean;
+  readonly theme: ThemeControl;
+  readonly now: Date;
+}) {
+  const { records, apply } = useSessionRecords(session);
+  const lk = useMemo(() => buildLookups(records), [records]);
+  const [role, setRole] = useState<Role>("teacher");
+  const [tab, setTab] = useState<Tab>("track");
+  const [trackView, setTrackView] = useState<TrackView>("dashboard");
+  const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
+
+  const onTab = useCallback((next: Tab) => {
+    setTrackView("dashboard");
+    setTab(next);
+  }, []);
+
+  const commit = useCallback(
+    async (mutator: Parameters<typeof apply>[0]) => {
+      await apply(mutator);
+      setSheetTarget(null);
+    },
+    [apply],
+  );
+
+  const track = (() => {
+    if (trackView === "new_goal") {
+      return (
+        <StubScreen
+          title="New goal"
+          note="New-goal flow lands in U5"
+          onBack={() => setTrackView("dashboard")}
+        />
+      );
+    }
+    if (trackView === "toscore") {
+      return (
+        <ToScoreScreen
+          records={records}
+          lk={lk}
+          onOpen={(point) => setSheetTarget(targetForQueued(point, lk))}
+          onBack={() => setTrackView("dashboard")}
+        />
+      );
+    }
+    return (
       <DashboardScreen
-        records={session.records}
-        now={nowRef.current}
+        records={records}
+        lk={lk}
+        now={now}
         onNewGoal={() => setTrackView("new_goal")}
+        onToScore={() => setTrackView("toscore")}
+        onOpenScore={setSheetTarget}
+        apply={apply}
       />
     );
-  const trackContent =
-    tab === "track" ? dashboardOrStub : <StubScreen title="Plan" note="Planner lands in Phase 2" />;
+  })();
+
+  const overlay =
+    sheetTarget !== null ? (
+      <QuickScoreSheet
+        target={sheetTarget}
+        onCommit={commit}
+        onClose={() => setSheetTarget(null)}
+      />
+    ) : null;
 
   return (
     <AppShell
@@ -93,11 +145,14 @@ export function App({ bootstrap = bootstrapTeacherSession }: AppProps = {}) {
       onThemeCycle={theme.cycle}
       tab={tab}
       onTab={onTab}
+      overlay={overlay}
     >
       {role === "para" ? (
         <StubScreen title="Para surface" note="Para view lands in U6" />
+      ) : tab === "track" ? (
+        track
       ) : (
-        trackContent
+        <StubScreen title="Plan" note="Planner lands in Phase 2" />
       )}
     </AppShell>
   );

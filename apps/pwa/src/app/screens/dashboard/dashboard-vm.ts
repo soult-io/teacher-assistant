@@ -59,6 +59,11 @@ export interface Lookups {
   readonly periodLabelById: ReadonlyMap<string, string>;
   readonly valueByGoal: ReadonlyMap<string, number>;
   readonly metaByGoal: ReadonlyMap<string, GoalMeta>;
+  /** The assigned probe per goal — its label + expected total (for the score sheet). */
+  readonly probeByGoal: ReadonlyMap<
+    string,
+    { readonly label: string; readonly expectedDenominator: number }
+  >;
   readonly pendingGoalIds: ReadonlySet<string>;
   readonly periodByStudent: (studentId: OpaqueId) => OpaqueId | null;
 }
@@ -89,6 +94,12 @@ export function buildLookups(records: DecryptedRecords): Lookups {
     }
   }
   const pendingGoalIds = new Set(buildValidationQueue(records.points).map((e) => e.goalId));
+  const probeByGoal = new Map(
+    records.probes.map((p) => [
+      p.goal_id,
+      { label: p.label ?? "probe", expectedDenominator: p.expected_denominator },
+    ]),
+  );
 
   return {
     initialsById,
@@ -96,6 +107,7 @@ export function buildLookups(records: DecryptedRecords): Lookups {
     periodLabelById,
     valueByGoal,
     metaByGoal,
+    probeByGoal,
     pendingGoalIds,
     periodByStudent: (studentId) => membershipByStudent.get(studentId) ?? null,
   };

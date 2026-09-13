@@ -15,15 +15,13 @@ import {
   type IsoDate,
   newOpaqueId,
   type OpaqueId,
+  type ProbeDefinition,
   type ProgressDataPoint,
   type Student,
   type Timestamp,
 } from "@teacher-assistant/schema";
+import { isoDateOf } from "./date.js";
 import type { DecryptedRecords } from "./repository.js";
-
-function todayIso(now: Date): IsoDate {
-  return now.toISOString().slice(0, 10) as string as IsoDate;
-}
 
 interface StudentSeed {
   readonly initials: string;
@@ -116,6 +114,17 @@ function pendingParaPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number):
   };
 }
 
+/** The goal's assigned probe: expected total + condition (drives the M5 mismatch flag). */
+function probeFor(goal: IEPGoal): ProbeDefinition {
+  return {
+    probe_definition_id: newOpaqueId(),
+    goal_id: goal.goal_id,
+    expected_denominator: 5,
+    condition: "given a 5-item probe",
+    label: "5-item probe",
+  };
+}
+
 /** A synthetic class period (cleartext structural container; carries no student). */
 function classPeriod(label: string, hasPara: boolean): ClassPeriod {
   return {
@@ -135,7 +144,7 @@ function classPeriod(label: string, hasPara: boolean): ClassPeriod {
  * across all three states.
  */
 export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
-  const adminDate = todayIso(now);
+  const adminDate = isoDateOf(now);
   const createdTs = asTimestamp(now.getTime());
 
   // Two periods so the by-period lens has real buckets; P2 has the para.
@@ -205,5 +214,15 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
     // cdFractions has no point this week → owes
   ];
 
-  return { students, goals, points, periods };
+  // One assigned probe per active goal (expected total 5) — the sheet defaults to
+  // it and flags a mismatch when the entered total differs.
+  const probes: ProbeDefinition[] = [
+    abTwoStep,
+    cdFractions,
+    abIntegers,
+    efSciNotation,
+    cdNumberLine,
+  ].map(probeFor);
+
+  return { students, goals, points, periods, probes };
 }

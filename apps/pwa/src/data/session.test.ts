@@ -4,13 +4,16 @@
 // foreign-realm Uint8Array (jsdom's TextEncoder produces one). fake-indexeddb is
 // still installed globally by the setup file, so IndexedDbPersistence works here.
 import { AuthRequiredError } from "@teacher-assistant/auth";
+import { asTimestamp } from "@teacher-assistant/schema";
 import { buildWeeklyDashboard, renderHeader } from "@teacher-assistant/store";
 import { InMemoryPersistence } from "@teacher-assistant/sync";
 import type { VerifiedAuthenticationResponse } from "@simplewebauthn/server";
 import { beforeEach, describe, expect, it } from "vitest";
+import { isoDateOf } from "./date.js";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
 import { bootstrapTeacherSession } from "./session.js";
+import { scoreMutator } from "./writes.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
 
@@ -30,6 +33,7 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     expect(session.records.goals).toHaveLength(6);
     expect(session.records.points).toHaveLength(4); // 2 scored, 1 no-data, 1 pending-para
     expect(session.records.periods).toHaveLength(2);
+    expect(session.records.probes).toHaveLength(5); // one per active goal
 
     const dashboard = buildWeeklyDashboard({
       goals: session.records.goals,
@@ -42,6 +46,43 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     expect(dashboard.rows).toHaveLength(5);
     expect(dashboard.header).toEqual({ scored: 2, collectable: 4, excused: 1, owe: 2 });
     expect(renderHeader(dashboard.header)).toBe("2 of 4 collectable scored · 1 excused · 2 owe");
+  });
+
+  it("captures a scored point through the M5 write path and re-reads it", async () => {
+    const session = await bootstrapTeacherSession({
+      persistence: new InMemoryPersistence(),
+      now: NOW,
+    });
+    const goal = session.records.goals.find((g) => g.goal_text === "Multiply fractions");
+    if (goal === undefined) {
+      throw new Error("expected the Multiply fractions goal");
+    }
+
+    await session.capture(
+      scoreMutator({
+        goalId: goal.goal_id,
+        studentId: goal.student_id,
+        adminDate: isoDateOf(NOW),
+        entryTs: asTimestamp(NOW.getTime()),
+        numerator: 5,
+        denominatorUsed: 5,
+        setting: "math_resource",
+      }),
+    );
+
+    const after = session.readRecords();
+    const scored = after.points.find((p) => p.goal_id === goal.goal_id && p.state === "scored");
+    expect(scored?.numerator).toBe(5);
+    expect(scored?.computed_value).toBe(1);
+    // The goal now reads scored, not owes.
+    const dash = buildWeeklyDashboard({
+      goals: after.goals,
+      points: after.points,
+      asOf: NOW,
+      isNonInstructional: () => false,
+    });
+    expect(dash.header.scored).toBe(3);
+    expect(dash.header.owe).toBe(1);
   });
 
   it("refuses to unlock without a verified passkey authentication (M0-AUTH gate)", async () => {
