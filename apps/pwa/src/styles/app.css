@@ -416,22 +416,11 @@ button.btn:disabled {
   display: inline-block;
   margin-right: 0.3rem;
 }
-.pendnote.queue {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-.pendnote.hold {
-  color: var(--owes);
-  background: var(--owes-bg);
-}
 
 .note {
   font-size: 0.78rem;
   color: var(--text-dim);
   margin-top: 0.3rem;
-}
-.tap {
-  cursor: pointer;
 }
 
 /* per-row action buttons (score-later flag) */

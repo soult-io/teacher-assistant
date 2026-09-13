@@ -77,33 +77,46 @@ export function buildLookups(records: DecryptedRecords): Lookups {
   };
 }
 
-/** Resolve a period id to its label via the lookups (null when unassigned/unknown). */
-function periodLabelFor(studentId: OpaqueId, lk: Lookups): string | null {
-  const periodId = lk.periodByStudent(studentId);
-  return periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
-}
-
 export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {
+  // Label off the store-computed row.periodId — the single source for the period,
+  // so the label can never contradict the by-period bucket keyed on the same id.
+  const periodLabel = row.periodId !== null ? (lk.periodLabelById.get(row.periodId) ?? null) : null;
   return {
     goalId: row.goalId,
     studentId: row.studentId,
     initials: lk.initialsById.get(row.studentId) ?? "??",
     goalText: lk.goalTextById.get(row.goalId) ?? "(goal)",
     state: row.state,
-    periodLabel: periodLabelFor(row.studentId, lk),
+    periodLabel,
     value: lk.valueByGoal.get(row.goalId),
     noDataReason: row.noDataReason,
     pending: lk.pendingGoalIds.has(row.goalId),
   };
 }
 
-/** The label a by-period group renders under (its rows share one period). */
-export function periodLabelOfGroup(group: DashboardGroup, lk: Lookups): string {
-  const first = group.rows[0];
-  if (first === undefined) {
-    return "Unassigned";
+/**
+ * The right-hand value text for a row, shared by the flat GoalRow and the nested
+ * StudentCard: the scored % or the ⊘ no-data reason, or null when the goal owes
+ * (the flat row hides the value and shows the score-later flag; the card renders
+ * a plain "owes"). One source of truth for state → value display.
+ */
+export function rowValueText(vm: RowVM): string | null {
+  if (vm.state === "has_point" && vm.value !== undefined) {
+    return `${Math.round(vm.value * 100)}%`;
   }
-  return periodLabelFor(first.studentId, lk) ?? "Unassigned";
+  if (vm.state === "documented_no_data") {
+    return `⊘ ${vm.noDataReason ?? "excused"}`;
+  }
+  return null;
+}
+
+/**
+ * The label a by-period group renders under. The store buckets by-period on
+ * `row.periodId`, so the group key IS the period id (or the literal "unassigned"
+ * for rows with no period) — resolve the label straight off it.
+ */
+export function periodLabelOfGroup(group: DashboardGroup, lk: Lookups): string {
+  return lk.periodLabelById.get(group.key) ?? "Unassigned";
 }
 
 /** Order by-period groups by their period label (presentation ordering). */

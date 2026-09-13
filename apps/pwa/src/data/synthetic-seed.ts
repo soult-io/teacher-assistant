@@ -124,6 +124,8 @@ function classPeriod(label: string, hasPara: boolean): ClassPeriod {
     format: "blended_resource",
     day_template: [],
     has_para: hasPara,
+    // "Set iff has_para" (schema §1.3); opaque, no student payload.
+    ...(hasPara ? { para_id: newOpaqueId() } : {}),
   };
 }
 

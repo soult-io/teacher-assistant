@@ -6,17 +6,7 @@
 import { hueClassForInitials } from "../../../design/hues.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { Avatar } from "../../../design/Avatar.js";
-import type { RowVM, StudentCardVM } from "./dashboard-vm.js";
-
-function nestedRight(vm: RowVM) {
-  if (vm.state === "has_point" && vm.value !== undefined) {
-    return `${Math.round(vm.value * 100)}%`;
-  }
-  if (vm.state === "documented_no_data") {
-    return `⊘ ${vm.noDataReason ?? "excused"}`;
-  }
-  return "owes";
-}
+import { rowValueText, type StudentCardVM } from "./dashboard-vm.js";
 
 export function StudentCard({ card }: { readonly card: StudentCardVM }) {
   const hue = hueClassForInitials(card.initials);
@@ -39,7 +29,7 @@ export function StudentCard({ card }: { readonly card: StudentCardVM }) {
             {chipForDashboardState(vm.state).glyph}
           </span>
           <span className="g">{vm.goalText}</span>
-          <span>{nestedRight(vm)}</span>
+          <span>{rowValueText(vm) ?? "owes"}</span>
         </div>
       ))}
     </div>

@@ -6,7 +6,7 @@ import type { DashboardState } from "@teacher-assistant/store";
 import { Avatar } from "../../../design/Avatar.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { StatusChip } from "../../../design/StatusChip.js";
-import type { RowVM } from "./dashboard-vm.js";
+import { type RowVM, rowValueText } from "./dashboard-vm.js";
 
 const STATE_LABEL: Readonly<Record<DashboardState, string>> = {
   owes: "owes",
@@ -15,13 +15,12 @@ const STATE_LABEL: Readonly<Record<DashboardState, string>> = {
 };
 
 function rightValue(vm: RowVM) {
-  if (vm.state === "has_point" && vm.value !== undefined) {
-    return <span className="rowval">{Math.round(vm.value * 100)}%</span>;
+  const text = rowValueText(vm);
+  if (text === null) {
+    return null;
   }
-  if (vm.state === "documented_no_data") {
-    return <span className="rowval dim">⊘ {vm.noDataReason ?? "excused"}</span>;
-  }
-  return null;
+  const dim = vm.state === "documented_no_data";
+  return <span className={`rowval${dim ? " dim" : ""}`}>{text}</span>;
 }
 
 export interface GoalRowProps {
