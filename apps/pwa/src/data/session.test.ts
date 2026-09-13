@@ -31,7 +31,10 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     expect(session.role).toBe("teacher");
     expect(session.records.students).toHaveLength(4);
     expect(session.records.goals).toHaveLength(6);
-    expect(session.records.points).toHaveLength(4); // 2 scored, 1 no-data, 1 pending-para
+    // 25 points: the current-week mix (2 scored, 1 no-data, 1 pending-para) PLUS
+    // the prior-week Goal Detail histories (U4) — which never touch THIS week's
+    // dashboard (the projection filters to the asOf ISO week; asserted below).
+    expect(session.records.points).toHaveLength(25);
     expect(session.records.periods).toHaveLength(2);
     expect(session.records.probes).toHaveLength(5); // one per active goal
 
@@ -71,7 +74,11 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     );
 
     const after = session.readRecords();
-    const scored = after.points.find((p) => p.goal_id === goal.goal_id && p.state === "scored");
+    // Key on the captured week — "Multiply fractions" also carries prior-week
+    // history points, so match the point just written for THIS week's admin date.
+    const scored = after.points.find(
+      (p) => p.goal_id === goal.goal_id && p.state === "scored" && p.admin_date === isoDateOf(NOW),
+    );
     expect(scored?.numerator).toBe(5);
     expect(scored?.computed_value).toBe(1);
     // The goal now reads scored, not owes.

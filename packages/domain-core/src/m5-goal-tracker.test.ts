@@ -474,3 +474,113 @@ describe("SME PASS-WITH-CHANGES regressions (M5 PR#15)", () => {
     expect(detail.noTimeCount).toBe(0);
   });
 });
+
+describe("goal detail — U4 chart display inputs (clamp boundary + ⊘ markers)", () => {
+  const base = (goal: IEPGoal) => ({
+    goal_id: goal.goal_id,
+    student_id: goal.student_id,
+    entry_ts: asTimestamp(0),
+    setting: "math_resource" as const,
+    scorer: "teacher" as const,
+    revisions: [],
+  });
+  const scored = (goal: IEPGoal, date: string, numerator: number): ProgressDataPoint => ({
+    ...base(goal),
+    data_point_id: newOpaqueId(),
+    admin_date: iso(date),
+    state: "scored",
+    numerator,
+    denominator_used: 10,
+    computed_value: numerator / 10,
+  });
+
+  it("clampAfter is null when the goal has no criterion / denominator-model change", () => {
+    const goal = makeGoal();
+    const detail = buildGoalDetail(goal, [scored(goal, "2026-09-07", 8)]);
+    expect(detail.clampAfter).toBeNull();
+  });
+
+  it("clampAfter is the change date so the UI never fits a line across the boundary", () => {
+    // A revision that raised the criterion level clamps the trend/aim line: the
+    // engine owns the boundary; the UI only reads this date.
+    const changeWhen = Date.UTC(2026, 8, 14); // 2026-09-14
+    const goal: IEPGoal = {
+      ...makeGoal(),
+      revisions: [
+        {
+          who: "teacher",
+          when: asTimestamp(changeWhen),
+          old: { criterion_level: 70 },
+          new: { criterion_level: 80 },
+        },
+      ],
+    };
+    const detail = buildGoalDetail(goal, [scored(goal, "2026-09-21", 9)]);
+    expect(detail.clampAfter).toBe("2026-09-14");
+  });
+
+  it("noDataMarkers lists every ⊘ with its date + reason, in admin-date order (the chart gaps)", () => {
+    const goal = makeGoal();
+    const nodata = (date: string, reason: NoDataReason): ProgressDataPoint => ({
+      ...base(goal),
+      data_point_id: newOpaqueId(),
+      admin_date: iso(date),
+      state: "no_data",
+      no_data_reason: reason,
+    });
+    const detail = buildGoalDetail(goal, [
+      nodata("2026-09-21", "absent"),
+      scored(goal, "2026-09-07", 8),
+      nodata("2026-09-14", "no_time"),
+    ]);
+    expect(detail.noDataMarkers).toEqual([
+      { adminDate: "2026-09-14", reason: "no_time" },
+      { adminDate: "2026-09-21", reason: "absent" },
+    ]);
+  });
+
+  it("DM-1: the consistency glance is CLAMPED + disposition-aware (never blends across a change)", () => {
+    // A criterion change on 2026-09-10 clamps the window. Pre-clamp probes meet the
+    // OLD criterion; a naive UI slice of the raw trend would paint them ●●● while the
+    // engine run correctly reads 0. The glance must show ONLY the post-clamp probes.
+    const changeWhen = Date.UTC(2026, 8, 10); // 2026-09-10
+    const goal: IEPGoal = {
+      ...makeGoal({ nProbes: 3 }),
+      revisions: [
+        {
+          who: "teacher",
+          when: asTimestamp(changeWhen),
+          old: { criterion_level: 70 },
+          new: { criterion_level: 80 },
+        },
+      ],
+    };
+    const countedOffBasis: ProgressDataPoint = {
+      ...base(goal),
+      data_point_id: newOpaqueId(),
+      admin_date: iso("2026-09-18"),
+      state: "scored",
+      numerator: 6,
+      denominator_used: 6, // ≠ original 10 → mismatch, teacher-elected "counted"
+      denominator_original: 10,
+      denominator_mismatch: true,
+      mismatch_acknowledged: true,
+      mismatch_window_disposition: "counted",
+      computed_value: 1,
+    };
+    const detail = buildGoalDetail(goal, [
+      scored(goal, "2026-09-01", 10), // pre-clamp 100% (meets OLD) — must NOT be in the glance
+      scored(goal, "2026-09-08", 10), // pre-clamp 100% — must NOT be in the glance
+      scored(goal, "2026-09-11", 6), // post-clamp 60% (below 80) clean
+      countedOffBasis, // post-clamp, off-basis, counted → in the window, flagged
+    ]);
+    const glance = detail.consistency.recentGlyphs;
+    // Only the two post-clamp probes appear (no blend with the pre-clamp 100%s).
+    expect(glance).toHaveLength(2);
+    // 2026-09-11 is 60% (below the new 80), the off-basis point is 100% (meets) but flagged.
+    expect(glance.map((g) => g.meets)).toEqual([false, true]);
+    expect(glance.map((g) => g.offBasis)).toEqual([false, true]);
+    // The glance's met-count is consistent with the engine run (no over-count across the clamp).
+    expect(glance.filter((g) => g.meets).length).toBeGreaterThanOrEqual(detail.consistency.run);
+  });
+});

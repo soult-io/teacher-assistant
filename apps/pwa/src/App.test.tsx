@@ -99,6 +99,28 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(screen.getByTestId("header-line")).toHaveTextContent("3 of 4 collectable scored");
   });
 
+  it("opens Goal Detail from a row's ↗ and returns to the dashboard", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Add integers" }));
+    // The detail screen renders the DRAFT statement + trend chart.
+    expect(await screen.findByText(/Draft progress statement/)).toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "progress trend" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
+    expect(await screen.findByTestId("header-line")).toBeInTheDocument();
+  });
+
+  it("acknowledging mastery writes a durable ARC flag (goal stays open)", async () => {
+    await unlock();
+    // "Multiply fractions" has a met consistency window → the Acknowledge action.
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Multiply fractions" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Acknowledge for ARC" }));
+    // The write→re-render loop shows the durable acknowledged banner; the goal is
+    // NOT auto-closed (still reachable, still on the board on return).
+    expect(await screen.findByTestId("mastery-acknowledged")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
+    expect(await screen.findByTestId("header-line")).toBeInTheDocument();
+  });
+
   it("⚑ bookmarks to the To-Score queue and scoring there clears it", async () => {
     await unlock();
     const flags = screen.getAllByRole("button", { name: "Gave it, score later" });

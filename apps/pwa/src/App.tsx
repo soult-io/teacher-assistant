@@ -3,26 +3,31 @@
 // record/sheet hooks are unconditional (they need a live session).
 
 import { useCallback, useMemo, useRef, useState } from "react";
+import type { OpaqueId } from "@teacher-assistant/schema";
 import { AppShell, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
 import { QuickScoreSheet } from "./app/QuickScoreSheet.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
+import { GoalDetailScreen } from "./app/screens/goal-detail/GoalDetailScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
 import { ToScoreScreen } from "./app/screens/ToScoreScreen.js";
 import { buildLookups } from "./app/screens/dashboard/dashboard-vm.js";
-import { type SheetTarget, targetForQueued } from "./app/sheet-target.js";
+import { type SheetTarget, targetForGoal, targetForQueued } from "./app/sheet-target.js";
 import { useOnline } from "./app/useOnline.js";
 import { useSessionRecords } from "./app/useSessionRecords.js";
 import { useTheme, type ThemeControl } from "./app/useTheme.js";
+import { isNonInstructionalWeek } from "./data/calendar.js";
+import { isoDateOf } from "./data/date.js";
 import {
   type BootstrapOptions,
   bootstrapTeacherSession,
   type Role,
   type Session,
 } from "./data/session.js";
+import { acknowledgeMasteryMutator } from "./data/writes.js";
 
 type Phase = "locked" | "unlocking" | "ready";
-type TrackView = "dashboard" | "toscore" | "new_goal";
+type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail";
 
 export interface AppProps {
   /** Injectable bootstrap (tests supply a crypto-free fake); defaults to the real pipeline. */
@@ -79,11 +84,18 @@ function ReadyApp({
   const [role, setRole] = useState<Role>("teacher");
   const [tab, setTab] = useState<Tab>("track");
   const [trackView, setTrackView] = useState<TrackView>("dashboard");
+  const [detailGoalId, setDetailGoalId] = useState<OpaqueId | null>(null);
   const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
+  const today = isoDateOf(now);
 
   const onTab = useCallback((next: Tab) => {
     setTrackView("dashboard");
     setTab(next);
+  }, []);
+
+  const openDetail = useCallback((goalId: OpaqueId) => {
+    setDetailGoalId(goalId);
+    setTrackView("goal_detail");
   }, []);
 
   const commit = useCallback(
@@ -93,6 +105,9 @@ function ReadyApp({
     },
     [apply],
   );
+
+  const detailGoal =
+    detailGoalId !== null ? records.goals.find((g) => g.goal_id === detailGoalId) : undefined;
 
   const track = (() => {
     if (trackView === "new_goal") {
@@ -114,6 +129,25 @@ function ReadyApp({
         />
       );
     }
+    if (trackView === "goal_detail" && detailGoal !== undefined) {
+      const periodId = lk.periodByStudent(detailGoal.student_id);
+      const periodLabel = periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
+      return (
+        <GoalDetailScreen
+          goal={detailGoal}
+          points={records.points}
+          observations={records.observations}
+          initials={lk.initialsById.get(detailGoal.student_id) ?? "??"}
+          periodLabel={periodLabel}
+          probeLabel={lk.probeByGoal.get(detailGoal.goal_id)?.label ?? "probe"}
+          isNonInstructional={isNonInstructionalWeek}
+          onBack={() => setTrackView("dashboard")}
+          onAddPoint={() => setSheetTarget(targetForGoal(detailGoal, lk, today))}
+          onEditPoint={(point) => setSheetTarget(targetForGoal(detailGoal, lk, today, point))}
+          onAckMastery={(candidate) => void apply(acknowledgeMasteryMutator(candidate))}
+        />
+      );
+    }
     return (
       <DashboardScreen
         records={records}
@@ -122,6 +156,7 @@ function ReadyApp({
         onNewGoal={() => setTrackView("new_goal")}
         onToScore={() => setTrackView("toscore")}
         onOpenScore={setSheetTarget}
+        onOpenDetail={openDetail}
         apply={apply}
       />
     );

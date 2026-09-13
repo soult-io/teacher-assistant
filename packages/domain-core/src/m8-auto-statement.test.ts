@@ -13,7 +13,7 @@ import {
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { describe, expect, it } from "vitest";
-import { computeAutoStatement, conditionPhrase } from "./index.js";
+import { computeAutoStatement, conditionPhrase, isoWeekId } from "./index.js";
 
 const iso = (s: string): IsoDate => s as IsoDate;
 const noBreaks = () => false;
@@ -202,6 +202,25 @@ describe("HARD sufficiency gate → INDETERMINATE (§G R3-3)", () => {
     expect(stmt?.variant).toBe("indeterminate");
     expect(stmt?.indeterminateReason).toBe("below_week_gate");
     expect(stmt?.text).not.toContain("on track");
+  });
+
+  it("DM-2: the ≥4-week gate CONSUMES the instructional-weeks calendar (break weeks excluded)", () => {
+    // The SAME 8-point on-track series: with no breaks it clears the week gate...
+    const goal = makeGoal();
+    const pts = series(goal, [52, 56, 60, 64, 68, 72, 76, 80]);
+    expect(computeAutoStatement(goal, "AB", pts, { isNonInstructional: noBreaks })?.variant).toBe(
+      "on_track",
+    );
+    // ...but marking all but the first three monitored ISO weeks as calendar breaks
+    // leaves only 3 instructional weeks (< 4), so the gate MUST fall to INDETERMINATE.
+    // This proves the projection reads the calendar rather than counting every week —
+    // a `() => false` default (every week instructional) would wrongly keep it on_track.
+    const instructional = new Set(WEEKLY.slice(0, 3).map((d) => isoWeekId(d)));
+    const withBreaks = computeAutoStatement(goal, "AB", pts, {
+      isNonInstructional: (w) => !instructional.has(w),
+    });
+    expect(withBreaks?.variant).toBe("indeterminate");
+    expect(withBreaks?.indeterminateReason).toBe("below_week_gate");
   });
 });
 

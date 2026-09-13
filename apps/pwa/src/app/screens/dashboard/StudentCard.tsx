@@ -8,6 +8,7 @@ import { Avatar } from "../../../design/Avatar.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { hueClassForInitials } from "../../../design/hues.js";
 import { type RowVM, rowValueText, type StudentCardVM } from "./dashboard-vm.js";
+import { TrendHistoryButton } from "./TrendHistoryButton.js";
 
 function nestedValue(vm: RowVM) {
   const text = rowValueText(vm) ?? "owes";
@@ -20,6 +21,7 @@ export interface StudentCardProps {
   readonly queuedGoalIds: ReadonlySet<string>;
   readonly onScoreLater: (vm: RowVM) => void;
   readonly onOpenScore: (vm: RowVM) => void;
+  readonly onOpenDetail: (vm: RowVM) => void;
 }
 
 function NestedGoal({
@@ -28,12 +30,14 @@ function NestedGoal({
   scoreLater,
   onScoreLater,
   onOpenScore,
+  onOpenDetail,
 }: {
   readonly vm: RowVM;
   readonly hue: string;
   readonly scoreLater: boolean;
   readonly onScoreLater: (vm: RowVM) => void;
   readonly onOpenScore: (vm: RowVM) => void;
+  readonly onOpenDetail: (vm: RowVM) => void;
 }) {
   const tappable = vm.state === "owes" || vm.state === "has_point";
   return (
@@ -67,11 +71,18 @@ function NestedGoal({
           ⚑
         </button>
       ) : null}
+      <TrendHistoryButton vm={vm} onOpenDetail={onOpenDetail} />
     </div>
   );
 }
 
-export function StudentCard({ card, queuedGoalIds, onScoreLater, onOpenScore }: StudentCardProps) {
+export function StudentCard({
+  card,
+  queuedGoalIds,
+  onScoreLater,
+  onOpenScore,
+  onOpenDetail,
+}: StudentCardProps) {
   const hue = hueClassForInitials(card.initials);
   return (
     <div className="scard">
@@ -93,6 +104,7 @@ export function StudentCard({ card, queuedGoalIds, onScoreLater, onOpenScore }: 
           scoreLater={queuedGoalIds.has(vm.goalId)}
           onScoreLater={onScoreLater}
           onOpenScore={onOpenScore}
+          onOpenDetail={onOpenDetail}
         />
       ))}
     </div>

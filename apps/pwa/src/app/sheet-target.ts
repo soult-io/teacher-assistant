@@ -3,7 +3,7 @@
 // dashboard row (score directly, dated today) or from a queued point (score from
 // the To-Score queue, keeping the collected admin date + the existing point).
 
-import type { IsoDate, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
+import type { IEPGoal, IsoDate, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
 import type { Lookups, RowVM } from "./screens/dashboard/dashboard-vm.js";
 
 export interface SheetTarget {
@@ -41,6 +41,31 @@ export function targetForRow(vm: RowVM, lk: Lookups, adminDate: IsoDate): SheetT
     probeLabel: probe.label,
     expectedDenominator: probe.expectedDenominator,
     adminDate,
+  };
+}
+
+/**
+ * Sheet target for scoring a goal directly from Goal Detail. `existingPoint` is
+ * passed for an audited [Fix] of a stored point (keeps its admin date + id); it is
+ * omitted for "+ Add a point" (a fresh capture dated today).
+ */
+export function targetForGoal(
+  goal: IEPGoal,
+  lk: Lookups,
+  today: IsoDate,
+  existingPoint?: ProgressDataPoint,
+): SheetTarget {
+  const probe = probeOf(goal.goal_id, lk);
+  return {
+    goalId: goal.goal_id,
+    studentId: goal.student_id,
+    initials: lk.initialsById.get(goal.student_id) ?? "??",
+    goalText: goal.goal_text,
+    periodLabel: periodLabelOf(goal.student_id, lk),
+    probeLabel: probe.label,
+    expectedDenominator: probe.expectedDenominator,
+    adminDate: existingPoint?.admin_date ?? today,
+    ...(existingPoint !== undefined ? { existingPoint } : {}),
   };
 }
 

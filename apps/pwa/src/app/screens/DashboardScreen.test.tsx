@@ -13,6 +13,7 @@ function renderDashboard() {
     onNewGoal: vi.fn(),
     onToScore: vi.fn(),
     onOpenScore: vi.fn(),
+    onOpenDetail: vi.fn(),
     apply: vi.fn().mockResolvedValue(undefined),
   };
   render(<DashboardScreen records={records} lk={lk} now={NOW} {...handlers} />);
@@ -70,6 +71,12 @@ describe("DashboardScreen (U2/U3)", () => {
     const { onOpenScore } = renderDashboard();
     fireEvent.click(screen.getByRole("button", { name: "score Two-step equations" }));
     expect(onOpenScore).toHaveBeenCalledOnce();
+  });
+
+  it("every goal has a ↗ trend button that opens Goal Detail (D2 reachability)", () => {
+    const { onOpenDetail } = renderDashboard();
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Two-step equations" }));
+    expect(onOpenDetail).toHaveBeenCalledOnce();
   });
 
   it("the ⚑ flag writes a bookmark via apply", () => {
