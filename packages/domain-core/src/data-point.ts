@@ -7,6 +7,7 @@
 import {
   type IEPGoal,
   type IsoDate,
+  type MismatchDisposition,
   newOpaqueId,
   type NoDataReason,
   type OpaqueId,
@@ -40,6 +41,14 @@ export interface ScoredPointInput {
   readonly denominatorUsed: number;
   /** The probe's expected total; a mismatch is flagged + the original retained (never hard-blocked). */
   readonly expectedDenominator?: number;
+  /**
+   * F-2 (§B): the teacher's affirmative acknowledgment + window disposition for a
+   * denominator mismatch. Applied ONLY when the point is actually mismatched;
+   * omitting the disposition leaves it pending (out of all computed math). Passing
+   * a disposition without an actual mismatch is ignored.
+   */
+  readonly mismatchAcknowledged?: boolean;
+  readonly mismatchWindowDisposition?: MismatchDisposition;
   readonly probeConditionId?: OpaqueId;
   /**
    * The goal + probe this point is recorded against. When present, the
@@ -80,6 +89,14 @@ export function captureScoredPoint(input: ScoredPointInput): ProgressDataPoint {
     revisions: [],
     ...(input.expectedDenominator !== undefined
       ? { denominator_original: input.expectedDenominator, denominator_mismatch: mismatch }
+      : {}),
+    // F-2: the teacher's election is stored ONLY on a genuine mismatch with a
+    // chosen disposition; otherwise it stays pending (fields absent).
+    ...(mismatch && input.mismatchWindowDisposition !== undefined
+      ? {
+          mismatch_acknowledged: input.mismatchAcknowledged ?? true,
+          mismatch_window_disposition: input.mismatchWindowDisposition,
+        }
       : {}),
     ...(probeConditionId !== undefined ? { probe_condition_id: probeConditionId } : {}),
   };

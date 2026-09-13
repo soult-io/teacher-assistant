@@ -2,12 +2,14 @@
 // most-recent-5 SCORED points by admin-date: ⊘ excluded from the average but the
 // no-data count SPANNED is shown; < 5 scored → average what exists + label n
 // (never pad with zeros); the window CLAMPS at a criterion / denominator-model
-// change and a mismatched point is excluded + surfaced. A DIFFERENT IC
+// change (before the disposition) and a mismatched point is excluded + surfaced
+// unless the teacher elects it "counted" (F-2, flagged off-basis). A DIFFERENT IC
 // destination than the weekly value — never overwrites it.
 
 import type { IEPGoal, IsoDate, ProgressDataPoint, Revision } from "@teacher-assistant/schema";
 import { compareCodePoints } from "./comparators.js";
 import { isoWeekId } from "./instructional-weeks.js";
+import { inComputedMath, isCountedOffBasis, isUnresolvedMismatch } from "./mismatch.js";
 import { computeValue } from "./value.js";
 
 /** The F4 most-recent-N window size — one reporting period (data-model §6.1). */
@@ -22,9 +24,14 @@ export interface QuarterlySummary {
   readonly dateRange: { readonly start: IsoDate; readonly end: IsoDate } | null;
   /** Distinct no-data WEEKS spanned by the window — shown so the gap is explained. */
   readonly noDataCountSpanned: number;
-  /** True if mismatched points were excluded (the window isn't single-denominator). */
+  /** True if the window blends off-basis points (some excluded, or some teacher-counted). */
   readonly mixedDenominator: boolean;
+  /** Mismatched points NOT averaged (resolved-excluded + pending). */
   readonly excludedMismatches: number;
+  /** Mismatched points the teacher elected "counted" — IN the average, flagged off-basis. */
+  readonly countedOffBasis: number;
+  /** Mismatched points with no disposition yet — out of the average, surfaced unresolved. */
+  readonly unresolvedMismatches: number;
   /** True when the window was clamped at a criterion-level / denominator-model change (§F.F4). */
   readonly clampedAtChange: boolean;
   readonly label: "quarterly progress summary";
@@ -93,22 +100,28 @@ export function computeQuarterlySummary(
         compareCodePoints(a.data_point_id, b.data_point_id),
     );
 
-  const mismatched = scored.filter((p) => p.denominator_mismatch === true);
-  const comparable = scored.filter((p) => p.denominator_mismatch !== true);
+  // Averageable = not-mismatched OR teacher-elected "counted" (clamp already applied).
+  const comparable = scored.filter(inComputedMath);
+  // Mismatched points NOT averaged (resolved-excluded + pending).
+  const notAveraged = scored.filter(
+    (p) => p.denominator_mismatch === true && !isCountedOffBasis(p),
+  );
 
   // Most-recent-5 comparable points by admin-date (the tail of the ascending list).
   const window = comparable.slice(Math.max(0, comparable.length - QUARTERLY_WINDOW));
   const n = window.length;
 
   if (n === 0) {
-    // No averageable points; still warn if any mismatch was excluded.
+    // No averageable points; still warn if any mismatch was excluded/pending.
     return {
       n: 0,
       average: null,
       dateRange: null,
       noDataCountSpanned: 0,
-      mixedDenominator: mismatched.length > 0,
-      excludedMismatches: mismatched.length,
+      mixedDenominator: notAveraged.length > 0,
+      excludedMismatches: notAveraged.length,
+      countedOffBasis: 0,
+      unresolvedMismatches: scored.filter(isUnresolvedMismatch).length,
       clampedAtChange: clampAfter !== undefined,
       label: "quarterly progress summary",
     };
@@ -131,15 +144,22 @@ export function computeQuarterlySummary(
 
   // Scope the mismatch warning to the averaged window's recent region (≥ its start),
   // so a stale OLD mismatched point doesn't over-warn; a recent one still does.
-  const excludedMismatches = mismatched.filter((p) => p.admin_date >= start).length;
+  const excludedMismatches = notAveraged.filter((p) => p.admin_date >= start).length;
+  // Off-basis points teacher-counted INTO the averaged window (flag the average).
+  const countedOffBasis = window.filter(isCountedOffBasis).length;
+  const unresolvedMismatches = scored.filter(
+    (p) => isUnresolvedMismatch(p) && p.admin_date >= start,
+  ).length;
 
   return {
     n,
     average,
     dateRange: { start, end },
     noDataCountSpanned: noDataWeeks.size,
-    mixedDenominator: excludedMismatches > 0,
+    mixedDenominator: excludedMismatches > 0 || countedOffBasis > 0,
     excludedMismatches,
+    countedOffBasis,
+    unresolvedMismatches,
     clampedAtChange: clampAfter !== undefined,
     label: "quarterly progress summary",
   };

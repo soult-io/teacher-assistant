@@ -18,6 +18,7 @@ import {
   type MasteryCandidate,
   observeMastery,
 } from "./consistency.js";
+import { inComputedMath, isCountedOffBasis } from "./mismatch.js";
 import {
   clampAfterFromRevisions,
   computeQuarterlySummary,
@@ -30,8 +31,13 @@ export interface TrendPoint {
   /** Value per the goal's method (% for the % model; raw otherwise). */
   readonly value: number;
   readonly isPercent: boolean;
-  /** True if this scored point is flagged as a denominator mismatch (excluded from the window). */
-  readonly mismatch: boolean;
+  /**
+   * F-2: a plotted point that is a teacher-COUNTED off-basis (denominator-mismatch)
+   * point — carried with this non-strippable flag. Excluded/pending mismatched
+   * points are NOT plotted (they remain in history/audit); a non-mismatched point
+   * plots with offBasis=false.
+   */
+  readonly offBasis: boolean;
 }
 
 export interface GoalDetail {
@@ -68,7 +74,9 @@ export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoin
   const clampAfter = clampAfterFromRevisions(goal);
 
   const trend: TrendPoint[] = mine
-    .filter((p) => p.state === "scored")
+    // Plot the points that participate: non-mismatched, or teacher-counted. An
+    // excluded/pending mismatched point is never plotted (it stays in history).
+    .filter((p) => p.state === "scored" && inComputedMath(p))
     .sort((a, b) => compareCodePoints(a.admin_date, b.admin_date))
     .map((p) => {
       const computed = computeValue(
@@ -80,7 +88,7 @@ export function buildGoalDetail(goal: IEPGoal, points: readonly ProgressDataPoin
         adminDate: p.admin_date,
         value: computed.value,
         isPercent: computed.isPercent,
-        mismatch: p.denominator_mismatch === true,
+        offBasis: isCountedOffBasis(p),
       };
     });
 

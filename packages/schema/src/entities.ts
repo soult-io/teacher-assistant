@@ -19,6 +19,7 @@ import type {
   Frequency,
   GoalStatus,
   MethodGeneral,
+  MismatchDisposition,
   ModifiedNoteTag,
   MypCriterion,
   MypProgressValue,
@@ -177,6 +178,19 @@ export interface ProgressDataPoint {
   readonly denominator_original?: number;
   /** Derived: denominator_used ≠ expected. Warn, do not hard-block. */
   readonly denominator_mismatch?: boolean;
+  /**
+   * F-2 (design §B) — the teacher's affirmative acknowledgment of a denominator
+   * mismatch. Set ONLY on a mismatched point the teacher has resolved; absent =
+   * pending/unresolved. NOT derived — it is her choice.
+   */
+  readonly mismatch_acknowledged?: boolean;
+  /**
+   * F-2 — the teacher's window disposition for a mismatched point: "counted" (in
+   * the consistency/quarterly math + trend, flagged off-basis) or "excluded" (out
+   * of the math, retained + visible in audit/history). Absent = pending (the safe
+   * default: out of all computed math, surfaced unresolved). NOT derived.
+   */
+  readonly mismatch_window_disposition?: MismatchDisposition;
   /** Derived: numerator/denominator_used. Stored AND computed; never % alone. */
   readonly computed_value?: number;
   /** Must match goal circumstance (construct-integrity guard). */

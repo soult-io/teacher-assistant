@@ -1,18 +1,23 @@
 // M5 — consistency window + mastery observation (design §A.3, §B "mastery
 // framing"). "Consecutive" means consecutive SCORED PROBES in admin-date order,
 // never weeks: a ⊘ (no-data) PAUSES the run (it is simply not a scored probe, so
-// it neither counts nor resets); a denominator/condition-mismatched point is
-// EXCLUDED from the window. Mastery is only OBSERVED here — the window being met
+// it neither counts nor resets); a denominator-mismatched point is EXCLUDED from
+// the window unless the teacher elects it "counted" (F-2, flagged off-basis), and
+// a criterion/denominator-model change CLAMPS the run first (hard, non-electable).
+// Mastery is only OBSERVED here — the window being met
 // flags a candidate for the ARC; the app never closes/retires the goal.
 
 import type {
   IEPGoal,
+  IsoDate,
   MasteryObservation,
   OpaqueId,
   ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { newOpaqueId } from "@teacher-assistant/schema";
 import { compareCodePoints } from "./comparators.js";
+import { inComputedMath, isCountedOffBasis, isUnresolvedMismatch } from "./mismatch.js";
+import { clampAfterFromRevisions } from "./quarterly.js";
 import { percentCorrect } from "./value.js";
 
 export interface ConsistencyResult {
@@ -27,18 +32,35 @@ export interface ConsistencyResult {
    * stays set). Consumers deciding mastery must check `met`, not this alone.
    */
   readonly windowMetDate?: ProgressDataPoint["admin_date"];
-  /** Count of mismatched points excluded from the window (surfaced, never silently dropped). */
+  /**
+   * Count of mismatched points NOT in the run — resolved-excluded PLUS pending
+   * (surfaced, never silently dropped). `unresolvedMismatches` is the pending subset.
+   */
   readonly excludedMismatches: number;
+  /** Mismatched points the teacher elected "counted" — IN the run, flagged off-basis. */
+  readonly countedOffBasis: number;
+  /** Mismatched points with no disposition yet — out of the run, surfaced as UNRESOLVED. */
+  readonly unresolvedMismatches: number;
 }
 
-/** Scored, non-mismatched points for a goal, in admin-date order (the probe axis). */
+/**
+ * Scored points for a goal that participate in the window, in admin-date order:
+ * CLAMPED FIRST at a criterion/denominator-model change (hard, non-electable),
+ * then a mismatched point is kept only if the teacher elected it "counted"
+ * (`inComputedMath`). A ⊘ never appears here (only scored probes).
+ */
 function scoredProbesInOrder(
   goal: IEPGoal,
   points: readonly ProgressDataPoint[],
+  clampAfter: IsoDate | undefined,
 ): ProgressDataPoint[] {
   return points
     .filter(
-      (p) => p.goal_id === goal.goal_id && p.state === "scored" && p.denominator_mismatch !== true,
+      (p) =>
+        p.goal_id === goal.goal_id &&
+        p.state === "scored" &&
+        (clampAfter === undefined || p.admin_date >= clampAfter) &&
+        inComputedMath(p),
     )
     .sort((a, b) => compareCodePoints(a.admin_date, b.admin_date));
 }
@@ -64,11 +86,30 @@ export function consistencyWindow(
   // percent model; a non-% goal (rubric/count/duration) gets no coerced window —
   // it never reports met / a mastery candidate (its window is out of MVP scope).
   if (goal.denominator_model !== "percent_correct_over_total") {
-    return { run: 0, required, met: false, excludedMismatches: 0 };
+    return {
+      run: 0,
+      required,
+      met: false,
+      excludedMismatches: 0,
+      countedOffBasis: 0,
+      unresolvedMismatches: 0,
+    };
   }
-  const probes = scoredProbesInOrder(goal, points);
-  const excludedMismatches = points.filter(
-    (p) => p.goal_id === goal.goal_id && p.state === "scored" && p.denominator_mismatch === true,
+  // Clamp FIRST (hard, non-electable), then the disposition decides survivors.
+  const clampAfter = clampAfterFromRevisions(goal);
+  const probes = scoredProbesInOrder(goal, points, clampAfter);
+  // Mismatch counts are scoped to the clamped region (a mismatched point before
+  // the model-change boundary is dropped by the clamp, not surfaced here).
+  const clampedScored = points.filter(
+    (p) =>
+      p.goal_id === goal.goal_id &&
+      p.state === "scored" &&
+      (clampAfter === undefined || p.admin_date >= clampAfter),
+  );
+  const countedOffBasis = clampedScored.filter(isCountedOffBasis).length;
+  const unresolvedMismatches = clampedScored.filter(isUnresolvedMismatch).length;
+  const excludedMismatches = clampedScored.filter(
+    (p) => p.denominator_mismatch === true && !isCountedOffBasis(p),
   ).length;
 
   let run = 0;
@@ -85,6 +126,8 @@ export function consistencyWindow(
     required,
     met: run >= required,
     excludedMismatches,
+    countedOffBasis,
+    unresolvedMismatches,
     ...(windowMetDate !== undefined ? { windowMetDate } : {}),
   };
 }
