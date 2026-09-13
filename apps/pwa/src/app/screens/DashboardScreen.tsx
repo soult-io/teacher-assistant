@@ -60,6 +60,8 @@ export interface DashboardScreenProps {
   readonly onToScore: () => void;
   /** Open the segregated Baseline / proposed-goal track (U5). */
   readonly onBaseline: () => void;
+  /** Open the teacher para-validation queue (U6). */
+  readonly onValidate: () => void;
   readonly onOpenScore: (target: SheetTarget) => void;
   /** Open Goal Detail for a goal (trend + history) — reachable from every row. */
   readonly onOpenDetail: (goalId: OpaqueId) => void;
@@ -67,8 +69,18 @@ export interface DashboardScreenProps {
 }
 
 export function DashboardScreen(props: DashboardScreenProps) {
-  const { records, lk, now, onNewGoal, onToScore, onBaseline, onOpenScore, onOpenDetail, apply } =
-    props;
+  const {
+    records,
+    lk,
+    now,
+    onNewGoal,
+    onToScore,
+    onBaseline,
+    onValidate,
+    onOpenScore,
+    onOpenDetail,
+    apply,
+  } = props;
   const [lens, setLens] = useState<DashboardLens>("owes_first");
   const today = isoDateOf(now);
 
@@ -178,9 +190,14 @@ export function DashboardScreen(props: DashboardScreenProps) {
           {renderHeader(h)}
         </p>
         {pendingCount > 0 ? (
-          <div className="pendnote">
+          <button
+            type="button"
+            className="pendnote pendbtn"
+            data-testid="validate-note"
+            onClick={onValidate}
+          >
             ⏳ {pendingCount} para point{pendingCount > 1 ? "s" : ""} awaiting your OK
-          </div>
+          </button>
         ) : null}
       </div>
 

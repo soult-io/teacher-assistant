@@ -13,6 +13,7 @@ function renderDashboard() {
     onNewGoal: vi.fn(),
     onToScore: vi.fn(),
     onBaseline: vi.fn(),
+    onValidate: vi.fn(),
     onOpenScore: vi.fn(),
     onOpenDetail: vi.fn(),
     apply: vi.fn().mockResolvedValue(undefined),
@@ -27,7 +28,7 @@ describe("DashboardScreen (U2/U3)", () => {
     expect(screen.getByTestId("header-line")).toHaveTextContent(
       "2 of 4 collectable scored · 1 excused · 2 owe",
     );
-    expect(screen.getByText(/1 para point.*awaiting your OK/)).toBeInTheDocument();
+    expect(screen.getByText(/2 para points.*awaiting your OK/)).toBeInTheDocument();
     const body = screen.getByTestId("dashboard-body").textContent ?? "";
     expect(body).toContain("5-item probe");
     expect(body).toContain("80% × 4 consecutive probes");

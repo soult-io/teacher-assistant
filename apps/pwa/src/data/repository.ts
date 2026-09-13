@@ -32,6 +32,19 @@ const PERIODS = "periods";
 const PROBES = "probes";
 const OBSERVATIONS = "observations";
 const BASELINE_POINTS = "baseline_points";
+const CATALOG = "catalog";
+
+/**
+ * A NON-PII curriculum-catalog row (data-model §10, CLEARTEXT) keyed by goal id —
+ * the gen-ed topic + KY standard the class works. It is the ONLY source the M13
+ * para administer-label may draw from (C-3): it is NOT the goal definition, and the
+ * para projection reads THIS, never goal_text. Absent → the opaque "Probe N" fallback.
+ */
+export interface CatalogEntry {
+  readonly goal_id: OpaqueId;
+  readonly topic_label: string;
+  readonly standard_code: string;
+}
 
 /** The decrypted, in-memory record set read out of one stream's doc. */
 export interface DecryptedRecords {
@@ -46,6 +59,8 @@ export interface DecryptedRecords {
   readonly observations: readonly MasteryObservation[];
   /** Baseline points (M7) for proposed/baselining goals — segregated from monitoring points; never feed IC. */
   readonly baselinePoints: readonly BaselinePoint[];
+  /** NON-PII curriculum catalog (M13/C-3) — the only source the para administer-label draws from. */
+  readonly catalog: readonly CatalogEntry[];
 }
 
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
@@ -58,6 +73,7 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     probes: [...doc.getMap<ProbeDefinition>(PROBES).values()],
     observations: [...doc.getMap<MasteryObservation>(OBSERVATIONS).values()],
     baselinePoints: [...doc.getMap<BaselinePoint>(BASELINE_POINTS).values()],
+    catalog: [...doc.getMap<CatalogEntry>(CATALOG).values()],
   };
 }
 
@@ -129,6 +145,10 @@ export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
   const baselinePoints = doc.getMap<BaselinePoint>(BASELINE_POINTS);
   for (const baselinePoint of records.baselinePoints) {
     baselinePoints.set(baselinePoint.baseline_point_id, baselinePoint);
+  }
+  const catalog = doc.getMap<CatalogEntry>(CATALOG);
+  for (const entry of records.catalog) {
+    catalog.set(entry.goal_id, entry);
   }
 }
 

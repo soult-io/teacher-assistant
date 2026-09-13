@@ -18,6 +18,7 @@ import {
   captureScoredPoint,
   type MasteryCandidate,
   recordNoData,
+  validateParaPoint,
 } from "@teacher-assistant/domain-core";
 import type {
   BaselinePoint,
@@ -177,6 +178,27 @@ export function adoptGoalMutator(
 ): DocMutator {
   const adopted = adoptGoal(goal, baselinePoints, options);
   return (doc) => upsertGoal(doc, adopted);
+}
+
+/**
+ * Persist a para-entered pending point (M13). The point is built by the ENGINE's
+ * buildParaPendingPoint (scorer=para, state pending/no_data, never validated); this
+ * only upserts it. It is NOT a record — it awaits teacher validation.
+ */
+export function paraCaptureMutator(point: ProgressDataPoint): DocMutator {
+  return (doc) => upsertPoint(doc, point);
+}
+
+/**
+ * Teacher validation of a para pending point (M13, C-4): validateParaPoint promotes
+ * it to the canonical record (pending→scored, stamped validated_by/ts; a ⊘ stays
+ * no_data) — the ONLY thing written back. Trend/history/exports are never produced
+ * here. In this single-doc app the validated record replaces the pending point by id
+ * (the two-doc split of validated→MK / tombstone→para is the crypto-envelope's job).
+ */
+export function validateParaMutator(pending: ProgressDataPoint, when: Timestamp): DocMutator {
+  const { validated } = validateParaPoint(pending, { who: "teacher", when });
+  return (doc) => upsertPoint(doc, validated);
 }
 
 /**

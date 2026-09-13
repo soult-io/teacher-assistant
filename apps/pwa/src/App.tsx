@@ -9,6 +9,7 @@ import {
   type IsoDate,
   newOpaqueId,
   type OpaqueId,
+  type ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { AppShell, type Tab } from "./app/AppShell.js";
@@ -24,6 +25,8 @@ import {
   nowTs,
 } from "./app/screens/new-goal/assemble.js";
 import { NewGoalScreen } from "./app/screens/new-goal/NewGoalScreen.js";
+import { ParaScreen } from "./app/screens/para/ParaScreen.js";
+import { ValidationQueueScreen } from "./app/screens/para/ValidationQueueScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
 import { ToScoreScreen } from "./app/screens/ToScoreScreen.js";
 import { buildLookups } from "./app/screens/dashboard/dashboard-vm.js";
@@ -46,10 +49,11 @@ import {
   adoptGoalMutator,
   createGoalMutator,
   upsertGoalMutator,
+  validateParaMutator,
 } from "./data/writes.js";
 
 type Phase = "locked" | "unlocking" | "ready";
-type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail" | "baseline";
+type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail" | "baseline" | "validation";
 
 export interface AppProps {
   /** Injectable bootstrap (tests supply a crypto-free fake); defaults to the real pipeline. */
@@ -180,6 +184,22 @@ function ReadyApp({
     [apply],
   );
 
+  // U6 teacher validation of a para pending point (M13, C-4): the engine promotes it
+  // to the canonical record; Fix opens the teacher score sheet to correct it first.
+  const confirmPara = useCallback(
+    (pending: ProgressDataPoint) => void apply(validateParaMutator(pending, nowTs())),
+    [apply],
+  );
+  const fixPara = useCallback(
+    (pending: ProgressDataPoint) => {
+      const goal = records.goals.find((g) => g.goal_id === pending.goal_id);
+      if (goal !== undefined) {
+        setSheetTarget(targetForGoal(goal, lk, today, pending));
+      }
+    },
+    [records.goals, lk, today],
+  );
+
   const commit = useCallback(
     async (mutator: Parameters<typeof apply>[0]) => {
       await apply(mutator);
@@ -188,8 +208,20 @@ function ReadyApp({
     [apply],
   );
 
+  // Period label for one student (baseline track needs it per-row); hoisted out of
+  // the track cascade so each branch below is a flat return with no nested ternary.
+  const periodLabelByStudent = useCallback(
+    (sid: OpaqueId): string | null => {
+      const pid = lk.periodByStudent(sid);
+      return pid !== null ? (lk.periodLabelById.get(pid) ?? null) : null;
+    },
+    [lk],
+  );
+
   const detailGoal =
     detailGoalId !== null ? records.goals.find((g) => g.goal_id === detailGoalId) : undefined;
+  const detailPeriodLabel =
+    detailGoal !== undefined ? periodLabelByStudent(detailGoal.student_id) : null;
 
   const track = (() => {
     if (trackView === "new_goal") {
@@ -200,10 +232,7 @@ function ReadyApp({
         <BaselineScreen
           records={records}
           initialsById={lk.initialsById}
-          periodLabelByStudent={(sid) => {
-            const pid = lk.periodByStudent(sid);
-            return pid !== null ? (lk.periodLabelById.get(pid) ?? null) : null;
-          }}
+          periodLabelByStudent={periodLabelByStudent}
           isNonInstructional={isNonInstructionalWeek}
           onBack={() => setTrackView("dashboard")}
           onNewGoal={() => setTrackView("new_goal")}
@@ -223,16 +252,26 @@ function ReadyApp({
         />
       );
     }
+    if (trackView === "validation") {
+      return (
+        <ValidationQueueScreen
+          records={records}
+          initialsById={lk.initialsById}
+          goalTextById={lk.goalTextById}
+          onConfirm={confirmPara}
+          onFix={fixPara}
+          onBack={() => setTrackView("dashboard")}
+        />
+      );
+    }
     if (trackView === "goal_detail" && detailGoal !== undefined) {
-      const periodId = lk.periodByStudent(detailGoal.student_id);
-      const periodLabel = periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
       return (
         <GoalDetailScreen
           goal={detailGoal}
           points={records.points}
           observations={records.observations}
           initials={lk.initialsById.get(detailGoal.student_id) ?? "??"}
-          periodLabel={periodLabel}
+          periodLabel={detailPeriodLabel}
           probeLabel={lk.probeByGoal.get(detailGoal.goal_id)?.label ?? "probe"}
           isNonInstructional={isNonInstructionalWeek}
           onBack={() => setTrackView("dashboard")}
@@ -250,6 +289,7 @@ function ReadyApp({
         onNewGoal={() => setTrackView("new_goal")}
         onToScore={() => setTrackView("toscore")}
         onBaseline={() => setTrackView("baseline")}
+        onValidate={() => setTrackView("validation")}
         onOpenScore={setSheetTarget}
         onOpenDetail={openDetail}
         apply={apply}
@@ -278,7 +318,7 @@ function ReadyApp({
       overlay={overlay}
     >
       {role === "para" ? (
-        <StubScreen title="Para surface" note="Para view lands in U6" />
+        <ParaScreen records={records} now={now} apply={apply} />
       ) : tab === "track" ? (
         track
       ) : (

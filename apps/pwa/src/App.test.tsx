@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { App } from "./App.js";
 import type { BootstrapOptions } from "./data/session.js";
@@ -193,5 +193,26 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.change(screen.getByLabelText("total items"), { target: { value: "7" } });
     expect(screen.queryByTestId("mismatch-ack")).toBeNull();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  it("switching to the Para role shows the period-scoped para surface", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "Para (JT)" }));
+    expect(await screen.findByText("Your students today")).toBeInTheDocument();
+    // A para capture opens the hard-constrained sheet (no free-text).
+    fireEvent.click(screen.getAllByRole("button", { name: /^score / })[0] as HTMLElement);
+    expect(await screen.findByRole("dialog", { name: "para score entry" })).toBeInTheDocument();
+  });
+
+  it("teacher validates a pending para point from the queue (nothing counts until then)", async () => {
+    await unlock();
+    fireEvent.click(screen.getByTestId("validate-note"));
+    const confirms = await screen.findAllByRole("button", { name: /^confirm / });
+    expect(confirms.length).toBe(2); // two seeded para captures await validation
+    fireEvent.click(confirms[0] as HTMLElement);
+    // One validated → it leaves the queue; one remains.
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /^confirm / }).length).toBe(1),
+    );
   });
 });

@@ -34,7 +34,7 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     // 25 points: the current-week mix (2 scored, 1 no-data, 1 pending-para) PLUS
     // the prior-week Goal Detail histories (U4) — which never touch THIS week's
     // dashboard (the projection filters to the asOf ISO week; asserted below).
-    expect(session.records.points).toHaveLength(25);
+    expect(session.records.points).toHaveLength(26);
     expect(session.records.periods).toHaveLength(2);
     expect(session.records.probes).toHaveLength(6); // one per active goal + the proposed goal's
 

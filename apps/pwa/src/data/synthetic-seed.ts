@@ -9,6 +9,7 @@
 // Ids are freshly minted opaque UUIDs (never derived from initials) each seed.
 
 import {
+  type AccommodationSubtype,
   asTimestamp,
   type BaselinePoint,
   type ClassPeriod,
@@ -17,13 +18,14 @@ import {
   newOpaqueId,
   type NoDataReason,
   type OpaqueId,
+  type ParaObservation,
   type ProbeDefinition,
   type ProgressDataPoint,
   type Student,
   type Timestamp,
 } from "@teacher-assistant/schema";
+import type { CatalogEntry, DecryptedRecords } from "./repository.js";
 import { isoDateOf } from "./date.js";
-import type { DecryptedRecords } from "./repository.js";
 
 const DAY_MS = 86_400_000;
 
@@ -142,11 +144,24 @@ function countedOffBasisPoint(
 }
 
 /**
- * A para-entered point awaiting teacher validation (scorer=para, no validated_by).
- * It does not score the goal — the goal still owes a validated point — but the
- * dashboard surfaces the pending-para note (buildValidationQueue) on its row.
+ * A para-entered scored point awaiting teacher validation (M13: scorer=para, state
+ * pending, no validated_by). It does not score the goal until the teacher validates.
+ * Carries the para's OWN witnessed observation chips (never sourced from accom_mod),
+ * and flags an off-basis total when denominatorUsed ≠ 5 (routes to the queue as a
+ * mismatch the teacher resolves — the para cannot redefine the denominator).
  */
-function pendingParaPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number): ProgressDataPoint {
+function pendingParaPoint(
+  goal: IEPGoal,
+  adminDate: IsoDate,
+  numerator: number,
+  opts: {
+    readonly denominatorUsed?: number;
+    readonly observations?: readonly ParaObservation[];
+    readonly accommodationSubtypes?: readonly AccommodationSubtype[];
+  } = {},
+): ProgressDataPoint {
+  const denominatorUsed = opts.denominatorUsed ?? 5;
+  const mismatch = denominatorUsed !== 5;
   return {
     data_point_id: newOpaqueId(),
     goal_id: goal.goal_id,
@@ -155,10 +170,17 @@ function pendingParaPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number):
     entry_ts: asTimestamp(0),
     state: "pending",
     numerator,
-    denominator_used: 5,
-    computed_value: numerator / 5,
+    denominator_used: denominatorUsed,
+    denominator_original: 5,
+    denominator_mismatch: mismatch,
+    computed_value: numerator / denominatorUsed,
+    probe_condition_id: newOpaqueId(),
     setting: "math_resource",
     scorer: "para",
+    ...(opts.observations !== undefined ? { para_observations: opts.observations } : {}),
+    ...(opts.accommodationSubtypes !== undefined
+      ? { accommodation_subtypes: opts.accommodationSubtypes }
+      : {}),
     revisions: [],
   };
 }
@@ -352,7 +374,31 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
     //    from the dashboard via the ↗ trend button; < 8 points → INDETERMINATE.
     scoredPoint(abTwoStep, weeksBefore(now, 2), 2), // 40%
     scoredPoint(abTwoStep, weeksBefore(now, 1), 3), // 60%
-    pendingParaPoint(abTwoStep, adminDate, 3), // owes + pending-para note (current week)
+    // ── M13 para captures awaiting teacher validation (3rd period = P2). Both on OWES
+    //    goals so the header is unchanged: a clean one (with witnessed observation
+    //    chips) and a denominator-MISMATCH one (the para entered the real total; it
+    //    routes to the queue flagged for the teacher to resolve). The ⊘ path is
+    //    exercised through the para capture flow itself, not seeded.
+    pendingParaPoint(abTwoStep, adminDate, 3, { observations: ["Independent"] }),
+    pendingParaPoint(cdFractions, adminDate, 5, {
+      denominatorUsed: 6, // ≠ assigned 5 → off-basis, teacher resolves on validation
+      observations: ["Accommodation", "Within2Prompts"],
+      accommodationSubtypes: ["Calculator"],
+    }),
+  ];
+
+  // NON-PII curriculum catalog (C-3): the gen-ed topic + KY standard the class works,
+  // keyed by opaque goal id. AUTHORED curriculum reference data — NOT read from
+  // goal_text; the para administer-label draws ONLY from here.
+  const catalog: CatalogEntry[] = [
+    { goal_id: abTwoStep.goal_id, topic_label: "Two-step equations", standard_code: "EE.C.7" },
+    { goal_id: abIntegers.goal_id, topic_label: "Integer operations", standard_code: "NS.A.1" },
+    { goal_id: cdFractions.goal_id, topic_label: "Multiplying fractions", standard_code: "NS.A.2" },
+    {
+      goal_id: cdNumberLine.goal_id,
+      topic_label: "Number line & inequalities",
+      standard_code: "NS.A.1",
+    },
   ];
 
   // One assigned probe per active goal (expected total 5) — the sheet defaults to
@@ -384,5 +430,5 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
 
   // No mastery observation seeded — a mastery-eligible run (cdFractions) surfaces
   // the teacher's Acknowledge action on Goal Detail; acknowledging writes one.
-  return { students, goals, points, periods, probes, observations: [], baselinePoints };
+  return { students, goals, points, periods, probes, observations: [], baselinePoints, catalog };
 }

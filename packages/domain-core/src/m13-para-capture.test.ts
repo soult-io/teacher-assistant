@@ -14,6 +14,7 @@ import {
 } from "@teacher-assistant/schema";
 import { describe, expect, it } from "vitest";
 import {
+  applyEdit,
   buildAdministerLabel,
   buildParaPendingPoint,
   type ParaCaptureContext,
@@ -179,6 +180,44 @@ describe("teacher validation writes the MK record and tombstones the para pendin
     // The only thing written back to the para doc is the consume tombstone.
     expect(tombstone.dataPointId).toBe(validated.data_point_id);
     expect(tombstone.consumedTs).toBe(when);
+  });
+
+  it("a teacher [Fix] of a pending para point resyncs computed_value before validation", () => {
+    // Para captured 3 of 10 (30%); the teacher corrects #correct to 8 via the Fix edit
+    // path. A para point is state=pending, so applyEdit must STILL recompute the ratio —
+    // otherwise validation promotes a record whose stored computed_value (0.30) contradicts
+    // its 8/10 numerator, which the dashboard/goal-detail then display.
+    const captured = buildParaPendingPoint(ctx(), {
+      kind: "scored",
+      numerator: 3,
+      denominatorUsed: 10,
+    });
+    if (!captured.ok) throw new Error("fixture");
+    expect(captured.point.state).toBe("pending");
+    expect(captured.point.computed_value).toBeCloseTo(0.3);
+
+    const fixed = applyEdit(captured.point, { numerator: 8 }, "teacher", asTimestamp(10));
+    expect(fixed.computed_value).toBeCloseTo(0.8); // resynced while still pending
+
+    const { validated } = validateParaPoint(fixed, { who: "teacher", when: asTimestamp(20) });
+    expect(validated.state).toBe("scored");
+    expect(validated.numerator).toBe(8);
+    expect(validated.computed_value).toBeCloseTo(0.8); // the corrected ratio, not the stale 0.30
+  });
+
+  it("a teacher [Fix] restoring the assigned total clears a pending point's off-basis flag", () => {
+    // Off-basis capture: 4 of 6 on a 10-item assigned probe → denominator_mismatch true.
+    const off = buildParaPendingPoint(ctx({ expectedDenominator: 10 }), {
+      kind: "scored",
+      numerator: 4,
+      denominatorUsed: 6,
+    });
+    if (!off.ok) throw new Error("fixture");
+    expect(off.point.denominator_mismatch).toBe(true);
+    // The teacher fixes the total back to the assigned 10 → the flag must clear.
+    const fixed = applyEdit(off.point, { denominator_used: 10 }, "teacher", asTimestamp(10));
+    expect(fixed.denominator_mismatch).toBe(false);
+    expect(fixed.computed_value).toBeCloseTo(0.4);
   });
 
   it("a documented ⊘ stays no_data on validation", () => {
