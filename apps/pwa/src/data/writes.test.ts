@@ -113,6 +113,42 @@ describe("write mutators (M5 capture path)", () => {
     expect(scored?.denominator_original).toBe(5);
   });
 
+  it("scoreMutator with an F-2 election records the teacher's mismatch disposition", () => {
+    const points = applyTo(
+      scoreMutator({
+        ...ctx(),
+        numerator: 3,
+        denominatorUsed: 6,
+        expectedDenominator: 5,
+        election: { mismatchWindowDisposition: "counted" },
+      }),
+    );
+    const p = points[0];
+    expect(p?.denominator_mismatch).toBe(true);
+    expect(p?.mismatch_acknowledged).toBe(true);
+    expect(p?.mismatch_window_disposition).toBe("counted");
+  });
+
+  it("editMutator carries the election onto a [Fix] that introduces a mismatch", () => {
+    const base = applyTo(
+      scoreMutator({ ...ctx(), numerator: 5, denominatorUsed: 5, expectedDenominator: 5 }),
+    )[0];
+    if (base === undefined) {
+      throw new Error("expected a base scored point");
+    }
+    expect(base.denominator_mismatch).toBe(false);
+    const doc = new Y.Doc();
+    doc.transact(() =>
+      editMutator(base, { denominator_used: 6 }, asTimestamp(2), {
+        mismatchWindowDisposition: "excluded",
+      })(doc),
+    );
+    const fixed = readRecords(doc).points[0];
+    expect(fixed?.denominator_mismatch).toBe(true);
+    expect(fixed?.mismatch_window_disposition).toBe("excluded");
+    expect(fixed?.mismatch_acknowledged).toBe(true);
+  });
+
   it("editMutator [Fix] on a scored point retains the prior value as a revision (same id)", () => {
     const points = applyTo(
       scoreMutator({ ...ctx(), numerator: 3, denominatorUsed: 5, expectedDenominator: 5 }),

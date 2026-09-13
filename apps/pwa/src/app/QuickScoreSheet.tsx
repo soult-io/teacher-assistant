@@ -18,6 +18,7 @@ import {
   completeQueuedMutator,
   DEFAULT_SETTING,
   editMutator,
+  type MismatchElection,
   noDataMutator,
   scoreMutator,
 } from "../data/writes.js";
@@ -84,8 +85,11 @@ function ScoreEntry({
     setCorrect((c) => clamp(c, 0, d));
   };
 
-  const save = () => {
+  // On a genuine mismatch, Save is gated behind the F-2 ack: `election` carries the
+  // teacher's one-tap disposition. On a matching total it is undefined (no ack).
+  const save = (election?: MismatchElection) => {
     const entryTs = asTimestamp(Date.now());
+    const withElection = election !== undefined ? { election } : {};
     if (existing !== undefined) {
       // A queued placeholder is completed by a fresh mismatch-aware capture that
       // replaces it; an already-scored point is corrected by an audited [Fix].
@@ -97,10 +101,16 @@ function ScoreEntry({
                 numerator: correct,
                 denominatorUsed: denom,
                 expectedDenominator: target.expectedDenominator,
+                ...withElection,
               },
               entryTs,
             )
-          : editMutator(existing, { numerator: correct, denominator_used: denom }, entryTs),
+          : editMutator(
+              existing,
+              { numerator: correct, denominator_used: denom },
+              entryTs,
+              election,
+            ),
       );
       return;
     }
@@ -110,6 +120,7 @@ function ScoreEntry({
         numerator: correct,
         denominatorUsed: denom,
         expectedDenominator: target.expectedDenominator,
+        ...withElection,
       }),
     );
   };
@@ -164,21 +175,48 @@ function ScoreEntry({
           {pct}
           <small>%</small>
         </div>
-        {mismatch ? (
+      </div>
+      {mismatch ? (
+        // F-2 (§B): a genuine denominator mismatch REQUIRES an affirmative
+        // acknowledgment before Save — one tap picks the window disposition. Both
+        // choices acknowledge; the point carries the off-basis flag either way.
+        <div className="ack" data-testid="mismatch-ack">
           <div className="note laternote">
-            Total differs from the assigned probe — it's flagged for you; the goal's denominator is
-            not changed here.
+            This total ({denom}) differs from the goal's basis ({target.expectedDenominator}) —
+            choose how it counts. It stays flagged off-basis; the goal's denominator is unchanged.
           </div>
-        ) : null}
-      </div>
-      <div className="btnrow">
-        <button type="button" className="btn primary wide" onClick={save}>
-          Save
-        </button>
-        <button type="button" className="btn wide" onClick={toNoData}>
-          No data
-        </button>
-      </div>
+          <div className="btnrow">
+            <button
+              type="button"
+              className="btn primary wide"
+              onClick={() => save({ mismatchWindowDisposition: "counted" })}
+            >
+              Count it in the trend
+            </button>
+            <button
+              type="button"
+              className="btn wide"
+              onClick={() => save({ mismatchWindowDisposition: "excluded" })}
+            >
+              Keep it out
+            </button>
+          </div>
+          <div className="sheet-later">
+            <button type="button" className="btn small ghost" onClick={toNoData}>
+              No data instead
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="btnrow">
+          <button type="button" className="btn primary wide" onClick={() => save()}>
+            Save
+          </button>
+          <button type="button" className="btn wide" onClick={toNoData}>
+            No data
+          </button>
+        </div>
+      )}
       {existing === undefined ? (
         <div className="sheet-later">
           <button

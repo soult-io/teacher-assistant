@@ -47,6 +47,22 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(header).toHaveTextContent("3 of 4 collectable scored · 1 excused · 1 owe");
   });
 
+  it("gates Save behind the F-2 mismatch acknowledgment on a genuine mismatch", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "score Multiply fractions" }));
+    // Change the total from the assigned 5 to 6 → a genuine denominator mismatch.
+    fireEvent.change(screen.getByLabelText("total items"), { target: { value: "6" } });
+
+    // Save is gated: the ack replaces the plain Save with the two dispositions.
+    expect(screen.getByTestId("mismatch-ack")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+    // One tap picks the disposition (and acknowledges) → the point saves.
+    fireEvent.click(screen.getByRole("button", { name: "Count it in the trend" }));
+    const header = await screen.findByTestId("header-line");
+    expect(header).toHaveTextContent("3 of 4 collectable scored");
+  });
+
   it("records a no-data ⊘ with a required reason", async () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "score Multiply fractions" }));

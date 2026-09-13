@@ -838,3 +838,8 @@ button.rowmain {
   padding: 0;
   cursor: pointer;
 }
+
+/* F-2 mismatch acknowledgment (gates Save on a genuine denominator mismatch) */
+.ack {
+  margin-top: 0.2rem;
+}

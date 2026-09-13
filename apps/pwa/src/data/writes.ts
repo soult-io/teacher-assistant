@@ -17,6 +17,7 @@ import {
 } from "@teacher-assistant/domain-core";
 import type {
   IsoDate,
+  MismatchDisposition,
   NoDataReason,
   OpaqueId,
   ProgressDataPoint,
@@ -42,11 +43,29 @@ export interface CaptureContext {
   readonly setting: Setting;
 }
 
+/**
+ * The teacher's F-2 acknowledgment of a denominator mismatch (set together on a
+ * genuine mismatch: one affirmative tap picks the window disposition). Absent =
+ * no mismatch, or the point matches the probe basis.
+ */
+export interface MismatchElection {
+  readonly mismatchWindowDisposition: MismatchDisposition;
+}
+
+/** Spread the M5 election params onto a captureScoredPoint call when one was made. */
+function electionParams(election: MismatchElection | undefined) {
+  return election === undefined
+    ? {}
+    : { mismatchAcknowledged: true, mismatchWindowDisposition: election.mismatchWindowDisposition };
+}
+
 export interface ScoreInput extends CaptureContext {
   readonly numerator: number;
   readonly denominatorUsed: number;
   /** The assigned probe's expected total; a mismatch is flagged (never blocked). */
   readonly expectedDenominator?: number;
+  /** The teacher's F-2 election, present iff Save was gated behind the mismatch ack. */
+  readonly election?: MismatchElection;
 }
 
 /** Capture a scored point (M5) and upsert it. */
@@ -63,6 +82,7 @@ export function scoreMutator(input: ScoreInput): DocMutator {
     ...(input.expectedDenominator !== undefined
       ? { expectedDenominator: input.expectedDenominator }
       : {}),
+    ...electionParams(input.election),
   });
   return (doc) => upsertPoint(doc, point);
 }
@@ -113,6 +133,7 @@ export function completeQueuedMutator(
     readonly numerator: number;
     readonly denominatorUsed: number;
     readonly expectedDenominator?: number;
+    readonly election?: MismatchElection;
   },
   entryTs: Timestamp,
 ): DocMutator {
@@ -128,6 +149,7 @@ export function completeQueuedMutator(
     ...(fill.expectedDenominator !== undefined
       ? { expectedDenominator: fill.expectedDenominator }
       : {}),
+    ...electionParams(fill.election),
   });
   return (doc) => {
     deletePoint(doc, queued.data_point_id);
@@ -146,7 +168,19 @@ export function editMutator(
   point: ProgressDataPoint,
   changes: Parameters<typeof applyEdit>[1],
   when: Timestamp,
+  election?: MismatchElection,
 ): DocMutator {
   const edited = applyEdit(point, changes, TEACHER, when);
-  return (doc) => upsertPoint(doc, edited);
+  // If the [Fix] leaves the point mismatched, carry the teacher's F-2 election
+  // onto it (applyEdit does not accept it — the disposition is a teacher input,
+  // and applyEdit already clears a stale one on a mismatch-resolving edit).
+  const withElection =
+    edited.denominator_mismatch === true && election !== undefined
+      ? {
+          ...edited,
+          mismatch_acknowledged: true,
+          mismatch_window_disposition: election.mismatchWindowDisposition,
+        }
+      : edited;
+  return (doc) => upsertPoint(doc, withElection);
 }
