@@ -13,18 +13,21 @@
 // as the stream's ciphertext snapshot/updates via the PersistenceAdapter
 // (hard-stop #10/#11). This module never touches storage.
 
-import type { IEPGoal, ProgressDataPoint, Student } from "@teacher-assistant/schema";
+import type { ClassPeriod, IEPGoal, ProgressDataPoint, Student } from "@teacher-assistant/schema";
 import type { Doc as YDoc } from "yjs";
 
 const STUDENTS = "students";
 const GOALS = "goals";
 const POINTS = "points";
+const PERIODS = "periods";
 
 /** The decrypted, in-memory record set read out of one stream's doc. */
 export interface DecryptedRecords {
   readonly students: readonly Student[];
   readonly goals: readonly IEPGoal[];
   readonly points: readonly ProgressDataPoint[];
+  /** ClassPeriod is a cleartext structural container (design §1.3); carried for the by-period lens. */
+  readonly periods: readonly ClassPeriod[];
 }
 
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
@@ -33,6 +36,7 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     students: [...doc.getMap<Student>(STUDENTS).values()],
     goals: [...doc.getMap<IEPGoal>(GOALS).values()],
     points: [...doc.getMap<ProgressDataPoint>(POINTS).values()],
+    periods: [...doc.getMap<ClassPeriod>(PERIODS).values()],
   };
 }
 
@@ -53,6 +57,10 @@ export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
   const points = doc.getMap<ProgressDataPoint>(POINTS);
   for (const point of records.points) {
     points.set(point.data_point_id, point);
+  }
+  const periods = doc.getMap<ClassPeriod>(PERIODS);
+  for (const period of records.periods) {
+    periods.set(period.period_id, period);
   }
 }
 

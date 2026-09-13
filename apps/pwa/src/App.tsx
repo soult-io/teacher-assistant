@@ -33,8 +33,15 @@ export function App({ bootstrap = bootstrapTeacherSession }: AppProps = {}) {
   const [error, setError] = useState<string | null>(null);
   const [role, setRole] = useState<Role>("teacher");
   const [tab, setTab] = useState<Tab>("track");
+  // Within the Track tab: the dashboard, or the New-Goal stub (the flow is U5).
+  const [trackView, setTrackView] = useState<"dashboard" | "new_goal">("dashboard");
   // Pin "now" once so the seed's week and the dashboard's evaluation week agree.
   const nowRef = useRef<Date>(new Date());
+
+  const onTab = useCallback((next: Tab) => {
+    setTrackView("dashboard");
+    setTab(next);
+  }, []);
 
   const unlock = useCallback(() => {
     setError(null);
@@ -60,12 +67,22 @@ export function App({ bootstrap = bootstrapTeacherSession }: AppProps = {}) {
     );
   }
 
-  const trackContent =
-    tab === "track" ? (
-      <DashboardScreen records={session.records} now={nowRef.current} />
+  const dashboardOrStub =
+    trackView === "new_goal" ? (
+      <StubScreen
+        title="New goal"
+        note="New-goal flow lands in U5"
+        onBack={() => setTrackView("dashboard")}
+      />
     ) : (
-      <StubScreen title="Plan" note="Planner lands in Phase 2" />
+      <DashboardScreen
+        records={session.records}
+        now={nowRef.current}
+        onNewGoal={() => setTrackView("new_goal")}
+      />
     );
+  const trackContent =
+    tab === "track" ? dashboardOrStub : <StubScreen title="Plan" note="Planner lands in Phase 2" />;
 
   return (
     <AppShell
@@ -75,7 +92,7 @@ export function App({ bootstrap = bootstrapTeacherSession }: AppProps = {}) {
       theme={theme.choice}
       onThemeCycle={theme.cycle}
       tab={tab}
-      onTab={setTab}
+      onTab={onTab}
     >
       {role === "para" ? (
         <StubScreen title="Para surface" note="Para view lands in U6" />

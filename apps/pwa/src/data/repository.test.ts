@@ -1,5 +1,6 @@
 import {
   asTimestamp,
+  type ClassPeriod,
   type IEPGoal,
   type IsoDate,
   newOpaqueId,
@@ -52,7 +53,14 @@ function sampleRecords(): DecryptedRecords {
     scorer: "teacher",
     revisions: [],
   };
-  return { students: [student], goals: [goal], points: [point] };
+  const period: ClassPeriod = {
+    period_id: newOpaqueId(),
+    label: "P2",
+    format: "blended_resource",
+    day_template: [],
+    has_para: true,
+  };
+  return { students: [student], goals: [goal], points: [point], periods: [period] };
 }
 
 describe("doc repository (round-trips entities through the CRDT)", () => {
@@ -70,6 +78,7 @@ describe("doc repository (round-trips entities through the CRDT)", () => {
     expect(read.students).toEqual(seed.students);
     expect(read.goals).toEqual(seed.goals);
     expect(read.points).toEqual(seed.points);
+    expect(read.periods).toEqual(seed.periods);
   });
 
   it("survives a Yjs snapshot round-trip (persistence rehydrate path)", () => {
