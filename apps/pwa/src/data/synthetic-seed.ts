@@ -10,6 +10,7 @@
 
 import {
   asTimestamp,
+  type ClassPeriod,
   type IEPGoal,
   type IsoDate,
   newOpaqueId,
@@ -94,6 +95,41 @@ function noDataPoint(goal: IEPGoal, adminDate: IsoDate): ProgressDataPoint {
 }
 
 /**
+ * A para-entered point awaiting teacher validation (scorer=para, no validated_by).
+ * It does not score the goal — the goal still owes a validated point — but the
+ * dashboard surfaces the pending-para note (buildValidationQueue) on its row.
+ */
+function pendingParaPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number): ProgressDataPoint {
+  return {
+    data_point_id: newOpaqueId(),
+    goal_id: goal.goal_id,
+    student_id: goal.student_id,
+    admin_date: adminDate,
+    entry_ts: asTimestamp(0),
+    state: "pending",
+    numerator,
+    denominator_used: 5,
+    computed_value: numerator / 5,
+    setting: "math_resource",
+    scorer: "para",
+    revisions: [],
+  };
+}
+
+/** A synthetic class period (cleartext structural container; carries no student). */
+function classPeriod(label: string, hasPara: boolean): ClassPeriod {
+  return {
+    period_id: newOpaqueId(),
+    label,
+    format: "blended_resource",
+    day_template: [],
+    has_para: hasPara,
+    // "Set iff has_para" (schema §1.3); opaque, no student payload.
+    ...(hasPara ? { para_id: newOpaqueId() } : {}),
+  };
+}
+
+/**
  * Build a fresh synthetic record set. The dashboard for `now` shows: 2 scored,
  * 1 excused (⊘ absent), 2 owes, and the proposed goal excluded — a live read
  * across all three states.
@@ -102,11 +138,22 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
   const adminDate = todayIso(now);
   const createdTs = asTimestamp(now.getTime());
 
-  const students: Student[] = CAST.map((s) => ({
+  // Two periods so the by-period lens has real buckets; P2 has the para.
+  const p2 = classPeriod("P2", true);
+  const p4 = classPeriod("P4", false);
+  const periods: ClassPeriod[] = [p2, p4];
+  const memberships: readonly (readonly OpaqueId[])[] = [
+    [p2.period_id], // AB
+    [p2.period_id], // CD
+    [p4.period_id], // EF
+    [p4.period_id], // GH
+  ];
+
+  const students: Student[] = CAST.map((s, i) => ({
     student_id: newOpaqueId(),
     initials: s.initials,
     color_token: s.color,
-    period_memberships: [],
+    period_memberships: memberships[i] ?? [],
     active: true,
   }));
   const [ab, cd, ef, gh] = students;
@@ -154,8 +201,9 @@ export function buildSyntheticSeed(now: Date = new Date()): DecryptedRecords {
     scoredPoint(abIntegers, adminDate, 4), // 80%
     scoredPoint(efSciNotation, adminDate, 3), // 60%
     noDataPoint(cdNumberLine, adminDate), // excused ⊘
-    // abTwoStep + cdFractions have no point this week → owes
+    pendingParaPoint(abTwoStep, adminDate, 3), // owes + pending-para note
+    // cdFractions has no point this week → owes
   ];
 
-  return { students, goals, points };
+  return { students, goals, points, periods };
 }

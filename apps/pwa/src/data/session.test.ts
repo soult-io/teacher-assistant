@@ -28,7 +28,8 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     expect(session.role).toBe("teacher");
     expect(session.records.students).toHaveLength(4);
     expect(session.records.goals).toHaveLength(6);
-    expect(session.records.points).toHaveLength(3);
+    expect(session.records.points).toHaveLength(4); // 2 scored, 1 no-data, 1 pending-para
+    expect(session.records.periods).toHaveLength(2);
 
     const dashboard = buildWeeklyDashboard({
       goals: session.records.goals,
