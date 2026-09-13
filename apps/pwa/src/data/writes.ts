@@ -164,22 +164,42 @@ export function completeQueuedMutator(
  * denominator_original, so a corrective [Fix] restoring the probe's total clears
  * the flag.
  */
+export interface EditOptions {
+  /**
+   * The assigned probe's expected total. Backfilled onto the point as
+   * `denominator_original` when it is missing, so applyEdit can (re)evaluate the
+   * denominator mismatch — a [Fix] on a point captured WITHOUT an expected total
+   * (e.g. a seeded point) would otherwise never flag an off-basis change and would
+   * silently drop the teacher's election. Never overwrites an existing original.
+   */
+  readonly expectedDenominator?: number;
+  /** The teacher's F-2 election, present iff Save was gated behind the mismatch ack. */
+  readonly election?: MismatchElection;
+}
+
 export function editMutator(
   point: ProgressDataPoint,
   changes: Parameters<typeof applyEdit>[1],
   when: Timestamp,
-  election?: MismatchElection,
+  opts: EditOptions = {},
 ): DocMutator {
-  const edited = applyEdit(point, changes, TEACHER, when);
+  // Ensure the point carries its probe basis so the ENGINE (applyEdit) evaluates
+  // the mismatch — the UI does not decide it. denominator_original is retained,
+  // never overwritten (schema §2.4).
+  const withBasis =
+    point.denominator_original === undefined && opts.expectedDenominator !== undefined
+      ? { ...point, denominator_original: opts.expectedDenominator }
+      : point;
+  const edited = applyEdit(withBasis, changes, TEACHER, when);
   // If the [Fix] leaves the point mismatched, carry the teacher's F-2 election
   // onto it (applyEdit does not accept it — the disposition is a teacher input,
   // and applyEdit already clears a stale one on a mismatch-resolving edit).
   const withElection =
-    edited.denominator_mismatch === true && election !== undefined
+    edited.denominator_mismatch === true && opts.election !== undefined
       ? {
           ...edited,
           mismatch_acknowledged: true,
-          mismatch_window_disposition: election.mismatchWindowDisposition,
+          mismatch_window_disposition: opts.election.mismatchWindowDisposition,
         }
       : edited;
   return (doc) => upsertPoint(doc, withElection);

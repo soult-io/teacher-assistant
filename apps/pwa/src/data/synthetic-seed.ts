@@ -70,6 +70,10 @@ function scoredPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number): Prog
     state: "scored",
     numerator,
     denominator_used: 5,
+    // Record the probe basis (expected total 5) like a real captureScoredPoint
+    // does — on-basis here, and so a later [Fix] to a different total can flag the
+    // mismatch. Never a mismatch as seeded (used === original).
+    denominator_original: 5,
     computed_value: numerator / 5,
     setting: "math_resource",
     scorer: "teacher",

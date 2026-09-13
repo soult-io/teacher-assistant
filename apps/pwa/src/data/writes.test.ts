@@ -140,7 +140,8 @@ describe("write mutators (M5 capture path)", () => {
     const doc = new Y.Doc();
     doc.transact(() =>
       editMutator(base, { denominator_used: 6 }, asTimestamp(2), {
-        mismatchWindowDisposition: "excluded",
+        expectedDenominator: 5,
+        election: { mismatchWindowDisposition: "excluded" },
       })(doc),
     );
     const fixed = readRecords(doc).points[0];
@@ -165,5 +166,36 @@ describe("write mutators (M5 capture path)", () => {
     expect(fixed?.computed_value).toBe(1); // re-derived
     expect(fixed?.revisions).toHaveLength(1); // prior value retained
     expect(fixed?.revisions[0]?.old).toMatchObject({ numerator: 3 });
+  });
+
+  it("editMutator backfills the probe basis so a [Fix] on a point WITHOUT denominator_original captures the election", () => {
+    // A scored point captured/seeded without denominator_original — the regression
+    // path: applyEdit could not re-evaluate the mismatch, dropping the election.
+    const seeded: ProgressDataPoint = {
+      data_point_id: newOpaqueId(),
+      goal_id: newOpaqueId(),
+      student_id: newOpaqueId(),
+      admin_date: ADMIN,
+      entry_ts: TS,
+      state: "scored",
+      numerator: 5,
+      denominator_used: 5,
+      computed_value: 1,
+      setting: "math_resource",
+      scorer: "teacher",
+      revisions: [],
+    };
+    const doc = new Y.Doc();
+    doc.transact(() =>
+      editMutator(seeded, { denominator_used: 6 }, asTimestamp(2), {
+        expectedDenominator: 5,
+        election: { mismatchWindowDisposition: "excluded" },
+      })(doc),
+    );
+    const fixed = readRecords(doc).points[0];
+    expect(fixed?.denominator_original).toBe(5); // basis backfilled
+    expect(fixed?.denominator_mismatch).toBe(true); // engine re-evaluated 6 ≠ 5
+    expect(fixed?.mismatch_window_disposition).toBe("excluded"); // election persisted
+    expect(fixed?.mismatch_acknowledged).toBe(true);
   });
 });

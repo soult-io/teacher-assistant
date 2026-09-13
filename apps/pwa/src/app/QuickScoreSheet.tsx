@@ -105,12 +105,10 @@ function ScoreEntry({
               },
               entryTs,
             )
-          : editMutator(
-              existing,
-              { numerator: correct, denominator_used: denom },
-              entryTs,
-              election,
-            ),
+          : editMutator(existing, { numerator: correct, denominator_used: denom }, entryTs, {
+              expectedDenominator: target.expectedDenominator,
+              ...(election !== undefined ? { election } : {}),
+            }),
       );
       return;
     }
