@@ -201,11 +201,13 @@ export function applyEdit(
     return { ...cleared, revisions: [...point.revisions, revision] };
   }
 
+  // Resync the derived ratio/mismatch on any numerator/denominator edit. A `no_data`
+  // point returned above, so a point here is either `scored` or a para `pending`
+  // capture the teacher is [Fix]-ing before validation — both must keep computed_value
+  // and denominator_mismatch in step with the corrected values, or validation would
+  // promote (and the dashboard display) a stale ratio.
   const derived: { computed_value?: number; denominator_mismatch?: boolean } = {};
-  if (
-    merged.state === "scored" &&
-    (changes.numerator !== undefined || changes.denominator_used !== undefined)
-  ) {
+  if (changes.numerator !== undefined || changes.denominator_used !== undefined) {
     derived.computed_value = computedRatio(merged.numerator ?? 0, merged.denominator_used ?? 0);
     if (merged.denominator_original !== undefined) {
       derived.denominator_mismatch = isDenominatorMismatch(

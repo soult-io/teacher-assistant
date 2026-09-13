@@ -7,17 +7,29 @@ import { buildLookups } from "./dashboard/dashboard-vm.js";
 const NOW = new Date("2026-09-14T12:00:00Z");
 
 function renderDashboard() {
-  const records = buildSyntheticSeed(NOW);
+  const seed = buildSyntheticSeed(NOW);
+  const records = seed.master;
   const lk = buildLookups(records);
   const handlers = {
     onNewGoal: vi.fn(),
     onToScore: vi.fn(),
     onBaseline: vi.fn(),
+    onValidate: vi.fn(),
     onOpenScore: vi.fn(),
     onOpenDetail: vi.fn(),
     apply: vi.fn().mockResolvedValue(undefined),
   };
-  render(<DashboardScreen records={records} lk={lk} now={NOW} {...handlers} />);
+  // The para pending count now comes from the para doc (D3), passed by App; the seed
+  // ships 2 para captures awaiting validation.
+  render(
+    <DashboardScreen
+      records={records}
+      lk={lk}
+      now={NOW}
+      paraPendingCount={seed.paraPending.length}
+      {...handlers}
+    />,
+  );
   return handlers;
 }
 
@@ -27,7 +39,7 @@ describe("DashboardScreen (U2/U3)", () => {
     expect(screen.getByTestId("header-line")).toHaveTextContent(
       "2 of 4 collectable scored · 1 excused · 2 owe",
     );
-    expect(screen.getByText(/1 para point.*awaiting your OK/)).toBeInTheDocument();
+    expect(screen.getByText(/2 para points.*awaiting your OK/)).toBeInTheDocument();
     const body = screen.getByTestId("dashboard-body").textContent ?? "";
     expect(body).toContain("5-item probe");
     expect(body).toContain("80% × 4 consecutive probes");

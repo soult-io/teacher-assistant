@@ -1256,3 +1256,51 @@ button.rowmain {
   width: 100%;
   margin-top: 0.4rem;
 }
+
+/* ── U6 Para surface + teacher validation queue ─────────────────────────────── */
+.para h1,
+.validation-queue h1 {
+  margin: 0.1rem 0 0.2rem;
+  font-size: 1.2rem;
+}
+.para .row,
+.validation-queue .row {
+  cursor: default;
+}
+/* the pending-para note becomes a button (opens the validation queue) */
+.pendbtn {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+/* teacher validation row */
+.row.validate {
+  border-color: var(--pending);
+  background: var(--pending-bg);
+  align-items: flex-start;
+}
+.valbtns {
+  display: flex;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+/* para capture sheet: the read-only provenance fields */
+.field {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.78rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.field .lab {
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.field .val.dim {
+  color: var(--text-dim);
+}
+.field .val.pendingtxt {
+  color: var(--pending);
+  font-weight: 700;
+}

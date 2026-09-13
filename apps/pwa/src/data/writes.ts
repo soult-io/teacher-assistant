@@ -38,6 +38,7 @@ import {
   upsertBaselinePoint,
   upsertGoal,
   upsertObservation,
+  upsertParaPending,
   upsertPoint,
   upsertProbe,
   upsertStudent,
@@ -177,6 +178,19 @@ export function adoptGoalMutator(
 ): DocMutator {
   const adopted = adoptGoal(goal, baselinePoints, options);
   return (doc) => upsertGoal(doc, adopted);
+}
+
+/**
+ * Persist a para-entered pending point (M13). The point is built by the ENGINE's
+ * buildParaPendingPoint (scorer=para, state pending/no_data, never validated); this
+ * only upserts it. It is NOT a record — it awaits teacher validation.
+ */
+export function paraCaptureMutator(point: ProgressDataPoint): DocMutator {
+  // The para writes into the {period}/para-visible doc's pending map (Period-DEK
+  // scope) — NEVER the master `points` map. It is not a record; the teacher's
+  // two-doc validate (session.validatePara) promotes it → master and tombstones it
+  // here (C-4). The single-doc shortcut is gone: the boundary is the key, not a flag.
+  return (doc) => upsertParaPending(doc, point);
 }
 
 /**
