@@ -538,4 +538,49 @@ describe("goal detail — U4 chart display inputs (clamp boundary + ⊘ markers)
       { adminDate: "2026-09-21", reason: "absent" },
     ]);
   });
+
+  it("DM-1: the consistency glance is CLAMPED + disposition-aware (never blends across a change)", () => {
+    // A criterion change on 2026-09-10 clamps the window. Pre-clamp probes meet the
+    // OLD criterion; a naive UI slice of the raw trend would paint them ●●● while the
+    // engine run correctly reads 0. The glance must show ONLY the post-clamp probes.
+    const changeWhen = Date.UTC(2026, 8, 10); // 2026-09-10
+    const goal: IEPGoal = {
+      ...makeGoal({ nProbes: 3 }),
+      revisions: [
+        {
+          who: "teacher",
+          when: asTimestamp(changeWhen),
+          old: { criterion_level: 70 },
+          new: { criterion_level: 80 },
+        },
+      ],
+    };
+    const countedOffBasis: ProgressDataPoint = {
+      ...base(goal),
+      data_point_id: newOpaqueId(),
+      admin_date: iso("2026-09-18"),
+      state: "scored",
+      numerator: 6,
+      denominator_used: 6, // ≠ original 10 → mismatch, teacher-elected "counted"
+      denominator_original: 10,
+      denominator_mismatch: true,
+      mismatch_acknowledged: true,
+      mismatch_window_disposition: "counted",
+      computed_value: 1,
+    };
+    const detail = buildGoalDetail(goal, [
+      scored(goal, "2026-09-01", 10), // pre-clamp 100% (meets OLD) — must NOT be in the glance
+      scored(goal, "2026-09-08", 10), // pre-clamp 100% — must NOT be in the glance
+      scored(goal, "2026-09-11", 6), // post-clamp 60% (below 80) clean
+      countedOffBasis, // post-clamp, off-basis, counted → in the window, flagged
+    ]);
+    const glance = detail.consistency.recentGlyphs;
+    // Only the two post-clamp probes appear (no blend with the pre-clamp 100%s).
+    expect(glance).toHaveLength(2);
+    // 2026-09-11 is 60% (below the new 80), the off-basis point is 100% (meets) but flagged.
+    expect(glance.map((g) => g.meets)).toEqual([false, true]);
+    expect(glance.map((g) => g.offBasis)).toEqual([false, true]);
+    // The glance's met-count is consistent with the engine run (no over-count across the clamp).
+    expect(glance.filter((g) => g.meets).length).toBeGreaterThanOrEqual(detail.consistency.run);
+  });
 });

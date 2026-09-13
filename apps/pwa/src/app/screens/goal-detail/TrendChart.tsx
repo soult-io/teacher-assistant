@@ -154,6 +154,25 @@ export function TrendChart(props: TrendChartProps) {
           strokeDasharray="6 5"
         />
       ) : null}
+
+      {/* Baseline caption — the aim line's start value (design: the baseline anchor).
+          Baseline is a goal attribute / segregated BaselinePoint, not a plotted
+          monitoring point, so it is shown as the aim origin, never a trend dot. */}
+      {baselineValue !== null ? (
+        <g>
+          <line
+            x1={PAD_L}
+            y1={Y(baselineValue)}
+            x2={PAD_L + 8}
+            y2={Y(baselineValue)}
+            stroke="var(--text-dim)"
+            strokeWidth={2}
+          />
+          <text x={PAD_L + 11} y={Y(baselineValue) + 3} fontSize={9} fill="var(--text-dim)">
+            base {baselineValue}%
+          </text>
+        </g>
+      ) : null}
       <text
         x={W - PAD_R}
         y={Y(criterionLevel) - 5}

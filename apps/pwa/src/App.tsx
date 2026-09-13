@@ -16,6 +16,7 @@ import { type SheetTarget, targetForGoal, targetForQueued } from "./app/sheet-ta
 import { useOnline } from "./app/useOnline.js";
 import { useSessionRecords } from "./app/useSessionRecords.js";
 import { useTheme, type ThemeControl } from "./app/useTheme.js";
+import { isNonInstructionalWeek } from "./data/calendar.js";
 import { isoDateOf } from "./data/date.js";
 import {
   type BootstrapOptions,
@@ -139,6 +140,7 @@ function ReadyApp({
           initials={lk.initialsById.get(detailGoal.student_id) ?? "??"}
           periodLabel={periodLabel}
           probeLabel={lk.probeByGoal.get(detailGoal.goal_id)?.label ?? "probe"}
+          isNonInstructional={isNonInstructionalWeek}
           onBack={() => setTrackView("dashboard")}
           onAddPoint={() => setSheetTarget(targetForGoal(detailGoal, lk, today))}
           onEditPoint={(point) => setSheetTarget(targetForGoal(detailGoal, lk, today, point))}

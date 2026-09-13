@@ -1,3 +1,4 @@
+import { asTimestamp, type IEPGoal, newOpaqueId } from "@teacher-assistant/schema";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { buildSyntheticSeed } from "../../../data/synthetic-seed.js";
@@ -26,6 +27,7 @@ function renderDetail(goalText: string, over?: Partial<Parameters<typeof GoalDet
       initials={initials}
       periodLabel="P4"
       probeLabel="5-item probe"
+      isNonInstructional={() => false}
       {...handlers}
       {...over}
     />,
@@ -107,5 +109,94 @@ describe("GoalDetailScreen (U4)", () => {
     const { handlers } = renderDetail("Add integers");
     fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
     expect(handlers.onBack).toHaveBeenCalledOnce();
+  });
+
+  // ── PASS-WITH-CHANGES batch ─────────────────────────────────────────────────
+
+  it("DM-1: the consistency glance is painted from the engine, flagging an off-basis probe", () => {
+    // "Scientific notation" carries a teacher-counted off-basis probe inside its
+    // recent window → its glyph gets the off-basis ring (win-off), engine-classified.
+    renderDetail("Scientific notation");
+    const glance = screen.getByTestId("consistency-window");
+    expect(glance.querySelector(".win-off")).not.toBeNull();
+  });
+
+  it("DF-2: the ARC history table carries the Setting column", () => {
+    renderDetail("Add integers");
+    expect(screen.getByRole("columnheader", { name: "Setting" })).toBeInTheDocument();
+    expect(screen.getAllByText("Resource").length).toBeGreaterThan(0);
+  });
+
+  it("DF-1/DF-7: an IC-exportable goal exposes both copy paths", () => {
+    renderDetail("Add integers");
+    expect(screen.getByTestId("copy-quarterly")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy to IC" })).toBeInTheDocument();
+  });
+
+  it("DF-1/DF-7: a non-IC-exportable (proposed) goal has NO copy path and no statement", () => {
+    // A proposed goal fails the structural export guard — no draft statement, and no
+    // IC copy button on the quarterly card.
+    const proposed: IEPGoal = {
+      goal_id: newOpaqueId(),
+      student_id: newOpaqueId(),
+      goal_text: "Proposed goal",
+      behavior: "b",
+      circumstance: "given a 5-item probe",
+      criterion_level: 80,
+      criterion_consistency: { n_probes: 4, phrase: "4 consecutive probes" },
+      method_general: "cbm",
+      method_tool: "5-item probe",
+      frequency: "weekly",
+      denominator_model: "percent_correct_over_total",
+      accom_mod: "none",
+      setting_default: "math_resource",
+      valid_settings: ["math_resource"],
+      status: "proposed",
+      created_ts: asTimestamp(0),
+      revisions: [],
+    };
+    render(
+      <GoalDetailScreen
+        goal={proposed}
+        points={[]}
+        observations={[]}
+        initials="ZZ"
+        periodLabel={null}
+        probeLabel="5-item probe"
+        isNonInstructional={() => false}
+        onBack={vi.fn()}
+        onAddPoint={vi.fn()}
+        onEditPoint={vi.fn()}
+        onAckMastery={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("copy-quarterly")).toBeNull();
+    expect(screen.queryByTestId("auto-statement")).toBeNull();
+  });
+
+  it("DF-3: the three honesty info tips are present", () => {
+    renderDetail("Multiply fractions"); // a mastery-candidate goal → all three tips render
+    expect(
+      screen.getByText(/A ⊘ pauses the run, it never breaks or resets it/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/A report-card figure/)).toBeInTheDocument();
+    expect(screen.getByText(/Acknowledging flags the goal for ARC/)).toBeInTheDocument();
+  });
+
+  it("DF-4: the trend chart shows the baseline caption", () => {
+    renderDetail("Add integers"); // baseline 40
+    expect(screen.getByText("base 40%")).toBeInTheDocument();
+  });
+
+  it("clarifier: an INDETERMINATE statement surfaces the gate math", () => {
+    renderDetail("Multiply fractions"); // 5 points → below_point_gate (needs 3 more)
+    expect(screen.getByTestId("indeterminate-hint")).toHaveTextContent(
+      "Needs 3 more scored data points",
+    );
+  });
+
+  it("clarifier: the two-average divergence is explained when a counted off-basis point is averaged", () => {
+    renderDetail("Scientific notation"); // F4 counts the off-basis point; M8 excludes it
+    expect(screen.getByTestId("two-average-clarifier")).toBeInTheDocument();
   });
 });

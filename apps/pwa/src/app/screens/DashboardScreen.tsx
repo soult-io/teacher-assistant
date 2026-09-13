@@ -17,6 +17,7 @@ import {
   renderHeader,
 } from "@teacher-assistant/store";
 import { type ReactElement, useCallback, useMemo, useState } from "react";
+import { isNonInstructionalWeek } from "../../data/calendar.js";
 import { isoDateOf } from "../../data/date.js";
 import type { DecryptedRecords } from "../../data/repository.js";
 import type { DocMutator } from "../../data/session.js";
@@ -74,7 +75,9 @@ export function DashboardScreen(props: DashboardScreenProps) {
         goals: records.goals,
         points: records.points,
         asOf: now,
-        isNonInstructional: () => false, // U1–U3 synthetic: every week is instructional
+        // Single-sourced calendar (data/calendar.ts) — the same predicate the R3-3
+        // gate uses, so owes math and the auto-statement agree on what a week is.
+        isNonInstructional: isNonInstructionalWeek,
         periodByStudent: lk.periodByStudent,
       }),
     [records, now, lk],

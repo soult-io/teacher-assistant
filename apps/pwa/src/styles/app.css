@@ -1040,3 +1040,40 @@ button.rowmain {
   color: var(--text-dim);
   margin-top: 0.2rem;
 }
+
+/* U4 PASS-WITH-CHANGES additions: info tips, off-basis glance glyph, copy buttons */
+.tip {
+  display: inline;
+}
+.tip > summary {
+  display: inline;
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+  list-style: none;
+  margin-left: 0.25rem;
+}
+.tip > summary::-webkit-details-marker {
+  display: none;
+}
+.tip[open] > summary {
+  color: var(--accent);
+}
+.tiptext {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.76rem;
+  color: var(--text-dim);
+  background: var(--surface-2);
+  border-radius: 8px;
+  padding: 0.4rem 0.5rem;
+}
+/* an off-basis (teacher-counted) probe in the consistency glance — a ring like the chart */
+.win-off {
+  outline: 1.5px dashed var(--owes);
+  outline-offset: 1px;
+  border-radius: 999px;
+}
+.copybtn {
+  margin-top: 0.5rem;
+}

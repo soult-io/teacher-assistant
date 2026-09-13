@@ -20,12 +20,34 @@ import { inComputedMath, isCountedOffBasis, isUnresolvedMismatch } from "./misma
 import { clampAfterFromRevisions } from "./quarterly.js";
 import { percentCorrect } from "./value.js";
 
+/**
+ * One glyph in the recent-window glance (design R3 D2): a single scored probe from
+ * the CLAMPED, disposition-aware window the run is computed over. The UI renders
+ * these verbatim (● when `meets`, ○ otherwise; an off-basis ring when `offBasis`)
+ * and re-derives NOTHING — so the glance can never blend pre/post-clamp probes or
+ * re-classify criterion the way a UI-side `value >= criterion_level` slice would.
+ */
+export interface ConsistencyGlyph {
+  /** The source probe's opaque id — a stable, unique identity for rendering. */
+  readonly dataPointId: OpaqueId;
+  /** The probe meets the criterion level (engine-classified, %-model). */
+  readonly meets: boolean;
+  /** A teacher-counted off-basis (denominator-mismatch) probe — flagged like the chart ring. */
+  readonly offBasis: boolean;
+}
+
 export interface ConsistencyResult {
   /** Length of the current trailing run of consecutive scored probes meeting criterion. */
   readonly run: number;
   /** Required consecutive probes (goal.criterion_consistency.n_probes). */
   readonly required: number;
   readonly met: boolean;
+  /**
+   * The trailing `required` probes of the CLAMPED, in-computed-math window (oldest
+   * → newest), each carrying its own `meets` + `offBasis` — the authoritative glance
+   * the UI paints. Fewer than `required` when the (post-clamp) history is shorter.
+   */
+  readonly recentGlyphs: readonly ConsistencyGlyph[];
   /**
    * Admin date at which the window was FIRST-EVER satisfied (independent of the
    * current run — a later below-criterion probe can reset `run`/`met` while this
@@ -90,6 +112,7 @@ export function consistencyWindow(
       run: 0,
       required,
       met: false,
+      recentGlyphs: [],
       excludedMismatches: 0,
       countedOffBasis: 0,
       unresolvedMismatches: 0,
@@ -98,6 +121,16 @@ export function consistencyWindow(
   // Clamp FIRST (hard, non-electable), then the disposition decides survivors.
   const clampAfter = clampAfterFromRevisions(goal);
   const probes = scoredProbesInOrder(goal, points, clampAfter);
+  // The glance: the trailing `required` probes of exactly this clamped window, each
+  // engine-classified. The UI paints these — it never slices the raw trend or
+  // re-tests the criterion (which would blend across the clamp boundary, R3 DM-1).
+  const recentGlyphs: ConsistencyGlyph[] = probes
+    .slice(Math.max(0, probes.length - required))
+    .map((p) => ({
+      dataPointId: p.data_point_id,
+      meets: meetsCriterion(goal, p),
+      offBasis: isCountedOffBasis(p),
+    }));
   // Mismatch counts are scoped to the clamped region (a mismatched point before
   // the model-change boundary is dropped by the clamp, not surfaced here).
   const clampedScored = points.filter(
@@ -125,6 +158,7 @@ export function consistencyWindow(
     run,
     required,
     met: run >= required,
+    recentGlyphs,
     excludedMismatches,
     countedOffBasis,
     unresolvedMismatches,

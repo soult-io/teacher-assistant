@@ -14,7 +14,10 @@ import {
   compareCodePoints,
   computeAutoStatement,
   type GoalDetail,
+  type IndeterminateReason,
+  isIcExportable,
   type MasteryCandidate,
+  MIN_SCORED_POINTS,
 } from "@teacher-assistant/domain-core";
 import type {
   IEPGoal,
@@ -23,8 +26,40 @@ import type {
   Revision,
   Timestamp,
 } from "@teacher-assistant/schema";
+import type { ReactNode } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import { TrendChart } from "./TrendChart.js";
+
+/** Copy text to the clipboard when available — a no-op elsewhere (guarded for jsdom/older browsers). */
+function copyToClipboard(text: string): void {
+  try {
+    void navigator.clipboard?.writeText(text);
+  } catch {
+    // Clipboard unavailable (insecure context / test env) — the DRAFT label + on-screen
+    // text still let the teacher copy manually; nothing to surface.
+  }
+}
+
+/** A friendly, honesty-safe hint for why a statement is INDETERMINATE (surfaces the gate math). */
+function indeterminateHint(statement: AutoStatement): string | null {
+  const reason: IndeterminateReason | undefined = statement.indeterminateReason;
+  switch (reason) {
+    case "below_point_gate":
+    case "insufficient_after_exclusion": {
+      const need = Math.max(0, MIN_SCORED_POINTS - statement.slots.totalPoints);
+      return `Needs ${need} more scored data point${need === 1 ? "" : "s"} for a defensible trend (${MIN_SCORED_POINTS} minimum).`;
+    }
+    case "below_week_gate":
+      return "Needs more instructional weeks of monitoring before a trend can be claimed.";
+    case "no_scored_data":
+      return "No scored data points this period yet.";
+    case "fourpoint_straddle":
+    case "trend_fourpoint_disagree":
+      return "The recent points are too mixed to claim a reliable trend yet.";
+    default:
+      return null;
+  }
+}
 
 /** ISO day for a millisecond audit timestamp (entry / edit time). */
 function isoDay(ts: Timestamp): string {
@@ -52,6 +87,20 @@ const VARIANT_BADGE: Readonly<Record<AutoStatement["variant"], string>> = {
   indeterminate: "Indeterminate",
 };
 
+/** Human label for the captured setting (display-only; the point carries the enum). */
+function settingLabel(setting: ProgressDataPoint["setting"]): string {
+  switch (setting) {
+    case "math_resource":
+      return "Resource";
+    case "gen_ed":
+      return "Gen-ed";
+    case "home_scored":
+      return "Home";
+    default:
+      return setting;
+  }
+}
+
 function pctOf(p: ProgressDataPoint): string {
   if (p.state === "no_data") {
     return `⊘ ${p.no_data_reason ?? "no data"}`;
@@ -65,6 +114,20 @@ function pctOf(p: ProgressDataPoint): string {
 /** "s" for a plural count, "" for one — keeps the note copy out of the branch count. */
 function plural(n: number): string {
   return n === 1 ? "" : "s";
+}
+
+/**
+ * An inline info tip (prototype ⓘ) — carries the honesty / ARC-defense copy for a
+ * non-technical teacher. Native <details> so it is keyboard-accessible and the text
+ * is in the DOM even when collapsed; no per-card state.
+ */
+function InfoTip({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <details className="tip">
+      <summary aria-label={label}>ⓘ</summary>
+      <span className="tiptext">{children}</span>
+    </details>
+  );
 }
 
 /** The F4 context notes (each shown only when it applies) — split out to keep the card simple. */
@@ -85,10 +148,19 @@ function QuarterlyNotes({ q }: { readonly q: GoalDetail["quarterlySummary"] }) {
         </div>
       ) : null}
       {q.countedOffBasis > 0 ? (
-        <div className="note warn">
-          ⚠ Includes {q.countedOffBasis} off-basis point{plural(q.countedOffBasis)} (counted at your
-          election) — check comparability before reporting.
-        </div>
+        <>
+          <div className="note warn">
+            ⚠ Includes {q.countedOffBasis} off-basis point{plural(q.countedOffBasis)} (counted at
+            your election) — check comparability before reporting.
+          </div>
+          {/* Clarifier: the IC progress statement HARD-excludes off-basis points, so its
+              average can differ from this F4 report-card number. Say so, so the two are not
+              read as a contradiction. */}
+          <div className="note" data-testid="two-average-clarifier">
+            The draft IC progress statement excludes off-basis points, so its average may differ
+            from this number.
+          </div>
+        </>
       ) : null}
       {q.excludedMismatches > 0 ? (
         <div className="note warn">
@@ -100,12 +172,23 @@ function QuarterlyNotes({ q }: { readonly q: GoalDetail["quarterlySummary"] }) {
   );
 }
 
-function QuarterlyCard({ detail }: { readonly detail: GoalDetail }) {
+function QuarterlyCard({
+  detail,
+  exportable,
+}: {
+  readonly detail: GoalDetail;
+  readonly exportable: boolean;
+}) {
   const q = detail.quarterlySummary;
   return (
     <div className="card qsummary" data-testid="quarterly">
       <div className="qhead">
         <span className="qlab">Quarterly progress summary</span>
+        <InfoTip label="What the quarterly summary is">
+          A report-card figure: the average of the last {q.n} scored points, not the last {q.n}{" "}
+          calendar weeks. Separate from the weekly monitoring feed, and copied to the progress
+          report (IC), not the weekly value.
+        </InfoTip>
       </div>
       {q.average === null ? (
         <div className="note">No scored points yet — nothing to average.</div>
@@ -119,6 +202,18 @@ function QuarterlyCard({ detail }: { readonly detail: GoalDetail }) {
             </span>
           </div>
           <QuarterlyNotes q={q} />
+          {/* IC copy path — ONLY for an IC-exportable goal (same structural guard the
+              statement card uses); a proposed/baseline/non-% goal has no copy path (DF-1). */}
+          {exportable ? (
+            <button
+              type="button"
+              className="btn small primary copybtn"
+              data-testid="copy-quarterly"
+              onClick={() => copyToClipboard(`${Math.round(q.average ?? 0)}%`)}
+            >
+              Copy for IC progress report
+            </button>
+          ) : null}
         </>
       )}
     </div>
@@ -126,6 +221,11 @@ function QuarterlyCard({ detail }: { readonly detail: GoalDetail }) {
 }
 
 function StatementCard({ statement }: { readonly statement: AutoStatement }) {
+  // The card only renders for an IC-exportable goal (computeAutoStatement returns
+  // null otherwise), so the copy path is inherently guarded (DF-7). Copy is the ONLY
+  // action — the statement stays slot-assembled; the teacher reviews/edits in IC
+  // after paste (FERPA: no in-app free-text statement channel).
+  const hint = statement.variant === "indeterminate" ? indeterminateHint(statement) : null;
   return (
     <div className="card draftstmt" data-testid="auto-statement">
       <div className="draftbanner">{statement.label}</div>
@@ -133,6 +233,11 @@ function StatementCard({ statement }: { readonly statement: AutoStatement }) {
         {VARIANT_BADGE[statement.variant]}
       </div>
       <p className="stmttext">{statement.text}</p>
+      {hint !== null ? (
+        <div className="note" data-testid="indeterminate-hint">
+          {hint}
+        </div>
+      ) : null}
       {statement.excludedMismatches > 0 ? (
         <div className="note">
           {statement.excludedMismatches} off-basis/condition-mismatched point
@@ -145,6 +250,13 @@ function StatementCard({ statement }: { readonly statement: AutoStatement }) {
           across).
         </div>
       ) : null}
+      <button
+        type="button"
+        className="btn small primary copybtn"
+        onClick={() => copyToClipboard(statement.text)}
+      >
+        Copy to IC
+      </button>
     </div>
   );
 }
@@ -162,21 +274,26 @@ function ConsistencyCard({
 }) {
   const c = detail.consistency;
   const candidate = detail.masteryCandidate;
-  // The recent probes glance: the last `required` plotted values vs criterion. The
-  // authoritative run count is the engine's `c.run` (⊘ pauses; off-basis per election).
-  const recent = detail.trend.slice(-c.required);
+  // The glance is painted from the ENGINE's clamped, disposition-aware glyphs
+  // (c.recentGlyphs) — the UI re-derives nothing, so it can never blend pre/post-clamp
+  // probes or re-classify the criterion (R3 DM-1). The authoritative run is c.run.
   return (
     <div className="card">
       <div className="cardhead">
         <b>Consistency window</b>
+        <InfoTip label="How the consistency window works">
+          Consecutive means consecutive probes in admin-date order — never cherry-picked weeks. A ⊘
+          pauses the run, it never breaks or resets it.
+        </InfoTip>
       </div>
       <div className="window" data-testid="consistency-window">
-        {recent.map((t) => (
+        {c.recentGlyphs.map((g) => (
           <span
-            key={t.adminDate}
-            className={t.value >= goal.criterion_level ? "win-yes" : "win-no"}
+            key={g.dataPointId}
+            className={`${g.meets ? "win-yes" : "win-no"}${g.offBasis ? " win-off" : ""}`}
+            title={g.offBasis ? "off-basis (counted at your election)" : undefined}
           >
-            {t.value >= goal.criterion_level ? "●" : "○"}
+            {g.meets ? "●" : "○"}
           </span>
         ))}
         <span className="wl">
@@ -198,6 +315,10 @@ function ConsistencyCard({
         <div className="metbox" data-testid="mastery-candidate">
           <div>
             <span className="star">★</span> <b>Criterion window met.</b>
+            <InfoTip label="What acknowledging does">
+              Acknowledging flags the goal for ARC / progress review. Retiring a goal is always your
+              call at ARC, never automatic.
+            </InfoTip>
           </div>
           <div className="note mastery-note">
             The app only observes this — it never closes the goal. Retiring a goal is your call at
@@ -254,6 +375,7 @@ function HistoryTable({
               <th>Correct/total</th>
               <th>%</th>
               <th>Probe</th>
+              <th>Setting</th>
               <th>Scorer</th>
               <th>Validated by</th>
               <th> </th>
@@ -285,6 +407,7 @@ function HistoryTable({
                   </td>
                   <td>{pctOf(p)}</td>
                   <td>{probeLabel}</td>
+                  <td>{settingLabel(p.setting)}</td>
                   <td>{p.scorer}</td>
                   <td>{p.validated_by ?? (p.scorer === "para" ? "—" : "teacher")}</td>
                   <td>
@@ -332,8 +455,14 @@ export interface GoalDetailScreenProps {
   readonly initials: string;
   readonly periodLabel: string | null;
   readonly probeLabel: string;
-  /** Calendar break flag (M4) — the ≥4-instructional-week gate; synthetic = none. */
-  readonly isNonInstructional?: (weekId: string) => boolean;
+  /**
+   * The M4 instructional-weeks calendar predicate — feeds the R3-3 ≥4-instructional-
+   * week half of the auto-statement gate. REQUIRED (no default): a default of
+   * `() => false` would count every calendar week as instructional and INFLATE the
+   * week count, silently LOOSENING the gate (R3 DM-2). A missing calendar must fail
+   * at the wiring site, not widen the honesty gate here.
+   */
+  readonly isNonInstructional: (weekId: string) => boolean;
   readonly onBack: () => void;
   readonly onAddPoint: () => void;
   readonly onEditPoint: (point: ProgressDataPoint) => void;
@@ -348,7 +477,7 @@ export function GoalDetailScreen(props: GoalDetailScreenProps) {
     initials,
     periodLabel,
     probeLabel,
-    isNonInstructional = () => false,
+    isNonInstructional,
     onBack,
     onAddPoint,
     onEditPoint,
@@ -358,6 +487,7 @@ export function GoalDetailScreen(props: GoalDetailScreenProps) {
   const detail = buildGoalDetail(goal, points);
   const statement = computeAutoStatement(goal, initials, points, { isNonInstructional });
   const observation = observations.find((o) => o.goal_id === goal.goal_id);
+  const exportable = isIcExportable(goal);
 
   return (
     <div className="goal-detail">
@@ -399,7 +529,7 @@ export function GoalDetailScreen(props: GoalDetailScreenProps) {
         <div className="note">⊘ no-data probe is shown as a gap, never plotted as a zero.</div>
       </div>
 
-      <QuarterlyCard detail={detail} />
+      <QuarterlyCard detail={detail} exportable={exportable} />
 
       {statement !== null ? <StatementCard statement={statement} /> : null}
 
