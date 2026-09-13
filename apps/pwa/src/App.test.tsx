@@ -145,7 +145,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
   it("drafts a proposed goal that lands on the baseline track and never on the active dashboard", async () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
-    // Fill the KY components (DRAFT path is the default).
+    fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
     fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "ZZ" } });
     fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
       target: { value: "count coins to a dollar" },
@@ -155,9 +155,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     });
     fireEvent.change(screen.getByLabelText("criterion level"), { target: { value: "80" } });
     fireEvent.change(screen.getByLabelText("criterion consistency"), { target: { value: "4" } });
-    fireEvent.change(screen.getByPlaceholderText("curriculum probe"), {
-      target: { value: "coin probe" },
-    });
+    fireEvent.change(screen.getByLabelText("method tool"), { target: { value: "coin probe" } });
     fireEvent.click(screen.getByRole("button", { name: "Start baselining →" }));
 
     // Lands on the segregated baseline/proposed track, showing the new proposed goal.
@@ -173,7 +171,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
   it("a VARIABLE-basis goal accepts any total with NO off-basis ack (F-2 escape valve)", async () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
-    fireEvent.click(screen.getByRole("button", { name: /Adopt an already-baselined/ }));
+    // ADOPT is the default path.
     fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "AB" } });
     fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
       target: { value: "read sight words" },
@@ -183,9 +181,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     });
     fireEvent.change(screen.getByLabelText("criterion level"), { target: { value: "80" } });
     fireEvent.change(screen.getByLabelText("criterion consistency"), { target: { value: "4" } });
-    fireEvent.change(screen.getByPlaceholderText("curriculum probe"), {
-      target: { value: "word list" },
-    });
+    fireEvent.change(screen.getByLabelText("method tool"), { target: { value: "word list" } });
     fireEvent.click(screen.getByRole("button", { name: "Variable / custom" }));
     fireEvent.change(screen.getByLabelText("baseline percent"), { target: { value: "30" } });
     fireEvent.click(screen.getByRole("button", { name: "Activate goal · begin monitoring" }));

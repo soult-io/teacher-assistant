@@ -56,6 +56,28 @@ describe("assembleGoal (U5 create)", () => {
     }
   });
 
+  it("carries method_general + the descriptive accom/mod detail from the form (method not hardcoded)", () => {
+    const { goal } = assembleGoal(
+      filledDraft({
+        methodGeneral: "direct",
+        accomMod: "accommodation",
+        accomDetail: "read-aloud + extended time",
+      }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.method_general).toBe("direct"); // was hardcoded "cbm" before the restore
+    expect(goal.accom_mod).toBe("accommodation"); // the category (drives M8)
+    expect(goal.accom_mod_detail).toBe("read-aloud + extended time"); // the descriptive label
+    // The descriptive accom text is NOT part of the composed goal_text (stranger-test surface).
+    expect(goal.goal_text).not.toContain("read-aloud");
+  });
+
+  it("omits accom_mod_detail when the field is blank", () => {
+    const { goal } = assembleGoal(filledDraft({ accomDetail: "   " }), newOpaqueId(), nowTs());
+    expect(goal.accom_mod_detail).toBeUndefined();
+  });
+
   it("a VARIABLE basis is carried onto the goal (F-2 escape valve)", () => {
     const { goal } = assembleGoal(
       filledDraft({ denominatorBasis: "variable" }),

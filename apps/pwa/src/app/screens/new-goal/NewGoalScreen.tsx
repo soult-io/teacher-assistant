@@ -12,6 +12,8 @@ import {
   type DenominatorBasis,
   type Frequency,
   FREQUENCIES,
+  type MethodGeneral,
+  METHODS_GENERAL,
   newOpaqueId,
   type Setting,
   SETTINGS,
@@ -28,6 +30,18 @@ const SETTING_LABEL: Readonly<Record<Setting, string>> = {
   math_resource: "Resource",
   gen_ed: "Gen-ed",
   home_scored: "Home",
+};
+const FREQ_LABEL: Readonly<Record<Frequency, string>> = {
+  daily: "daily",
+  weekly: "weekly",
+  twice_monthly: "2×/month",
+  monthly: "monthly",
+};
+const METHOD_LABEL: Readonly<Record<MethodGeneral, string>> = {
+  cbm: "CBM (curriculum-based)",
+  direct: "Direct assessment",
+  indirect: "Indirect",
+  authentic: "Authentic",
 };
 
 /** DRAFT is ready when the ONLY thing the engine gate is missing is the baseline. */
@@ -203,13 +217,28 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             />
           </div>
         </Field>
-        <Field label="Method tool" hint="e.g. enVision worksheet" required>
-          <input
-            className="tin"
-            value={form.methodTool}
-            placeholder="curriculum probe"
-            onChange={(e) => set("methodTool", e.target.value)}
-          />
+        <Field label="Method" hint="general class + the concrete tool" required>
+          <div className="two">
+            <select
+              className="tin"
+              value={form.methodGeneral}
+              aria-label="method general"
+              onChange={(e) => set("methodGeneral", e.target.value as MethodGeneral)}
+            >
+              {METHODS_GENERAL.map((m) => (
+                <option key={m} value={m}>
+                  {METHOD_LABEL[m]}
+                </option>
+              ))}
+            </select>
+            <input
+              className="tin"
+              value={form.methodTool}
+              placeholder="tool e.g. enVision worksheet"
+              aria-label="method tool"
+              onChange={(e) => set("methodTool", e.target.value)}
+            />
+          </div>
         </Field>
         <Field label="Frequency" hint="(drives owes cadence)">
           <select
@@ -219,7 +248,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           >
             {FREQUENCIES.map((f) => (
               <option key={f} value={f}>
-                {f}
+                {FREQ_LABEL[f]}
               </option>
             ))}
           </select>
@@ -275,10 +304,15 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             ))}
           </select>
         </Field>
-        <Field label="Accommodation / modification" hint="(explicit — never defaulted)" required>
+        <Field
+          label="Accommodation / modification"
+          hint="category (explicit — never defaulted)"
+          required
+        >
           <select
             className="tin"
             value={form.accomMod}
+            aria-label="accommodation category"
             onChange={(e) => set("accomMod", e.target.value as AccomMod)}
           >
             {ACCOM_MODS.map((a) => (
@@ -287,6 +321,15 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
               </option>
             ))}
           </select>
+        </Field>
+        <Field label="Accom / mod detail" hint="teacher reference only — not in the IC statement">
+          <input
+            className="tin"
+            value={form.accomDetail}
+            placeholder="e.g. read-aloud + extended time"
+            aria-label="accommodation detail"
+            onChange={(e) => set("accomDetail", e.target.value)}
+          />
         </Field>
 
         {form.path === "adopt" ? (

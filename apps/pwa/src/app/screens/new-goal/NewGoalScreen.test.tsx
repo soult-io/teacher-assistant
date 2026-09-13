@@ -12,24 +12,23 @@ function fillCore() {
   });
   fireEvent.change(screen.getByLabelText("criterion level"), { target: { value: "80" } });
   fireEvent.change(screen.getByLabelText("criterion consistency"), { target: { value: "4" } });
-  fireEvent.change(screen.getByPlaceholderText("curriculum probe"), {
-    target: { value: "curriculum probe" },
-  });
+  fireEvent.change(screen.getByLabelText("method tool"), { target: { value: "enVision" } });
   fireEvent.change(screen.getByLabelText("total items per probe"), { target: { value: "5" } });
 }
 
 describe("NewGoalScreen (U5)", () => {
   it("DRAFT is ready once the KY components are filled (no baseline required)", () => {
     render(<NewGoalScreen onSubmit={vi.fn()} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
     expect(screen.getByTestId("ng-gate")).toHaveClass("bad");
     fillCore();
     expect(screen.getByTestId("ng-gate")).toHaveClass("ok");
     expect(screen.getByRole("button", { name: "Start baselining →" })).toBeEnabled();
   });
 
-  it("ADOPT is baseline-mandatory: not ready until a baseline is entered", () => {
+  it("ADOPT is baseline-mandatory: not ready until a baseline is entered (default path)", () => {
     render(<NewGoalScreen onSubmit={vi.fn()} onBack={vi.fn()} />);
-    fireEvent.click(screen.getByRole("button", { name: /Adopt an already-baselined/ }));
+    // ADOPT is the default path.
     fillCore();
     // Core filled but no baseline → the engine gate blocks activation.
     expect(screen.getByTestId("ng-gate")).toHaveClass("bad");
@@ -51,6 +50,7 @@ describe("NewGoalScreen (U5)", () => {
   it("submitting hands the collected form up", () => {
     const onSubmit = vi.fn();
     render(<NewGoalScreen onSubmit={onSubmit} onBack={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
     fillCore();
     fireEvent.click(screen.getByRole("button", { name: "Start baselining →" }));
     expect(onSubmit).toHaveBeenCalledOnce();

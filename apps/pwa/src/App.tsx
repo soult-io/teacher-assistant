@@ -200,6 +200,10 @@ function ReadyApp({
         <BaselineScreen
           records={records}
           initialsById={lk.initialsById}
+          periodLabelByStudent={(sid) => {
+            const pid = lk.periodByStudent(sid);
+            return pid !== null ? (lk.periodLabelById.get(pid) ?? null) : null;
+          }}
           isNonInstructional={isNonInstructionalWeek}
           onBack={() => setTrackView("dashboard")}
           onNewGoal={() => setTrackView("new_goal")}

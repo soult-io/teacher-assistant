@@ -19,6 +19,7 @@ function renderBaseline() {
     <BaselineScreen
       records={records}
       initialsById={initialsById}
+      periodLabelByStudent={() => "P4"}
       isNonInstructional={() => false}
       {...handlers}
     />,

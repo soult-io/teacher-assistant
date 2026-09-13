@@ -204,6 +204,20 @@ describe("HARD sufficiency gate → INDETERMINATE (§G R3-3)", () => {
     expect(stmt?.text).not.toContain("on track");
   });
 
+  it("DF-3: the descriptive accom/mod detail NEVER enters the statement (category drives it, slot-only)", () => {
+    // The teacher-authored `accom_mod_detail` free text must not leak into the M8
+    // narrative (FERPA: slot-only). The condition phrase is driven by the CATEGORY.
+    const goal: IEPGoal = {
+      ...makeGoal({ accomMod: "accommodation" }),
+      accom_mod_detail: "read-aloud SECRETPHRASE with extended time",
+    };
+    const stmt = computeAutoStatement(goal, "AB", series(goal, [52, 56, 60, 64, 68, 72, 76, 80]), {
+      isNonInstructional: noBreaks,
+    });
+    expect(stmt?.text).toContain("with accommodations"); // category → condition phrase
+    expect(stmt?.text).not.toContain("SECRETPHRASE"); // the descriptive detail is never narrated
+  });
+
   it("DM-2: the ≥4-week gate CONSUMES the instructional-weeks calendar (break weeks excluded)", () => {
     // The SAME 8-point on-track series: with no breaks it clears the week gate...
     const goal = makeGoal();

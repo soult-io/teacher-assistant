@@ -12,7 +12,7 @@ import {
   computeBaselineWindowStart,
   deriveBaseline,
 } from "@teacher-assistant/domain-core";
-import type { BaselinePoint, IEPGoal } from "@teacher-assistant/schema";
+import type { BaselinePoint, IEPGoal, OpaqueId } from "@teacher-assistant/schema";
 import { useState } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import type { DecryptedRecords } from "../../../data/repository.js";
@@ -20,6 +20,8 @@ import type { DecryptedRecords } from "../../../data/repository.js";
 export interface BaselineScreenProps {
   readonly records: DecryptedRecords;
   readonly initialsById: ReadonlyMap<string, string>;
+  /** The student's class-period label, if any (design §E.1 — the period tag on the card). */
+  readonly periodLabelByStudent: (studentId: OpaqueId) => string | null;
   readonly isNonInstructional: (weekId: string) => boolean;
   readonly onBack: () => void;
   readonly onNewGoal: () => void;
@@ -70,6 +72,47 @@ function AddPointRow({
   );
 }
 
+/** The window/deadline line — the DEADLINE (ARC date) drives urgency (pure). */
+function windowText(goal: IEPGoal, windowStart: string | undefined): string {
+  if (goal.arc_date === undefined) {
+    return " · set an ARC date to open the baseline window";
+  }
+  const open = windowStart !== undefined ? ` · window ${windowStart} →` : "";
+  return `${open} closes ARC ${goal.arc_date}`;
+}
+
+/** The baseline estimate (usable) or the "needs more / not comparable" note — split out for complexity. */
+function EstimateBlock({
+  estimate,
+  useMedian,
+}: {
+  readonly estimate: ReturnType<typeof deriveBaseline>;
+  readonly useMedian: boolean;
+}) {
+  if (estimate.usable && estimate.value !== null) {
+    return (
+      <>
+        <div className="estline" data-testid="baseline-estimate">
+          <span className="est">{Math.round(estimate.value)}%</span>
+          <span className="estlab">baseline estimate ({useMedian ? "median" : "average"})</span>
+        </div>
+        <div className="note">
+          An ESTIMATE, not a trend (n = {estimate.n}). Locks into the goal only on ARC adoption,
+          when the criterion is finalized.
+        </div>
+      </>
+    );
+  }
+  const need = Math.max(0, 3 - estimate.n);
+  return (
+    <div className="note owestext" data-testid="baseline-not-usable">
+      {estimate.comparable
+        ? `Needs ${need} more comparable probe${need === 1 ? "" : "s"} before a usable baseline.`
+        : "Points span more than one probe condition — not comparable. Re-collect on one probe."}
+    </div>
+  );
+}
+
 function ArcAlertNote({ alert }: { readonly alert: ArcDateAlert }) {
   if (alert === null) {
     return null;
@@ -87,6 +130,7 @@ function ProposedCard({
   goal,
   points,
   initials,
+  periodLabel,
   useMedian,
   isNonInstructional,
   onAddBaselinePoint,
@@ -96,6 +140,7 @@ function ProposedCard({
   readonly goal: IEPGoal;
   readonly points: readonly BaselinePoint[];
   readonly initials: string;
+  readonly periodLabel: string | null;
   readonly useMedian: boolean;
   readonly isNonInstructional: (weekId: string) => boolean;
   readonly onAddBaselinePoint: (goal: IEPGoal, numerator: number, denominator: number) => void;
@@ -110,7 +155,6 @@ function ProposedCard({
   const estimate = deriveBaseline(goal, points, useMedian ? "median" : "mean");
   const adoptCheck = canAdopt(goal, points);
   const windowStart = computeBaselineWindowStart(goal, isNonInstructional);
-  const need = Math.max(0, 3 - estimate.n);
 
   return (
     <div className="bcard" data-testid="proposed-card">
@@ -118,28 +162,30 @@ function ProposedCard({
         <Avatar initials={initials} />
         <div className="btitle">
           <div className="rowtitle">{goal.goal_text}</div>
-          <div className="rowmeta">{goal.behavior}</div>
+          <div className="rowmeta">
+            {periodLabel !== null ? `${periodLabel} · ` : ""}
+            {goal.behavior}
+          </div>
         </div>
       </div>
 
       <div className="note bwindow">
         <b>{estimate.n} of ≥3 collected</b>
-        {windowStart !== undefined ? ` · window opens ${windowStart}` : ""}
-        {goal.arc_date !== undefined ? ` · ARC ${goal.arc_date}` : " · ARC date TBD"}
+        {windowText(goal, windowStart)}
       </div>
 
-      {goal.arc_date !== undefined ? (
-        <label className="arcedit">
-          <span className="nghint">ARC date</span>
-          <input
-            className="tin arcin"
-            type="date"
-            value={goal.arc_date}
-            aria-label="arc date"
-            onChange={(e) => e.target.value !== "" && setAlert(onEditArcDate(goal, e.target.value))}
-          />
-        </label>
-      ) : null}
+      {/* DD-1: the ARC-date input renders even when unset, so a just-drafted proposed
+          goal can get its arc_date and open its window (routed through the engine). */}
+      <label className="arcedit">
+        <span className="nghint">ARC date</span>
+        <input
+          className="tin arcin"
+          type="date"
+          value={goal.arc_date ?? ""}
+          aria-label="arc date"
+          onChange={(e) => e.target.value !== "" && setAlert(onEditArcDate(goal, e.target.value))}
+        />
+      </label>
       <ArcAlertNote alert={alert} />
 
       <div className="chips bchips">
@@ -154,24 +200,7 @@ function ProposedCard({
         )}
       </div>
 
-      {estimate.usable && estimate.value !== null ? (
-        <>
-          <div className="estline" data-testid="baseline-estimate">
-            <span className="est">{Math.round(estimate.value)}%</span>
-            <span className="estlab">baseline estimate ({useMedian ? "median" : "average"})</span>
-          </div>
-          <div className="note">
-            An ESTIMATE, not a trend (n = {estimate.n}). Locks into the goal only on ARC adoption,
-            when the criterion is finalized.
-          </div>
-        </>
-      ) : (
-        <div className="note owestext" data-testid="baseline-not-usable">
-          {estimate.comparable
-            ? `Needs ${need} more comparable probe${need === 1 ? "" : "s"} before a usable baseline.`
-            : "Points span more than one probe condition — not comparable. Re-collect on one probe."}
-        </div>
-      )}
+      <EstimateBlock estimate={estimate} useMedian={useMedian} />
 
       <AddPointRow goal={goal} onAdd={onAddBaselinePoint} />
 
@@ -190,7 +219,8 @@ function ProposedCard({
 }
 
 export function BaselineScreen(props: BaselineScreenProps) {
-  const { records, initialsById, isNonInstructional, onBack, onNewGoal } = props;
+  const { records, initialsById, periodLabelByStudent, isNonInstructional, onBack, onNewGoal } =
+    props;
   const [useMedian, setUseMedian] = useState(false);
 
   const proposed = records.goals.filter((g) => g.status === "proposed");
@@ -200,6 +230,11 @@ export function BaselineScreen(props: BaselineScreenProps) {
     bucket.push(p);
     pointsByGoal.set(p.goal_id, bucket);
   }
+  // DF-5: the mean/median toggle only makes sense once a usable estimate exists —
+  // show it only when at least one card has a usable (≥3 comparable) baseline.
+  const anyUsable = proposed.some(
+    (g) => deriveBaseline(g, pointsByGoal.get(g.goal_id) ?? []).usable,
+  );
 
   return (
     <div className="baseline-track">
@@ -217,23 +252,25 @@ export function BaselineScreen(props: BaselineScreenProps) {
         baseline and become active goals.
       </div>
 
-      <div className="chips" style={{ margin: "0.4rem 0" }}>
-        <button
-          type="button"
-          className={`dchip${!useMedian ? " on" : ""}`}
-          onClick={() => setUseMedian(false)}
-        >
-          Average
-        </button>
-        <button
-          type="button"
-          className={`dchip${useMedian ? " on" : ""}`}
-          data-testid="median-toggle"
-          onClick={() => setUseMedian(true)}
-        >
-          Median-of-3
-        </button>
-      </div>
+      {anyUsable ? (
+        <div className="chips" style={{ margin: "0.4rem 0" }} data-testid="estimate-method">
+          <button
+            type="button"
+            className={`dchip${!useMedian ? " on" : ""}`}
+            onClick={() => setUseMedian(false)}
+          >
+            Average
+          </button>
+          <button
+            type="button"
+            className={`dchip${useMedian ? " on" : ""}`}
+            data-testid="median-toggle"
+            onClick={() => setUseMedian(true)}
+          >
+            Median
+          </button>
+        </div>
+      ) : null}
 
       {proposed.length === 0 ? (
         <div className="card">No proposed goals. Draft one to start baselining.</div>
@@ -244,6 +281,7 @@ export function BaselineScreen(props: BaselineScreenProps) {
             goal={goal}
             points={pointsByGoal.get(goal.goal_id) ?? []}
             initials={initialsById.get(goal.student_id) ?? "??"}
+            periodLabel={periodLabelByStudent(goal.student_id)}
             useMedian={useMedian}
             isNonInstructional={isNonInstructional}
             onAddBaselinePoint={props.onAddBaselinePoint}

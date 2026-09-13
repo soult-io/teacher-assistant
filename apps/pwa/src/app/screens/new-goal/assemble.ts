@@ -12,6 +12,7 @@ import {
   type DenominatorBasis,
   type Frequency,
   type IEPGoal,
+  type MethodGeneral,
   newOpaqueId,
   type OpaqueId,
   type ProbeDefinition,
@@ -31,13 +32,17 @@ export interface NewGoalForm {
   /** Criterion mastery level (%) and consistency (n consecutive probes). */
   readonly level: string;
   readonly consistency: string;
+  /** Method: the general class (KY component, an enum) + the concrete tool (free text). */
+  readonly methodGeneral: MethodGeneral;
   readonly methodTool: string;
   readonly frequency: Frequency;
   readonly denominatorBasis: DenominatorBasis;
   /** Total items per probe — the fixed basis. Ignored (suggested only) when basis = variable. */
   readonly total: string;
   readonly setting: Setting;
+  /** Accom/mod CATEGORY (drives M8's condition phrase) + an optional descriptive label (display-only). */
   readonly accomMod: AccomMod;
+  readonly accomDetail: string;
   /** Already-collected baseline % — ADOPT path only. */
   readonly baseline: string;
 }
@@ -99,7 +104,7 @@ export function assembleGoal(
     circumstance,
     criterion_level: level,
     criterion_consistency: { n_probes: nProbes, phrase: `${nProbes} consecutive probes` },
-    method_general: "cbm",
+    method_general: form.methodGeneral,
     method_tool: form.methodTool.trim(),
     frequency: form.frequency,
     denominator_model: "percent_correct_over_total",
@@ -110,6 +115,9 @@ export function assembleGoal(
     status: form.path === "adopt" ? "active" : "proposed",
     created_ts: createdTs,
     revisions: [],
+    // The descriptive accom/mod label is a teacher-only reference attribute — kept only
+    // when non-empty, and DISPLAY-ONLY (M8 reads the accom_mod category, never this text).
+    ...(form.accomDetail.trim() !== "" ? { accom_mod_detail: form.accomDetail.trim() } : {}),
     // ADOPT: the baseline is already in hand → lock it so the goal can begin
     // monitoring. Only a real numeric entry counts (parseBaseline); a blank or
     // non-numeric field stays undefined so the baseline-mandatory gate blocks.
@@ -118,12 +126,15 @@ export function assembleGoal(
       : {}),
   };
 
+  const variable = form.denominatorBasis === "variable";
   const probe: ProbeDefinition = {
     probe_definition_id: probeId,
     goal_id: goalId,
     expected_denominator: total,
     condition: circumstance,
-    label: `${total}-item probe`,
+    // A variable-basis goal's total is not fixed, so don't label it "N-item" — that
+    // would silently assert a fixed size the goal deliberately does not have.
+    label: variable ? "probe (variable total)" : `${total}-item probe`,
   };
 
   return { goal, probe, ...(newStudent !== undefined ? { student: newStudent } : {}) };
@@ -140,21 +151,23 @@ export function makeStudent(initials: string, color: ColorToken): Student {
   };
 }
 
-/** A fresh, empty form (DRAFT path by default; nothing pre-selected that would default a choice). */
+/** A fresh, empty form. ADOPT is the default path (most of a caseload's goals already exist). */
 export function emptyForm(): NewGoalForm {
   return {
-    path: "draft",
+    path: "adopt",
     initials: "",
     behavior: "",
     circumstance: "",
     level: "",
     consistency: "",
+    methodGeneral: "cbm",
     methodTool: "",
     frequency: "weekly",
     denominatorBasis: "fixed",
     total: "",
     setting: "math_resource",
     accomMod: "none",
+    accomDetail: "",
     baseline: "",
   };
 }
