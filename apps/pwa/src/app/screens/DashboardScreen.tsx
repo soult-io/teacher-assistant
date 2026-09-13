@@ -7,6 +7,7 @@
 // No domain logic here: the header string and the row states come from the
 // engine; this only maps ids → the student's avatar + goal title and paints.
 
+import { compareCodePoints } from "@teacher-assistant/domain-core";
 import type { IEPGoal, ProgressDataPoint, Student } from "@teacher-assistant/schema";
 import {
   buildWeeklyDashboard,
@@ -25,14 +26,6 @@ const STATE_ORDER: Readonly<Record<DashboardState, number>> = {
   documented_no_data: 1,
   has_point: 2,
 };
-
-/** Deterministic, locale-independent code-point comparison (localeCompare is banned). */
-function compareCodePoints(a: string, b: string): number {
-  if (a < b) {
-    return -1;
-  }
-  return a > b ? 1 : 0;
-}
 
 const STATE_LABEL: Readonly<Record<DashboardState, string>> = {
   owes: "owes",
