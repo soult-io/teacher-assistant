@@ -58,8 +58,10 @@ function GoalRow({ vm }: { vm: RowViewModel }) {
       <StatusChip chip={chip} label={STATE_LABEL[vm.row.state]} />
       <Avatar initials={vm.initials} />
       <div className="rowmain">
+        {/* §E.1: the avatar already carries the initials, so the row meta does
+            not repeat them. The period tag lands here in U2 (the M3 projection
+            surfaces periodId; U1's synthetic seed has no period entities yet). */}
         <span className="rowtitle">{vm.goalText}</span>
-        <span className="rowmeta">{vm.initials}</span>
       </div>
       <div className="rowright">
         <span className={`rowval${isOwes ? " dim" : ""}`}>{rightText(vm.row, vm.value)}</span>
@@ -128,7 +130,7 @@ export function DashboardScreen({
         <div className="three">
           <div className="stat scored">
             <b>{h.scored}</b>
-            <span>of {h.collectable} scored</span>
+            <span>scored</span>
           </div>
           <div className="stat excused">
             <b>{h.excused}</b>

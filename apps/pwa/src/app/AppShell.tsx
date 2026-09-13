@@ -44,7 +44,7 @@ export function AppShell(props: AppShellProps) {
             aria-pressed={role === "para"}
             onClick={() => onRole("para")}
           >
-            Para
+            Para (JT)
           </button>
         </div>
         <button
