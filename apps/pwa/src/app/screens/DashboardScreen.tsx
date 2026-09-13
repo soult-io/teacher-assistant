@@ -20,7 +20,7 @@ import { type ReactElement, useCallback, useMemo, useState } from "react";
 import { isoDateOf } from "../../data/date.js";
 import type { DecryptedRecords } from "../../data/repository.js";
 import type { DocMutator } from "../../data/session.js";
-import { bookmarkMutator, unbookmarkMutator } from "../../data/writes.js";
+import { bookmarkMutator, DEFAULT_SETTING, unbookmarkMutator } from "../../data/writes.js";
 import { type SheetTarget, targetForRow } from "../sheet-target.js";
 import { GoalRow } from "./dashboard/GoalRow.js";
 import {
@@ -34,7 +34,7 @@ import {
 } from "./dashboard/dashboard-vm.js";
 import { StudentCard } from "./dashboard/StudentCard.js";
 
-const SETTING = "math_resource" as const;
+const SETTING = DEFAULT_SETTING;
 
 const LENS_LABEL: Readonly<Record<DashboardLens, string>> = {
   owes_first: "owes-first",
@@ -110,21 +110,26 @@ export function DashboardScreen(props: DashboardScreenProps) {
 
   const openScore = useCallback(
     (vm: RowVM) => {
-      if (vm.state === "owes") {
-        onOpenScore(targetForRow(vm, lk, today));
-        return;
-      }
-      if (vm.state === "has_point") {
-        // Tapping a scored row opens the sheet against the existing point → [Fix]
-        // (an audited edit that retains the prior value), keyed to its admin date.
-        const point: ProgressDataPoint | undefined = scoredPointByGoal.get(vm.goalId);
+      // Resolve any existing point for this goal/week: a scored row opens for a
+      // [Fix]; an owes row that already has a ⚑ queued placeholder opens THAT
+      // placeholder (so scoring completes it in place — never a duplicate point).
+      const existing: ProgressDataPoint | undefined =
+        vm.state === "has_point"
+          ? scoredPointByGoal.get(vm.goalId)
+          : queuedPointByGoal.get(vm.goalId);
+      if (existing !== undefined) {
         onOpenScore({
           ...targetForRow(vm, lk, today),
-          ...(point !== undefined ? { existingPoint: point, adminDate: point.admin_date } : {}),
+          existingPoint: existing,
+          adminDate: existing.admin_date,
         });
+        return;
+      }
+      if (vm.state === "owes") {
+        onOpenScore(targetForRow(vm, lk, today));
       }
     },
-    [onOpenScore, lk, today, scoredPointByGoal],
+    [onOpenScore, lk, today, scoredPointByGoal, queuedPointByGoal],
   );
 
   const renderRow = (vm: RowVM): ReactElement => (

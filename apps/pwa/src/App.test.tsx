@@ -63,6 +63,26 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(header).toHaveTextContent("2 of 3 collectable scored · 2 excused · 1 owe");
   });
 
+  it("tapping an owes row that already has a ⚑ bookmark completes it in place (no duplicate)", async () => {
+    await unlock();
+    const flags = screen.getAllByRole("button", { name: "Gave it, score later" });
+    const flag = flags[0];
+    if (flag === undefined) {
+      throw new Error("expected a score-later button");
+    }
+    fireEvent.click(flag); // bookmark AB Two-step equations
+    expect(await screen.findByTestId("to-score")).toHaveTextContent("To-score (1)");
+
+    // Tap the same row to score it directly → completes the queued point in place.
+    fireEvent.click(screen.getByRole("button", { name: "score Two-step equations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    // Exactly one scored point results: the queue empties (not left stranded) and
+    // the scored count rises by one.
+    expect(await screen.findByTestId("to-score")).toHaveTextContent("To-score (0)");
+    expect(screen.getByTestId("header-line")).toHaveTextContent("3 of 4 collectable scored");
+  });
+
   it("⚑ bookmarks to the To-Score queue and scoring there clears it", async () => {
     await unlock();
     const flags = screen.getAllByRole("button", { name: "Gave it, score later" });

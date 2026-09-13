@@ -29,6 +29,9 @@ import { deletePoint, upsertPoint } from "./repository.js";
 /** The teacher is the scorer and the edit author (a role, never a student name — identity-clean). */
 const TEACHER = "teacher" as const;
 
+/** The capture setting for this session — Resource, locked in the UI ("this session"). */
+export const DEFAULT_SETTING: Setting = "math_resource";
+
 export interface CaptureContext {
   readonly goalId: OpaqueId;
   readonly studentId: OpaqueId;
@@ -97,30 +100,48 @@ export function unbookmarkMutator(dataPointId: OpaqueId): DocMutator {
 }
 
 /**
- * Score a queued (bookmarked) point from the To-Score queue via an audited edit:
- * queued → scored, retaining the same data_point_id + admin date and appending a
- * Revision. This clears it from the queue (buildToScoreQueue filters queued).
+ * Complete a queued (bookmarked) placeholder by scoring it. The placeholder holds
+ * no value, so this is a fresh M5 capture (captureScoredPoint) — which evaluates
+ * the denominator mismatch against the assigned probe, exactly like a direct
+ * score — that REPLACES the placeholder: the queued point is deleted in the same
+ * transaction, so the goal ends the week with one scored point (never two) and
+ * the queue clears. It keeps the collected admin date (week membership).
  */
-export function scoreQueuedMutator(
-  point: ProgressDataPoint,
-  fill: { readonly numerator: number; readonly denominatorUsed: number; readonly setting: Setting },
-  when: Timestamp,
+export function completeQueuedMutator(
+  queued: ProgressDataPoint,
+  fill: {
+    readonly numerator: number;
+    readonly denominatorUsed: number;
+    readonly expectedDenominator?: number;
+  },
+  entryTs: Timestamp,
 ): DocMutator {
-  const scored = applyEdit(
-    point,
-    {
-      state: "scored",
-      numerator: fill.numerator,
-      denominator_used: fill.denominatorUsed,
-      setting: fill.setting,
-    },
-    TEACHER,
-    when,
-  );
-  return (doc) => upsertPoint(doc, scored);
+  const scored = captureScoredPoint({
+    goalId: queued.goal_id,
+    studentId: queued.student_id,
+    adminDate: queued.admin_date,
+    entryTs,
+    numerator: fill.numerator,
+    denominatorUsed: fill.denominatorUsed,
+    setting: queued.setting,
+    scorer: TEACHER,
+    ...(fill.expectedDenominator !== undefined
+      ? { expectedDenominator: fill.expectedDenominator }
+      : {}),
+  });
+  return (doc) => {
+    deletePoint(doc, queued.data_point_id);
+    upsertPoint(doc, scored);
+  };
 }
 
-/** Apply an audited edit to an existing point ([Fix]) — retains prior value as a revision. */
+/**
+ * Apply an audited edit to an existing SCORED point ([Fix]) — retains the prior
+ * value as a Revision (never a silent overwrite), same id. applyEdit re-derives
+ * computed_value and re-evaluates the denominator mismatch against the retained
+ * denominator_original, so a corrective [Fix] restoring the probe's total clears
+ * the flag.
+ */
 export function editMutator(
   point: ProgressDataPoint,
   changes: Parameters<typeof applyEdit>[1],

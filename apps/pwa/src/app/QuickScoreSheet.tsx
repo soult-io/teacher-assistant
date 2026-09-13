@@ -15,13 +15,15 @@ import type { DocMutator } from "../data/session.js";
 import {
   bookmarkMutator,
   type CaptureContext,
+  completeQueuedMutator,
+  DEFAULT_SETTING,
+  editMutator,
   noDataMutator,
   scoreMutator,
-  scoreQueuedMutator,
 } from "../data/writes.js";
 import type { SheetTarget } from "./sheet-target.js";
 
-const SETTING = "math_resource" as const;
+const SETTING = DEFAULT_SETTING;
 
 // Locked no-data reason set (design §A.2 + R3-1). Excused = Absent/Testing/No
 // School (pause the run, no fidelity ding); No time accrues the fidelity counter.
@@ -83,13 +85,22 @@ function ScoreEntry({
   };
 
   const save = () => {
+    const entryTs = asTimestamp(Date.now());
     if (existing !== undefined) {
+      // A queued placeholder is completed by a fresh mismatch-aware capture that
+      // replaces it; an already-scored point is corrected by an audited [Fix].
       onCommit(
-        scoreQueuedMutator(
-          existing,
-          { numerator: correct, denominatorUsed: denom, setting: SETTING },
-          asTimestamp(Date.now()),
-        ),
+        existing.state === "queued"
+          ? completeQueuedMutator(
+              existing,
+              {
+                numerator: correct,
+                denominatorUsed: denom,
+                expectedDenominator: target.expectedDenominator,
+              },
+              entryTs,
+            )
+          : editMutator(existing, { numerator: correct, denominator_used: denom }, entryTs),
       );
       return;
     }

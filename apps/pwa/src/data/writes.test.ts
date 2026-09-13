@@ -10,9 +10,10 @@ import * as Y from "yjs";
 import { readRecords } from "./repository.js";
 import {
   bookmarkMutator,
+  completeQueuedMutator,
+  editMutator,
   noDataMutator,
   scoreMutator,
-  scoreQueuedMutator,
   unbookmarkMutator,
 } from "./writes.js";
 
@@ -72,25 +73,61 @@ describe("write mutators (M5 capture path)", () => {
     expect(readRecords(doc).points).toHaveLength(0);
   });
 
-  it("scoreQueuedMutator turns a queued point scored with an audit revision (same id)", () => {
+  it("completeQueuedMutator replaces the placeholder with ONE scored point (no duplicate)", () => {
     const doc = new Y.Doc();
-    const context = ctx();
-    doc.transact(() => bookmarkMutator(context)(doc));
+    doc.transact(() => bookmarkMutator(ctx())(doc));
     const queued = readRecords(doc).points[0];
     if (queued === undefined) {
       throw new Error("expected a queued point");
     }
     doc.transact(() =>
-      scoreQueuedMutator(
+      completeQueuedMutator(
         queued,
-        { numerator: 4, denominatorUsed: 5, setting: "math_resource" },
+        { numerator: 4, denominatorUsed: 5, expectedDenominator: 5 },
+        asTimestamp(1),
+      )(doc),
+    );
+    const points = readRecords(doc).points;
+    expect(points).toHaveLength(1); // placeholder deleted → exactly one point
+    expect(points[0]?.state).toBe("scored");
+    expect(points[0]?.numerator).toBe(4);
+    expect(points[0]?.admin_date).toBe(queued.admin_date); // keeps the collected date
+  });
+
+  it("completeQueuedMutator flags a denominator mismatch on the queued→scored point", () => {
+    const doc = new Y.Doc();
+    doc.transact(() => bookmarkMutator(ctx())(doc));
+    const queued = readRecords(doc).points[0];
+    if (queued === undefined) {
+      throw new Error("expected a queued point");
+    }
+    doc.transact(() =>
+      completeQueuedMutator(
+        queued,
+        { numerator: 3, denominatorUsed: 6, expectedDenominator: 5 },
         asTimestamp(1),
       )(doc),
     );
     const scored = readRecords(doc).points[0];
-    expect(scored?.data_point_id).toBe(queued.data_point_id); // same id — not a new point
-    expect(scored?.state).toBe("scored");
-    expect(scored?.numerator).toBe(4);
-    expect(scored?.revisions).toHaveLength(1); // audited, prior value retained
+    expect(scored?.denominator_mismatch).toBe(true); // 6 ≠ 5 → flagged like the direct path
+    expect(scored?.denominator_original).toBe(5);
+  });
+
+  it("editMutator [Fix] on a scored point retains the prior value as a revision (same id)", () => {
+    const points = applyTo(
+      scoreMutator({ ...ctx(), numerator: 3, denominatorUsed: 5, expectedDenominator: 5 }),
+    );
+    const original = points[0];
+    if (original === undefined) {
+      throw new Error("expected a scored point");
+    }
+    const doc = new Y.Doc();
+    doc.transact(() => editMutator(original, { numerator: 5 }, asTimestamp(2))(doc));
+    const fixed = readRecords(doc).points[0];
+    expect(fixed?.data_point_id).toBe(original.data_point_id); // same id
+    expect(fixed?.numerator).toBe(5);
+    expect(fixed?.computed_value).toBe(1); // re-derived
+    expect(fixed?.revisions).toHaveLength(1); // prior value retained
+    expect(fixed?.revisions[0]?.old).toMatchObject({ numerator: 3 });
   });
 });
