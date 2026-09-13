@@ -23,6 +23,7 @@ import {
   buildLookups,
   buildStudentCards,
   orderPeriodGroups,
+  orderRowsByStudent,
   periodLabelOfGroup,
   type RowVM,
   toRowVM,
@@ -135,13 +136,19 @@ export function DashboardScreen({ records, now, onNewGoal }: DashboardScreenProp
       <div data-testid="dashboard-body">
         {lens === "by_student" ? (
           buildStudentCards(groups, lk).map((card) => (
-            <StudentCard key={card.studentId} card={card} />
+            <StudentCard
+              key={card.studentId}
+              card={card}
+              scoreLater={scoreLater}
+              onScoreLater={toggleLater}
+            />
           ))
         ) : lens === "by_period" ? (
           orderPeriodGroups(groups, lk).map((group) => (
             <div key={group.key}>
               <SectionLabel text={`Period ${periodLabelOfGroup(group, lk)}`} />
-              {group.rows.map((row) => renderRow(toRowVM(row, lk)))}
+              {/* Within a period: a student's goals adjacent + alphabetized (§E.4). */}
+              {orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))).map(renderRow)}
             </div>
           ))
         ) : (
@@ -169,8 +176,9 @@ function OwesFirst({
   readonly rows: readonly RowVM[];
   readonly renderRow: (vm: RowVM) => ReactElement;
 }) {
-  const owes = rows.filter((r) => r.state === "owes");
-  const done = rows.filter((r) => r.state !== "owes");
+  // Within each section a student's goals stay adjacent + alphabetized (§E.4).
+  const owes = orderRowsByStudent(rows.filter((r) => r.state === "owes"));
+  const done = orderRowsByStudent(rows.filter((r) => r.state !== "owes"));
   return (
     <div>
       <SectionLabel text="Owes a point" owes />

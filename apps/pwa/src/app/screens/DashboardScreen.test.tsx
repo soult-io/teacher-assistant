@@ -57,6 +57,29 @@ describe("DashboardScreen (U2)", () => {
     expect(within(body).getByText("Done this week")).toBeInTheDocument();
   });
 
+  it("owes rows show probe + criterion context (C4)", () => {
+    renderDashboard();
+    const body = screen.getByTestId("dashboard-body").textContent ?? "";
+    expect(body).toContain("5-item probe");
+    expect(body).toContain("80% × 4 consecutive probes");
+  });
+
+  it("by-student owes rows carry the score-later flag and a status-coloured value (C1/C3)", () => {
+    renderDashboard();
+    const toggle = screen.getByTestId("group-toggle");
+    fireEvent.click(toggle); // by period
+    fireEvent.click(toggle); // by student
+    // C1: the ⚑ flag is present on owes rows in the by-student lens too.
+    expect(screen.getAllByRole("button", { name: "Gave it, score later" }).length).toBeGreaterThan(
+      0,
+    );
+    // C3: the nested "owes" value carries the amber status class (.sval.owes).
+    const owesValues = screen.getAllByText("owes");
+    expect(
+      owesValues.some((el) => el.className.includes("sval") && el.className.includes("owes")),
+    ).toBe(true);
+  });
+
   it("routes + New goal to its handler", () => {
     const { onNewGoal } = renderDashboard();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));

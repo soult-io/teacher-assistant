@@ -515,6 +515,18 @@ button.btn:disabled {
   font-size: 1.1rem;
   width: 1.3rem;
 }
+/* nested value — status-coloured so status dominates (§E.3): owes amber, ⊘ grey, % default */
+.sval {
+  font-weight: 800;
+  flex: none;
+}
+.sval.owes {
+  color: var(--owes);
+}
+.sval.nodata {
+  color: var(--nodata);
+  font-weight: 600;
+}
 .rail {
   width: 0.28rem;
   border-radius: 2px;

@@ -41,6 +41,9 @@ export function GoalRow({ vm, scoreLater, onScoreLater }: GoalRowProps) {
         <span className="rowtitle">{vm.goalText}</span>
         <span className="rowmeta">
           {vm.periodLabel !== null ? <span className="period">{vm.periodLabel}</span> : null}
+          {/* Owes rows carry glanceable mid-class context: the probe + criterion. */}
+          {isOwes && vm.probe !== "" ? ` · ${vm.probe}` : null}
+          {isOwes && vm.criterion !== "" ? ` · ${vm.criterion}` : null}
           {scoreLater ? <span className="laternote"> · ⚑ score later</span> : null}
         </span>
         {vm.pending ? <span className="pendnote">⏳ para point — awaiting your OK</span> : null}
