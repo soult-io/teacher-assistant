@@ -19,6 +19,6 @@
     "ferpa-guard": "pnpm --filter @teacher-assistant/ferpa-guard test"
   },
   "devDependencies": {
-    "@biomejs/biome": "2.5.8"
+    "@biomejs/biome": "2.5.13"
   }
 }
