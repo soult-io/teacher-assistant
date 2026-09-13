@@ -16,6 +16,7 @@
 import type {
   ClassPeriod,
   IEPGoal,
+  MasteryObservation,
   OpaqueId,
   ProbeDefinition,
   ProgressDataPoint,
@@ -28,6 +29,7 @@ const GOALS = "goals";
 const POINTS = "points";
 const PERIODS = "periods";
 const PROBES = "probes";
+const OBSERVATIONS = "observations";
 
 /** The decrypted, in-memory record set read out of one stream's doc. */
 export interface DecryptedRecords {
@@ -38,6 +40,8 @@ export interface DecryptedRecords {
   readonly periods: readonly ClassPeriod[];
   /** The assigned probe per goal — expected denominator + condition (M5 mismatch/construct guard). */
   readonly probes: readonly ProbeDefinition[];
+  /** Teacher-acknowledged mastery windows (M5) — flagged for ARC; the goal stays open. */
+  readonly observations: readonly MasteryObservation[];
 }
 
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
@@ -48,12 +52,18 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     points: [...doc.getMap<ProgressDataPoint>(POINTS).values()],
     periods: [...doc.getMap<ClassPeriod>(PERIODS).values()],
     probes: [...doc.getMap<ProbeDefinition>(PROBES).values()],
+    observations: [...doc.getMap<MasteryObservation>(OBSERVATIONS).values()],
   };
 }
 
 /** Upsert one monitoring point (M5 capture path). Keyed by opaque data_point_id. */
 export function upsertPoint(doc: YDoc, point: ProgressDataPoint): void {
   doc.getMap<ProgressDataPoint>(POINTS).set(point.data_point_id, point);
+}
+
+/** Record a teacher-acknowledged mastery observation (flag for ARC). Keyed by observation id. */
+export function upsertObservation(doc: YDoc, observation: MasteryObservation): void {
+  doc.getMap<MasteryObservation>(OBSERVATIONS).set(observation.observation_id, observation);
 }
 
 /** Remove a monitoring point by id (e.g. un-bookmarking a score-later placeholder). */
@@ -86,6 +96,10 @@ export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
   const probes = doc.getMap<ProbeDefinition>(PROBES);
   for (const probe of records.probes) {
     probes.set(probe.probe_definition_id, probe);
+  }
+  const observations = doc.getMap<MasteryObservation>(OBSERVATIONS);
+  for (const observation of records.observations) {
+    observations.set(observation.observation_id, observation);
   }
 }
 

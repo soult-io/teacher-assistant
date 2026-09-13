@@ -474,3 +474,68 @@ describe("SME PASS-WITH-CHANGES regressions (M5 PR#15)", () => {
     expect(detail.noTimeCount).toBe(0);
   });
 });
+
+describe("goal detail — U4 chart display inputs (clamp boundary + ⊘ markers)", () => {
+  const base = (goal: IEPGoal) => ({
+    goal_id: goal.goal_id,
+    student_id: goal.student_id,
+    entry_ts: asTimestamp(0),
+    setting: "math_resource" as const,
+    scorer: "teacher" as const,
+    revisions: [],
+  });
+  const scored = (goal: IEPGoal, date: string, numerator: number): ProgressDataPoint => ({
+    ...base(goal),
+    data_point_id: newOpaqueId(),
+    admin_date: iso(date),
+    state: "scored",
+    numerator,
+    denominator_used: 10,
+    computed_value: numerator / 10,
+  });
+
+  it("clampAfter is null when the goal has no criterion / denominator-model change", () => {
+    const goal = makeGoal();
+    const detail = buildGoalDetail(goal, [scored(goal, "2026-09-07", 8)]);
+    expect(detail.clampAfter).toBeNull();
+  });
+
+  it("clampAfter is the change date so the UI never fits a line across the boundary", () => {
+    // A revision that raised the criterion level clamps the trend/aim line: the
+    // engine owns the boundary; the UI only reads this date.
+    const changeWhen = Date.UTC(2026, 8, 14); // 2026-09-14
+    const goal: IEPGoal = {
+      ...makeGoal(),
+      revisions: [
+        {
+          who: "teacher",
+          when: asTimestamp(changeWhen),
+          old: { criterion_level: 70 },
+          new: { criterion_level: 80 },
+        },
+      ],
+    };
+    const detail = buildGoalDetail(goal, [scored(goal, "2026-09-21", 9)]);
+    expect(detail.clampAfter).toBe("2026-09-14");
+  });
+
+  it("noDataMarkers lists every ⊘ with its date + reason, in admin-date order (the chart gaps)", () => {
+    const goal = makeGoal();
+    const nodata = (date: string, reason: NoDataReason): ProgressDataPoint => ({
+      ...base(goal),
+      data_point_id: newOpaqueId(),
+      admin_date: iso(date),
+      state: "no_data",
+      no_data_reason: reason,
+    });
+    const detail = buildGoalDetail(goal, [
+      nodata("2026-09-21", "absent"),
+      scored(goal, "2026-09-07", 8),
+      nodata("2026-09-14", "no_time"),
+    ]);
+    expect(detail.noDataMarkers).toEqual([
+      { adminDate: "2026-09-14", reason: "no_time" },
+      { adminDate: "2026-09-21", reason: "absent" },
+    ]);
+  });
+});

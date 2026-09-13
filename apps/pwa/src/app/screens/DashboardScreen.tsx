@@ -7,7 +7,7 @@
 // Grouping + within-group ordering come from the store; the app-local
 // dashboard-vm only resolves display + orders groups (see dashboard-vm.ts).
 
-import { asTimestamp, type ProgressDataPoint } from "@teacher-assistant/schema";
+import { asTimestamp, type OpaqueId, type ProgressDataPoint } from "@teacher-assistant/schema";
 import {
   buildToScoreQueue,
   buildWeeklyDashboard,
@@ -58,11 +58,13 @@ export interface DashboardScreenProps {
   readonly onNewGoal: () => void;
   readonly onToScore: () => void;
   readonly onOpenScore: (target: SheetTarget) => void;
+  /** Open Goal Detail for a goal (trend + history) — reachable from every row. */
+  readonly onOpenDetail: (goalId: OpaqueId) => void;
   readonly apply: (mutator: DocMutator) => Promise<void>;
 }
 
 export function DashboardScreen(props: DashboardScreenProps) {
-  const { records, lk, now, onNewGoal, onToScore, onOpenScore, apply } = props;
+  const { records, lk, now, onNewGoal, onToScore, onOpenScore, onOpenDetail, apply } = props;
   const [lens, setLens] = useState<DashboardLens>("owes_first");
   const today = isoDateOf(now);
 
@@ -132,6 +134,8 @@ export function DashboardScreen(props: DashboardScreenProps) {
     [onOpenScore, lk, today, scoredPointByGoal, queuedPointByGoal],
   );
 
+  const openDetail = useCallback((vm: RowVM) => onOpenDetail(vm.goalId), [onOpenDetail]);
+
   const renderRow = (vm: RowVM): ReactElement => (
     <GoalRow
       key={vm.goalId}
@@ -139,6 +143,7 @@ export function DashboardScreen(props: DashboardScreenProps) {
       scoreLater={queuedGoalIds.has(vm.goalId)}
       onScoreLater={toggleLater}
       onOpenScore={openScore}
+      onOpenDetail={openDetail}
     />
   );
 
@@ -193,6 +198,7 @@ export function DashboardScreen(props: DashboardScreenProps) {
               queuedGoalIds={queuedGoalIds}
               onScoreLater={toggleLater}
               onOpenScore={openScore}
+              onOpenDetail={openDetail}
             />
           ))
         ) : lens === "by_period" ? (

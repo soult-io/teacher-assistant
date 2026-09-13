@@ -10,9 +10,11 @@
 // versioned via applyEdit (who/when/old→new), never silent overwrites.
 
 import {
+  acknowledgeMastery,
   applyEdit,
   bookmarkForLater,
   captureScoredPoint,
+  type MasteryCandidate,
   recordNoData,
 } from "@teacher-assistant/domain-core";
 import type {
@@ -25,7 +27,7 @@ import type {
   Timestamp,
 } from "@teacher-assistant/schema";
 import type { DocMutator } from "./session.js";
-import { deletePoint, upsertPoint } from "./repository.js";
+import { deletePoint, upsertObservation, upsertPoint } from "./repository.js";
 
 /** The teacher is the scorer and the edit author (a role, never a student name — identity-clean). */
 const TEACHER = "teacher" as const;
@@ -117,6 +119,17 @@ export function bookmarkMutator(context: CaptureContext): DocMutator {
 /** Remove a score-later placeholder (un-flag a queued point). */
 export function unbookmarkMutator(dataPointId: OpaqueId): DocMutator {
   return (doc) => deletePoint(doc, dataPointId);
+}
+
+/**
+ * Teacher acknowledgement of an observed mastery window (M5) — records a
+ * MasteryObservation flagged for ARC. It NEVER transitions the goal to mastered
+ * (the app observes; the ARC closes the goal, design §B). Teacher-only by
+ * construction (the acknowledged_by is fixed to teacher in acknowledgeMastery).
+ */
+export function acknowledgeMasteryMutator(candidate: MasteryCandidate): DocMutator {
+  const observation = acknowledgeMastery(candidate);
+  return (doc) => upsertObservation(doc, observation);
 }
 
 /**

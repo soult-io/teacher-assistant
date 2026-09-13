@@ -9,6 +9,7 @@ import { Avatar } from "../../../design/Avatar.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { type RowVM, rowValueText } from "./dashboard-vm.js";
+import { TrendHistoryButton } from "./TrendHistoryButton.js";
 
 const STATE_LABEL: Readonly<Record<DashboardState, string>> = {
   owes: "owes",
@@ -47,9 +48,11 @@ export interface GoalRowProps {
   readonly scoreLater: boolean;
   readonly onScoreLater: (vm: RowVM) => void;
   readonly onOpenScore: (vm: RowVM) => void;
+  /** Open Goal Detail (trend + history) — reachable from EVERY goal (design R3 D2). */
+  readonly onOpenDetail: (vm: RowVM) => void;
 }
 
-export function GoalRow({ vm, scoreLater, onScoreLater, onOpenScore }: GoalRowProps) {
+export function GoalRow({ vm, scoreLater, onScoreLater, onOpenScore, onOpenDetail }: GoalRowProps) {
   const chip = chipForDashboardState(vm.state);
   const isOwes = vm.state === "owes";
   const tappable = vm.state === "owes" || vm.state === "has_point";
@@ -73,8 +76,8 @@ export function GoalRow({ vm, scoreLater, onScoreLater, onOpenScore }: GoalRowPr
         </div>
       )}
       {right !== null ? <div className="rowright">{right}</div> : null}
-      {isOwes ? (
-        <div className="rowactions">
+      <div className="rowactions">
+        {isOwes ? (
           <button
             type="button"
             className={`minibtn book${scoreLater ? " on" : ""}`}
@@ -85,8 +88,10 @@ export function GoalRow({ vm, scoreLater, onScoreLater, onOpenScore }: GoalRowPr
           >
             ⚑
           </button>
-        </div>
-      ) : null}
+        ) : null}
+        {/* ↗ trend/history is on EVERY row — the always-available path to Goal Detail. */}
+        <TrendHistoryButton vm={vm} onOpenDetail={onOpenDetail} />
+      </div>
     </div>
   );
 }
