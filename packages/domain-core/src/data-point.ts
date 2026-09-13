@@ -7,6 +7,7 @@
 import {
   type IEPGoal,
   type IsoDate,
+  type MismatchDisposition,
   newOpaqueId,
   type NoDataReason,
   type OpaqueId,
@@ -40,6 +41,14 @@ export interface ScoredPointInput {
   readonly denominatorUsed: number;
   /** The probe's expected total; a mismatch is flagged + the original retained (never hard-blocked). */
   readonly expectedDenominator?: number;
+  /**
+   * F-2 (§B): the teacher's affirmative acknowledgment + window disposition for a
+   * denominator mismatch. Applied ONLY when the point is actually mismatched;
+   * omitting the disposition leaves it pending (out of all computed math). Passing
+   * a disposition without an actual mismatch is ignored.
+   */
+  readonly mismatchAcknowledged?: boolean;
+  readonly mismatchWindowDisposition?: MismatchDisposition;
   readonly probeConditionId?: OpaqueId;
   /**
    * The goal + probe this point is recorded against. When present, the
@@ -80,6 +89,14 @@ export function captureScoredPoint(input: ScoredPointInput): ProgressDataPoint {
     revisions: [],
     ...(input.expectedDenominator !== undefined
       ? { denominator_original: input.expectedDenominator, denominator_mismatch: mismatch }
+      : {}),
+    // F-2: the teacher's election is stored ONLY on a genuine mismatch with a
+    // chosen disposition; otherwise it stays pending (fields absent).
+    ...(mismatch && input.mismatchWindowDisposition !== undefined
+      ? {
+          mismatch_acknowledged: input.mismatchAcknowledged ?? true,
+          mismatch_window_disposition: input.mismatchWindowDisposition,
+        }
       : {}),
     ...(probeConditionId !== undefined ? { probe_condition_id: probeConditionId } : {}),
   };
@@ -168,7 +185,8 @@ export function applyEdit(
   const merged = { ...point, ...changes };
 
   // A scored → ⊘ edit must carry NO residual value: a ⊘ is not a score of 0, so
-  // drop numerator / denominator / computed value / mismatch flags (design §A.2).
+  // drop numerator / denominator / computed value / mismatch flags — and the F-2
+  // disposition, which no longer applies with no denominator (design §A.2 / §B).
   if (merged.state === "no_data") {
     const {
       numerator: _n,
@@ -176,6 +194,8 @@ export function applyEdit(
       computed_value: _c,
       denominator_mismatch: _m,
       denominator_original: _o,
+      mismatch_window_disposition: _mwd,
+      mismatch_acknowledged: _ma,
       ...cleared
     } = merged;
     return { ...cleared, revisions: [...point.revisions, revision] };
@@ -194,5 +214,13 @@ export function applyEdit(
       );
     }
   }
-  return { ...merged, ...derived, revisions: [...point.revisions, revision] };
+
+  const next = { ...merged, ...derived, revisions: [...point.revisions, revision] };
+  // A corrective [Fix] that CLEARS the mismatch drops the now-stale F-2 disposition
+  // (a matched point has nothing to elect on) — no dangling counted/excluded state.
+  if (derived.denominator_mismatch === false) {
+    const { mismatch_window_disposition: _mwd, mismatch_acknowledged: _ma, ...resolved } = next;
+    return resolved;
+  }
+  return next;
 }

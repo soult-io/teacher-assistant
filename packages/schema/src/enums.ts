@@ -79,6 +79,19 @@ export const DATA_POINT_STATES = ["scored", "no_data", "incomplete", "queued", "
 export type DataPointState = Member<typeof DATA_POINT_STATES>;
 
 /**
+ * F-2 teacher election on a denominator-mismatched scored point (design §B). Two
+ * values only; the pending/unresolved state is the NULL case (the field absent),
+ * never a third enum value. State machine: pending → counted | excluded.
+ *   - "counted"  = in the consistency/quarterly math + trend, carried with a
+ *                  non-strippable off-basis flag in every rendering.
+ *   - "excluded" = out of the computed math, but retained + visible in audit/history.
+ * The M8 auto-statement HARD-excludes every mismatched point regardless of this
+ * election (a statement cannot flip on an off-basis point).
+ */
+export const MISMATCH_DISPOSITIONS = ["counted", "excluded"] as const;
+export type MismatchDisposition = Member<typeof MISMATCH_DISPOSITIONS>;
+
+/**
  * No-data reason (data-model §2.4, §A.2). `no_time` is a fidelity gap (accrues
  * the No-time counter, NOT excused); absent/testing/no_school are excused and
  * pause (never break) the consistency run. The para path may write only a

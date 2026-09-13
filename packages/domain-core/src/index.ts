@@ -20,6 +20,8 @@ export * from "./instructional-weeks.js";
 // M5 — goal-tracker + progress monitoring domain logic (phase1-spec §2).
 export * from "./value.js";
 export * from "./data-point.js";
+// F-2 — the teacher's denominator-mismatch window disposition (design §B).
+export * from "./mismatch.js";
 export * from "./consistency.js";
 export * from "./owes.js";
 export * from "./goal-validation.js";
