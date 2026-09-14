@@ -14,26 +14,31 @@ export function LockScreen({
 }) {
   return (
     <div className="lock">
-      <span className="mark" aria-hidden="true">
-        🔒
-      </span>
-      <h1>Teacher Assistant</h1>
-      <p className="locknote">
-        Offline-first IEP goal tracking. Student data is end-to-end encrypted on this device; unlock
-        with your passkey to open it.
-      </p>
-      <button
-        type="button"
-        className="btn primary wide"
-        onClick={onUnlock}
-        disabled={busy}
-        data-testid="unlock"
-      >
-        {busy ? "Unlocking…" : "Unlock with passkey"}
-      </button>
-      <p className="err" role="alert">
-        {error ?? ""}
-      </p>
+      {/* The lock screen renders as the plain `.phone` (no 1180 shell), so its content is
+          capped here in a centered `.lockbody` column — otherwise `.btn.wide` (width:100%)
+          stretches edge-to-edge on a wide monitor. The cap never binds on mobile. */}
+      <div className="lockbody">
+        <span className="mark" aria-hidden="true">
+          🔒
+        </span>
+        <h1>Teacher Assistant</h1>
+        <p className="locknote">
+          Offline-first IEP goal tracking. Student data is end-to-end encrypted on this device;
+          unlock with your passkey to open it.
+        </p>
+        <button
+          type="button"
+          className="btn primary wide"
+          onClick={onUnlock}
+          disabled={busy}
+          data-testid="unlock"
+        >
+          {busy ? "Unlocking…" : "Unlock with passkey"}
+        </button>
+        <p className="err" role="alert">
+          {error ?? ""}
+        </p>
+      </div>
     </div>
   );
 }

@@ -67,6 +67,20 @@ describe("AppShell", () => {
     expect(screen.getByText("3rd period · Math 81 Resource · JT")).toBeInTheDocument();
   });
 
+  it("desktop wraps the top-bar content in the centered .topbar-inner column (aligns with .screen-inner)", () => {
+    // The title and the offline/role/theme trio must live inside the capped, centered
+    // inner column so the header shares the 1180px content column — not span the full
+    // main-column width (the desktop-margin-polish fix).
+    const { container } = render(<AppShell {...base({ isDesktop: true, nav })} />);
+    const inner = container.querySelector(".topbar > .topbar-inner");
+    expect(inner).not.toBeNull();
+    expect(inner?.querySelector(".title")?.textContent).toBe("Weekly Dashboard");
+    expect(inner?.querySelector(".offline")).not.toBeNull();
+    expect(inner?.querySelector(".roleseg")).not.toBeNull();
+    // The band itself carries no flex children directly — only the inner column.
+    expect(container.querySelector(".topbar > .title")).toBeNull();
+  });
+
   it("desktop shows the top-bar back affordance only when onBack is provided", () => {
     const onBack = vi.fn();
     const { rerender } = render(<AppShell {...base({ isDesktop: true, nav })} />);
