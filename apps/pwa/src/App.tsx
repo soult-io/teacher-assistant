@@ -15,6 +15,7 @@ import {
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { buildToScoreQueue } from "@teacher-assistant/store";
+import { SyncError } from "@teacher-assistant/sync";
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
@@ -131,6 +132,21 @@ export interface AppProps {
   readonly bootstrapPara?: (handoff: ParaHandoff) => Promise<ParaSession>;
 }
 
+/**
+ * Copy for a FAILED unlock. The passkey guidance is reserved for an actual
+ * passkey/keyring/decryption failure — the only thing that can fail unlock, since
+ * bootstrap performs no relay I/O and the reconcile is non-blocking. A relay/sync
+ * error (defensive: should never reach the unlock catch) gets neutral, non-blaming
+ * copy instead. Identity-clean: never echoes an error's message (no student data).
+ */
+function unlockErrorMessage(err: unknown): string {
+  // Every sync/relay failure is a SyncError (RelayRequestError extends it).
+  if (err instanceof SyncError) {
+    return "Couldn't reach the sync server. Your local data is unaffected — try again.";
+  }
+  return "Unlock failed. Check your passkey and try again.";
+}
+
 export function App({
   bootstrap = bootstrapTeacherSession,
   bootstrapPara = bootstrapParaSession,
@@ -150,14 +166,19 @@ export function App({
         // Enter the para-device session from the handoff (wrapped Period DEK only) —
         // it opens ONLY the para stream and cannot decrypt master.
         const para = await bootstrapPara(teacher.paraHandoff);
+        // The local encrypted store is open — unlock has SUCCEEDED. The relay reconcile
+        // is best-effort and offline-first: fire-and-forget, and swallow even a contract
+        // violation so it can NEVER surface as an unlock error or an unhandled rejection.
         setSessions({ teacher, para });
         setPhase("ready");
-        void teacher.sync(); // best-effort reconcile; offline-first, non-blocking
+        void teacher.sync().catch(() => {});
       })
-      .catch(() => {
-        // Identity-clean: no student data in the message; generic guidance only.
+      .catch((err: unknown) => {
+        // Only a genuine passkey/keyring/decryption failure reaches here — bootstrap does
+        // NO relay I/O and the reconcile above is non-blocking — so a relay/sync error
+        // must never masquerade as a passkey problem (identity-clean: no student data).
         setPhase("locked");
-        setError("Unlock failed. Check your passkey and try again.");
+        setError(unlockErrorMessage(err));
       });
   }, [bootstrap, bootstrapPara]);
 

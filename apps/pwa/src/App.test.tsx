@@ -1,3 +1,4 @@
+import { RelayRequestError } from "@teacher-assistant/sync";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { App } from "./App.js";
@@ -214,5 +215,47 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     await waitFor(() =>
       expect(screen.getAllByRole("button", { name: /^confirm / }).length).toBe(1),
     );
+  });
+});
+
+describe("App — unlock error copy is passkey-only; the relay never blocks unlock", () => {
+  const NOW = new Date("2026-09-14T12:00:00Z");
+
+  it("shows the passkey guidance ONLY for a genuine keyring/passkey/decryption failure", async () => {
+    render(
+      <App
+        bootstrap={() => Promise.reject(new Error("keyring unwrap failed"))}
+        bootstrapPara={makeFakeParaSession}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("unlock"));
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert).toHaveTextContent("Check your passkey"));
+    expect(screen.getByTestId("unlock")).toBeInTheDocument(); // stays locked
+  });
+
+  it("does NOT blame the passkey when unlock fails for a relay/sync reason", async () => {
+    render(
+      <App
+        bootstrap={() => Promise.reject(new RelayRequestError(404, "doc-1", null))}
+        bootstrapPara={makeFakeParaSession}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("unlock"));
+    const alert = await screen.findByRole("alert");
+    await waitFor(() => expect(alert.textContent ?? "").not.toBe(""));
+    expect(alert).not.toHaveTextContent("Check your passkey");
+  });
+
+  it("reaches the ready dashboard even when the post-unlock reconcile rejects (non-blocking)", async () => {
+    const base = makeFakeSession(buildSyntheticSeed(NOW));
+    // A session whose best-effort reconcile REJECTS (a contract violation the app must
+    // still survive): unlock has already opened the local store — it must reach ready
+    // and never surface the failure.
+    const flaky = { ...base, sync: () => Promise.reject(new Error("relay down")) };
+    render(<App bootstrap={() => Promise.resolve(flaky)} bootstrapPara={makeFakeParaSession} />);
+    fireEvent.click(screen.getByTestId("unlock"));
+    expect(await screen.findByTestId("header-line")).toBeInTheDocument();
+    expect(screen.queryByText(/Check your passkey/)).toBeNull();
   });
 });

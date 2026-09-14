@@ -190,6 +190,22 @@ async function loadEngine(engine: SyncEngine): Promise<void> {
   await engine.load();
 }
 
+/**
+ * Best-effort reconcile of ONE stream's engine with the relay. Offline-first: any relay
+ * failure — unreachable, OR the relay reached but erroring/404-ing an un-enrolled device
+ * (H-PUB-3) — degrades to local-only and resolves `false`; it NEVER throws. So the
+ * bootstrap-time reconcile can never block unlock or surface as a passkey failure, and a
+ * failure on one stream never skips the other.
+ */
+async function reconcile(engine: SyncEngine): Promise<boolean> {
+  try {
+    await engine.sync();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Seed the master caseload into the master stream on first run (ciphertext). */
 async function seedMaster(
   engine: SyncEngine,
@@ -303,13 +319,11 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
       gateway,
     },
     sync: async () => {
-      try {
-        await masterEngine.sync();
-        await paraEngine.sync();
-        return true;
-      } catch {
-        return false; // offline-first: unreachable relay is not an error
-      }
+      // Reconcile BOTH streams best-effort + independently (offline-first): one stream's
+      // relay failure must not skip the other, and degrades to offline rather than throw.
+      const masterOk = await reconcile(masterEngine);
+      const paraOk = await reconcile(paraEngine);
+      return masterOk && paraOk;
     },
   };
 }
@@ -345,13 +359,6 @@ export async function bootstrapParaSession(handoff: ParaHandoff): Promise<ParaSe
     },
     refreshRecords: refresh,
     readParaRecords: () => readParaVisible(stream.doc),
-    sync: async () => {
-      try {
-        await engine.sync();
-        return true;
-      } catch {
-        return false;
-      }
-    },
+    sync: () => reconcile(engine), // best-effort, offline-first (never throws)
   };
 }
