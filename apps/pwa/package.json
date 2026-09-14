@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.sw.json",
     "test": "vitest run"
   },
   "dependencies": {
@@ -35,6 +35,10 @@
     "typescript": "~5.9.3",
     "vite": "^7.1.0",
     "vite-plugin-pwa": "^1.0.3",
-    "vitest": "~4.1.10"
+    "vitest": "~4.1.10",
+    "workbox-core": "7.4.1",
+    "workbox-precaching": "7.4.1",
+    "workbox-routing": "7.4.1",
+    "workbox-strategies": "7.4.1"
   }
 }

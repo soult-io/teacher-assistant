@@ -8,5 +8,8 @@
     "noEmit": true,
     "types": ["vite/client", "vite-plugin-pwa/client"]
   },
-  "include": ["src"]
+  "include": ["src"],
+  // The service worker is a WebWorker context (no DOM); it is type-checked on its
+  // own via tsconfig.sw.json and compiled by vite-plugin-pwa, not by this project.
+  "exclude": ["src/sw.ts"]
 }
