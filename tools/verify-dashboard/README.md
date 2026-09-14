@@ -1,8 +1,9 @@
 # verify-dashboard
 
 Generates the **TRACK Verification** dashboard — a live page that always reflects
-`main`, replacing the old hand-built claude.ai snapshot. Published to GitHub Pages
-by `.github/workflows/verification-dashboard.yml`.
+`main`, replacing the old hand-built claude.ai snapshot. Packaged into a small
+static nginx image (`teacher-assistant-verify`) and pushed to GHCR by
+`.github/workflows/verification-dashboard.yml`, then served privately on Lexington.
 
 ## What it does
 
@@ -49,6 +50,21 @@ without them the pills render as "status unknown".
 
 ## Hosting
 
-GitHub Pages, source = **GitHub Actions** (one-time repo setting). No gh-pages
-branch and no screenshots committed to `main`. URL:
-<https://soult-io.github.io/teacher-assistant/>.
+**Private**, on the Lexington infra — not public GitHub Pages (Neil's call). On push
+to `main` the workflow builds the generated output (`dist-dashboard/`) into a static
+nginx image and pushes it to GHCR:
+
+- `ghcr.io/soult-io/teacher-assistant-verify:sha-<commit>` (immutable, pinned in the
+  deploy stack) + a moving `:latest`.
+
+No screenshots are committed to `main`. The deploy stack
+`nsoult-agentic/stack-lexington-teacher-assistant` (`verify/docker-compose.yml`, stack
+`teacher-assistant-verify`) pins the image by tag + digest and serves it behind the
+Lexington NPM on `ta-verify.stabpablo.com` (proposed). TLS + HTTP/2 terminate at the
+NPM; **Neil applies the access gate (access-list / local-only)** on that host — the
+image ships no auth of its own. The dashboard is PII-free/synthetic, so a public GHCR
+image is fine; the private serving is about who can view the page, not the image.
+
+To make the first image public on GHCR (so the Lexington host pulls with no
+credential, like the four app images): a one-time package-visibility toggle by the
+operator after the first push (GHCR packages default to private).
