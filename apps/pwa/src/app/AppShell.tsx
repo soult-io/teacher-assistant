@@ -260,16 +260,22 @@ function DesktopShell(props: AppShellProps) {
       />
       <div className="main">
         <div className="topbar">
-          {onBack !== undefined ? (
-            <button type="button" className="backlink" onClick={onBack}>
-              ‹ Dashboard
-            </button>
-          ) : null}
-          <span className="title">{title}</span>
-          <span className="topgrow" />
-          <OfflineBadge online={online} />
-          <RoleSeg role={role} onRole={onRole} />
-          <ThemeToggle theme={theme} onThemeCycle={onThemeCycle} />
+          {/* The band spans the full main column (background + divider); its content is
+              held in the same centered 1180px inner column as `.screen-inner`, so the
+              title aligns with the content's left edge and the offline/role/theme trio
+              aligns with its right edge — one coherent column. */}
+          <div className="topbar-inner">
+            {onBack !== undefined ? (
+              <button type="button" className="backlink" onClick={onBack}>
+                ‹ Dashboard
+              </button>
+            ) : null}
+            <span className="title">{title}</span>
+            <span className="topgrow" />
+            <OfflineBadge online={online} />
+            <RoleSeg role={role} onRole={onRole} />
+            <ThemeToggle theme={theme} onThemeCycle={onThemeCycle} />
+          </div>
         </div>
         <div className="screen" id="screen">
           <div className="screen-inner">{props.children}</div>

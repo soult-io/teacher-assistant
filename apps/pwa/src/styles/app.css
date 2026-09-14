@@ -563,7 +563,17 @@ button.btn:disabled {
   justify-content: center;
   text-align: center;
   padding: 1.5rem 1.4rem;
+}
+/* The lock screen has no 1180 shell, so its content is capped in a centered column here;
+   without it the `.btn.wide` (width:100%) stretches full-viewport on a wide monitor. The
+   24rem cap does not bind on mobile, where it reads as the de-bezelled full-bleed column. */
+.lockbody {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
   gap: 0.4rem;
+  width: 100%;
+  max-width: 24rem;
 }
 .lock .mark {
   width: 3.4rem;
@@ -1424,14 +1434,31 @@ button.rowmain {
     flex-direction: column;
     min-width: 0;
     min-height: 0; /* allow the flex child `.screen` to own the scroll */
+    /* The centered content column width, shared by the top-bar and content inner columns
+       (`.topbar-inner` / `.screen-inner`) so the cap can't drift between them. */
+    --content-max: 1180px;
+    /* The classic scrollbar width the content pane reserves (see `.main .screen`). The top
+       bar mirrors it as extra inset so the two centered inner columns share identical
+       insets and stay aligned at EVERY width, not just where the cap binds. */
+    --content-scrollbar: 10px;
   }
+  /* The band is full-bleed (background + bottom divider span the whole main column); its
+     content sits in `.topbar-inner`, the SAME centered 1180px column as `.screen-inner`.
+     The horizontal padding matches the content pane's padding PLUS its reserved scrollbar
+     gutter, so the header title aligns with the content's left edge and the offline/role/
+     theme trio aligns with its right edge — one coherent column at every desktop width. */
   .topbar {
+    padding: 0.6rem calc(1.3rem + var(--content-scrollbar));
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar-inner {
     display: flex;
     align-items: center;
     gap: 0.7rem;
-    padding: 0.6rem 1.3rem;
-    background: var(--surface);
-    border-bottom: 1px solid var(--border);
+    width: 100%;
+    max-width: var(--content-max);
+    margin: 0 auto;
   }
   .topbar .title {
     font-weight: 800;
@@ -1456,16 +1483,20 @@ button.rowmain {
     flex: 1;
     overflow-y: auto;
     padding: 1.1rem 1.3rem;
+    /* Reserve the classic scrollbar on BOTH edges so the centered `.screen-inner` column
+       stays symmetric within the main column; the top bar mirrors the same gutter via
+       `--content-scrollbar`, so header and content align at every desktop width. */
+    scrollbar-gutter: stable both-edges;
   }
   .main .screen::-webkit-scrollbar {
-    width: 10px;
+    width: var(--content-scrollbar);
   }
   .main .screen::-webkit-scrollbar-thumb {
     background: var(--border-strong);
     border-radius: 5px;
   }
   .screen-inner {
-    max-width: 1180px;
+    max-width: var(--content-max);
     margin: 0 auto;
   }
 
