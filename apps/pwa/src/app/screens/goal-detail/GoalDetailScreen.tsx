@@ -28,6 +28,7 @@ import type {
 } from "@teacher-assistant/schema";
 import type { ReactNode } from "react";
 import { Avatar } from "../../../design/Avatar.js";
+import { useIsDesktop } from "../../useIsDesktop.js";
 import { TrendChart } from "./TrendChart.js";
 
 /** Copy text to the clipboard when available — a no-op elsewhere (guarded for jsdom/older browsers). */
@@ -469,7 +470,81 @@ export interface GoalDetailScreenProps {
   readonly onAckMastery: (candidate: MasteryCandidate) => void;
 }
 
-export function GoalDetailScreen(props: GoalDetailScreenProps) {
+/** The trend card (chart + the ⊘-as-gap note) — shared by every layout. */
+function ChartCard({ detail, goal }: { readonly detail: GoalDetail; readonly goal: IEPGoal }) {
+  return (
+    <div className="card">
+      <div className="chartwrap">
+        <TrendChart
+          trend={detail.trend}
+          noDataMarkers={detail.noDataMarkers}
+          clampAfter={detail.clampAfter}
+          baselineValue={goal.baseline_value ?? null}
+          criterionLevel={goal.criterion_level}
+          iepEndDate={goal.iep_end_date ?? null}
+        />
+      </div>
+      <div className="note">⊘ no-data probe is shown as a gap, never plotted as a zero.</div>
+    </div>
+  );
+}
+
+/** The goal header (avatar + name + criterion/baseline). Desktop lays "+ Add a point" inline. */
+function DetailHeader({
+  goal,
+  initials,
+  periodLabel,
+  onAddPoint,
+  inlineAdd,
+}: {
+  readonly goal: IEPGoal;
+  readonly initials: string;
+  readonly periodLabel: string | null;
+  readonly onAddPoint: () => void;
+  readonly inlineAdd: boolean;
+}) {
+  return (
+    <div className="detailhead">
+      <Avatar initials={initials} />
+      <div className="detailtitle">
+        <h1>{goal.goal_text}</h1>
+        <div className="sub">
+          {periodLabel !== null ? `${periodLabel} · ` : ""}Criterion: {goal.criterion_level}% ×{" "}
+          {goal.criterion_consistency.phrase}
+          {goal.baseline_value !== undefined ? ` · Baseline ${goal.baseline_value}%` : ""}
+        </div>
+      </div>
+      {inlineAdd ? (
+        <span className="detailadd">
+          <button type="button" className="btn primary small" onClick={onAddPoint}>
+            + Add a point
+          </button>
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** Which arrangement to render the Goal Detail cards in (design §3.1/§3.2). */
+export type GoalDetailLayout = "mobile" | "pane" | "full";
+
+export interface GoalDetailBodyProps extends Omit<GoalDetailScreenProps, "onBack"> {
+  /** mobile = validated single column; full = two columns (deep-link); pane = stacked (dashboard). */
+  readonly layout: GoalDetailLayout;
+}
+
+/**
+ * The Goal Detail cards, arranged for one of three layouts. The SAME card components
+ * render everywhere — only their arrangement changes (design §5: desktop reflows the
+ * honesty surfaces, never their meaning or copy):
+ *   - mobile: the validated single column (chart · quarterly · statement · consistency · ARC).
+ *   - full  : two columns — data left (chart · consistency · ARC), report-bound honesty
+ *             surfaces right (draft statement · quarterly) — the deep-linked Goal Detail.
+ *   - pane  : one stacked column inside the dashboard master-detail (chart · statement ·
+ *             consistency · quarterly · ARC), with "+ Add a point" inline in the header.
+ * The caller wraps this in `.goal-detail`.
+ */
+export function GoalDetailBody(props: GoalDetailBodyProps) {
   const {
     goal,
     points,
@@ -478,10 +553,10 @@ export function GoalDetailScreen(props: GoalDetailScreenProps) {
     periodLabel,
     probeLabel,
     isNonInstructional,
-    onBack,
     onAddPoint,
     onEditPoint,
     onAckMastery,
+    layout,
   } = props;
 
   const detail = buildGoalDetail(goal, points);
@@ -489,6 +564,83 @@ export function GoalDetailScreen(props: GoalDetailScreenProps) {
   const observation = observations.find((o) => o.goal_id === goal.goal_id);
   const exportable = isIcExportable(goal);
 
+  const header = (
+    <DetailHeader
+      goal={goal}
+      initials={initials}
+      periodLabel={periodLabel}
+      onAddPoint={onAddPoint}
+      inlineAdd={layout !== "mobile"}
+    />
+  );
+  const chart = <ChartCard detail={detail} goal={goal} />;
+  const quarterly = <QuarterlyCard detail={detail} exportable={exportable} />;
+  const stmt = statement !== null ? <StatementCard statement={statement} /> : null;
+  const consistency = (
+    <ConsistencyCard
+      detail={detail}
+      goal={goal}
+      observation={observation}
+      onAckMastery={onAckMastery}
+    />
+  );
+  const history = (
+    <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+  );
+
+  if (layout === "full") {
+    return (
+      <>
+        {header}
+        <div className="twocol">
+          <div className="gdcol">
+            {chart}
+            {consistency}
+            {history}
+          </div>
+          <div className="gdcol">
+            {stmt}
+            {quarterly}
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  if (layout === "pane") {
+    return (
+      <>
+        {header}
+        {chart}
+        {stmt}
+        {consistency}
+        {quarterly}
+        {history}
+      </>
+    );
+  }
+
+  // mobile — the validated single column (unchanged order + the full-width add button).
+  return (
+    <>
+      {header}
+      <div className="btnrow addrow">
+        <button type="button" className="btn primary wide" onClick={onAddPoint}>
+          + Add a point
+        </button>
+      </div>
+      {chart}
+      {quarterly}
+      {stmt}
+      {consistency}
+      {history}
+    </>
+  );
+}
+
+export function GoalDetailScreen(props: GoalDetailScreenProps) {
+  const { onBack, ...body } = props;
+  const isDesktop = useIsDesktop();
   return (
     <div className="goal-detail">
       <div className="backrow">
@@ -496,51 +648,7 @@ export function GoalDetailScreen(props: GoalDetailScreenProps) {
           ‹ Dashboard
         </button>
       </div>
-
-      <div className="detailhead">
-        <Avatar initials={initials} />
-        <div className="detailtitle">
-          <h1>{goal.goal_text}</h1>
-          <div className="sub">
-            {periodLabel !== null ? `${periodLabel} · ` : ""}Criterion: {goal.criterion_level}% ×{" "}
-            {goal.criterion_consistency.phrase}
-            {goal.baseline_value !== undefined ? ` · Baseline ${goal.baseline_value}%` : ""}
-          </div>
-        </div>
-      </div>
-
-      <div className="btnrow addrow">
-        <button type="button" className="btn primary wide" onClick={onAddPoint}>
-          + Add a point
-        </button>
-      </div>
-
-      <div className="card">
-        <div className="chartwrap">
-          <TrendChart
-            trend={detail.trend}
-            noDataMarkers={detail.noDataMarkers}
-            clampAfter={detail.clampAfter}
-            baselineValue={goal.baseline_value ?? null}
-            criterionLevel={goal.criterion_level}
-            iepEndDate={goal.iep_end_date ?? null}
-          />
-        </div>
-        <div className="note">⊘ no-data probe is shown as a gap, never plotted as a zero.</div>
-      </div>
-
-      <QuarterlyCard detail={detail} exportable={exportable} />
-
-      {statement !== null ? <StatementCard statement={statement} /> : null}
-
-      <ConsistencyCard
-        detail={detail}
-        goal={goal}
-        observation={observation}
-        onAckMastery={onAckMastery}
-      />
-
-      <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+      <GoalDetailBody {...body} layout={isDesktop ? "full" : "mobile"} />
     </div>
   );
 }

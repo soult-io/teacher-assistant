@@ -26,7 +26,7 @@ import {
   PARA_OBSERVATIONS,
   type Setting,
 } from "@teacher-assistant/schema";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import { isoDateOf } from "../../../data/date.js";
 import type { DocMutator } from "../../../data/session.js";
@@ -122,6 +122,17 @@ export function ParaCaptureSheet({
   const [reason, setReason] = useState<ParaNoDataReason | null>(null);
   const mismatch = total !== target.expectedDenominator;
 
+  // Escape closes (design §3.3 — desktop modal parity); the backdrop click is the pointer path.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+      }
+    };
+    globalThis.addEventListener?.("keydown", onKey);
+    return () => globalThis.removeEventListener?.("keydown", onKey);
+  }, [onClose]);
+
   const toggleObs = (o: ParaObservation) => {
     setObservations((prev) => {
       const next = prev.includes(o) ? prev.filter((x) => x !== o) : [...prev, o];
@@ -179,6 +190,9 @@ export function ParaCaptureSheet({
       <div className="scrim open" onClick={onClose} />
       <div className="sheet open" role="dialog" aria-label="para score entry">
         <div className="grip" />
+        <button type="button" className="modal-close" aria-label="close" onClick={onClose}>
+          ✕
+        </button>
         <div className="whowhat sheet-who">
           <Avatar initials={target.initials} />
           <span>{target.administerLabel}</span>

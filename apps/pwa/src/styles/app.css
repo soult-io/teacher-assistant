@@ -18,24 +18,19 @@ body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 16px;
   line-height: 1.4;
-  padding: 1.2rem 0.6rem 2rem;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
 }
 
-/* centered phone frame */
+/* De-bezelled app surface (design §1): full-bleed at every width — the fake phone
+   frame (max-width / border / radius / shadow / fixed height) is dropped so the app
+   fills the viewport. At >=900px the SHELL variant (`.phone.shell`) becomes the desktop
+   grid (sidebar | main); the plain `.phone` — mobile chrome and the lock screen — stays
+   a full-height flex column. */
 .phone {
   width: 100%;
-  max-width: 26rem;
+  height: 100dvh;
   background: var(--bg);
-  border: 1px solid var(--border-strong);
-  border-radius: 30px;
   overflow: hidden;
-  box-shadow: var(--shadow);
   position: relative;
-  height: 52rem;
-  max-height: 90vh;
   display: flex;
   flex-direction: column;
 }
@@ -252,6 +247,13 @@ h2 {
 .row.owes {
   border-color: var(--owes-line);
   background: var(--owes-bg);
+}
+/* Desktop master-detail selection (design §3.1): accent left-rail + tint, overriding the
+   owes tint so the selected goal is unambiguous. */
+.row.selected {
+  border-color: var(--accent);
+  box-shadow: inset 4px 0 0 var(--accent);
+  background: var(--accent-soft);
 }
 .rowmain {
   flex: 1;
@@ -652,6 +654,11 @@ button.btn:disabled {
   border-radius: 999px;
   background: var(--border-strong);
   margin: 0.2rem auto 0.7rem;
+}
+/* Desktop modal close (✕). Hidden on mobile, where the sheet uses the scrim tap + Esc
+   + the in-sheet Back/Cancel; shown on desktop (the grip is hidden there instead). */
+.modal-close {
+  display: none;
 }
 .whowhat {
   font-weight: 800;
@@ -1303,4 +1310,297 @@ button.rowmain {
 .field .val.pendingtxt {
   color: var(--pending);
   font-weight: 700;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════════
+   U7 — DESKTOP (>=900px). design/desktop-design-spec.md. Same render functions, the
+   host containers re-laid-out: a persistent sidebar + top bar shell, master-detail
+   dashboard, two-column Goal Detail, centered Quick-Score modal, and wider tables.
+   Below 900px NONE of this applies — the validated mobile layout renders unchanged.
+   ══════════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 900px) {
+  /* The shell: sidebar | main. Only `.phone.shell` (post-unlock) becomes the grid; the
+     plain `.phone` (lock screen) stays a full-height flex column. */
+  .phone.shell {
+    display: grid;
+    grid-template-columns: 15rem 1fr;
+    /* Bound the single row to the viewport (minmax(0,…) lets the sidebar and main
+       shrink so their own overflow-y scrolls, instead of the row growing past
+       100dvh with tall content and clipping under `.phone { overflow: hidden }`). */
+    grid-template-rows: minmax(0, 1fr);
+    height: 100dvh;
+  }
+
+  /* ── Left sidebar ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+    padding: 0.9rem 0.7rem;
+    overflow-y: auto;
+    min-width: 0;
+  }
+  .brand {
+    font-weight: 900;
+    font-size: 0.95rem;
+    padding: 0.3rem 0.5rem 0.8rem;
+  }
+  .brand small {
+    display: block;
+    font-weight: 700;
+    font-size: 0.66rem;
+    color: var(--text-dim);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-top: 0.15rem;
+  }
+  .navitem {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-align: left;
+    padding: 0.6rem 0.6rem;
+    border-radius: 10px;
+    cursor: pointer;
+  }
+  .navitem:hover {
+    background: var(--surface-2);
+  }
+  .navitem.on {
+    color: var(--accent);
+    background: var(--accent-soft);
+    box-shadow: inset 3px 0 0 var(--accent);
+  }
+  /* Scoped under .sidebar so this is strictly higher-specificity than the earlier
+     `.tabbar button .ic` (avoids a descending-specificity lint on the shared `.ic`). */
+  .sidebar .navitem .ic {
+    font-size: 1.1rem;
+    width: 1.3rem;
+    text-align: center;
+    line-height: 1;
+  }
+  .navitem .badge {
+    margin-left: auto;
+    font-size: 0.7rem;
+    font-weight: 800;
+    color: var(--text-dim);
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 0.05rem 0.45rem;
+  }
+  .navdiv {
+    height: 1px;
+    background: var(--border);
+    margin: 0.6rem 0.3rem;
+  }
+  .navsec {
+    font-size: 0.64rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-dim);
+    padding: 0.2rem 0.6rem;
+  }
+  .sidefoot {
+    margin-top: auto;
+    font-size: 0.72rem;
+    color: var(--text-dim);
+    padding: 0.5rem;
+  }
+
+  /* ── Main column: top bar + scrolling content ── */
+  .main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0; /* allow the flex child `.screen` to own the scroll */
+  }
+  .topbar {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.6rem 1.3rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .topbar .title {
+    font-weight: 800;
+    font-size: 0.95rem;
+  }
+  .topbar .topgrow {
+    flex: 1;
+  }
+  .backlink {
+    border: 0;
+    background: transparent;
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 0;
+  }
+
+  /* The content region shows a native scrollbar (a desktop user expects one) and caps
+     line length; the mobile scrollbar-hiding rule does not apply here. */
+  .main .screen {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1.1rem 1.3rem;
+  }
+  .main .screen::-webkit-scrollbar {
+    width: 10px;
+  }
+  .main .screen::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 5px;
+  }
+  .screen-inner {
+    max-width: 1180px;
+    margin: 0 auto;
+  }
+
+  /* The in-screen "‹ Dashboard" backrow is replaced by the top-bar back affordance. */
+  .backrow {
+    display: none;
+  }
+
+  /* ── Dashboard master-detail (design §3.1) ── */
+  .md {
+    display: grid;
+    grid-template-columns: 24rem 1fr;
+    gap: 1.1rem;
+    align-items: start;
+  }
+  .mdlist {
+    min-width: 0;
+  }
+  .mddetail {
+    min-width: 0;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 1rem;
+  }
+  .listtoolbar {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 0.3rem;
+  }
+  /* Rows get a pointer + hover cue on desktop (mouse, not thumb). */
+  .row {
+    cursor: pointer;
+  }
+  .row:hover {
+    border-color: var(--border-strong);
+  }
+  .row.selected:hover {
+    border-color: var(--accent);
+  }
+
+  /* by-student lens → full-width card grid (design Q2), no detail pane. */
+  .scardgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
+    gap: 0.7rem;
+    align-items: start;
+  }
+
+  /* ── Goal Detail two-column (design §3.2) ── */
+  .twocol {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 1.1rem;
+    align-items: start;
+  }
+  .gdcol {
+    min-width: 0;
+  }
+  .detailadd {
+    margin-left: auto;
+  }
+
+  /* The dashboard detail PANE stacks in one column (design §3.1) even on desktop. */
+  .gd-pane .twocol {
+    grid-template-columns: 1fr;
+  }
+
+  /* ── Quick-Score / para capture → centered modal (design §3.3) ── */
+  .sheet {
+    top: 50%;
+    left: 50%;
+    right: auto;
+    bottom: auto;
+    transform: translate(-50%, -50%);
+    width: 28rem;
+    max-width: 92vw;
+    max-height: 86vh;
+    border-radius: 20px;
+  }
+  .sheet.open {
+    transform: translate(-50%, -50%);
+  }
+  .sheet .grip {
+    display: none;
+  }
+  .sheet .modal-close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 0.6rem;
+    right: 0.7rem;
+    width: 2rem;
+    height: 2rem;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    border-radius: 10px;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+
+  /* ── Sub-screens: cap line length so nothing runs the full 1180px ── */
+  .to-score {
+    max-width: 56rem;
+  }
+  .new-goal .form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.6rem 1rem;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+  /* Path selector, standalone notes, the gate banner, and submit span both columns. */
+  .new-goal .form > .ngfield:first-child,
+  .new-goal .form > .note,
+  .new-goal .form > .gate,
+  .new-goal .form > .ngsubmit {
+    grid-column: 1 / -1;
+  }
+
+  /* Baseline / proposed cards → a card grid (design §3.5). */
+  .bcardgrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(22rem, 1fr));
+    gap: 0.7rem;
+    align-items: start;
+  }
+}
+
+/* Wide screens (design §1, >=1400px): the fluid card grids gain a third column. */
+@media (min-width: 1400px) {
+  .scardgrid,
+  .bcardgrid {
+    grid-template-columns: repeat(3, 1fr);
+  }
 }
