@@ -9,8 +9,9 @@
 // parent applies it (encrypted + persisted) and closes.
 
 import { asTimestamp, type NoDataReason, type ProgressDataPoint } from "@teacher-assistant/schema";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../design/Avatar.js";
+import { matchesDesktop } from "./useIsDesktop.js";
 import type { DocMutator } from "../data/session.js";
 import {
   bookmarkMutator,
@@ -78,6 +79,14 @@ function ScoreEntry({
   const [denom, setDenom] = useState<number>(
     existing?.denominator_used ?? target.expectedDenominator,
   );
+  // Desktop (design §3.3): focus # correct on open so type-to-enter is primary. Guarded
+  // so it never pops the mobile keyboard (mobile keeps the stepper as the primary path).
+  const numRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (matchesDesktop()) {
+      numRef.current?.focus();
+    }
+  }, []);
   const pct = denom > 0 ? Math.round((correct / denom) * 100) : 0;
   // A VARIABLE-basis goal (F-2 escape valve) never warns: the entered total is
   // accepted as-is and NO expected total is passed to capture, so no off-basis flag.
@@ -138,8 +147,17 @@ function ScoreEntry({
     );
   };
 
+  // Enter = Save (design §3.3). A form submit; guarded so a genuine mismatch still
+  // requires the explicit F-2 disposition (Enter cannot bypass the ack).
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mismatch) {
+      save();
+    }
+  };
+
   return (
-    <>
+    <form className="qs-form" onSubmit={onSubmit}>
       <TargetHeader target={target} />
       <div className="ctx">
         Probe: {target.probeLabel} · Setting: Resource <span className="locked">this session</span>
@@ -156,6 +174,7 @@ function ScoreEntry({
             −
           </button>
           <input
+            ref={numRef}
             className="numin"
             inputMode="numeric"
             aria-label="number correct"
@@ -222,7 +241,7 @@ function ScoreEntry({
         </div>
       ) : (
         <div className="btnrow">
-          <button type="button" className="btn primary wide" onClick={() => save()}>
+          <button type="submit" className="btn primary wide">
             Save
           </button>
           <button type="button" className="btn wide" onClick={toNoData}>
@@ -241,7 +260,7 @@ function ScoreEntry({
           </button>
         </div>
       ) : null}
-    </>
+    </form>
   );
 }
 
@@ -340,6 +359,9 @@ export function QuickScoreSheet({
       <div className="scrim open" onClick={onClose} />
       <div className="sheet open" role="dialog" aria-label="score entry">
         <div className="grip" />
+        <button type="button" className="modal-close" aria-label="close" onClick={onClose}>
+          ✕
+        </button>
         {mode === "score" ? (
           <ScoreEntry
             target={target}

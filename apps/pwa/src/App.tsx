@@ -14,13 +14,20 @@ import {
   type OpaqueId,
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AppShell, type Tab } from "./app/AppShell.js";
+import { buildToScoreQueue } from "@teacher-assistant/store";
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
 import { QuickScoreSheet, type ParaFixEdit } from "./app/QuickScoreSheet.js";
 import { BaselineScreen } from "./app/screens/baseline/BaselineScreen.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
-import { GoalDetailScreen } from "./app/screens/goal-detail/GoalDetailScreen.js";
+import {
+  GoalDetailBody,
+  GoalDetailScreen,
+  type GoalDetailScreenProps,
+} from "./app/screens/goal-detail/GoalDetailScreen.js";
+import { ValidationStrip } from "./app/screens/dashboard/ValidationStrip.js";
+import { useIsDesktop } from "./app/useIsDesktop.js";
 import {
   assembleGoal,
   makeStudent,
@@ -61,6 +68,56 @@ import {
 
 type Phase = "locked" | "unlocking" | "ready";
 type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail" | "baseline" | "validation";
+
+/** Desktop top-bar titles per Track view (design §2). */
+const SCREEN_TITLES: Readonly<Record<TrackView, string>> = {
+  dashboard: "Weekly Dashboard",
+  toscore: "To-score",
+  new_goal: "New goal",
+  goal_detail: "Goal Detail",
+  baseline: "Baseline / proposed goals",
+  validation: "Para points to confirm",
+};
+
+/** The desktop sidebar roster context for the Para role (period-scoped, non-PII). */
+const PARA_CONTEXT = "3rd period · Math 81 Resource · JT";
+
+interface ShellProps {
+  readonly title: string;
+  readonly onBack: (() => void) | undefined;
+  readonly nav: ShellNav | undefined;
+}
+
+/**
+ * Derive the desktop shell chrome (top-bar title + back affordance + sidebar Track
+ * destinations) from the current role/tab/view. Pure — kept out of ReadyApp so the
+ * component stays under the complexity bar. The Track destinations + back exist only
+ * in the teacher Track context (the Para role collapses the shell; §2 FERPA).
+ */
+function buildShellProps(args: {
+  readonly role: Role;
+  readonly tab: Tab;
+  readonly trackView: TrackView;
+  readonly toScoreCount: number;
+  readonly baselineCount: number;
+  readonly go: (view: TrackView) => void;
+}): ShellProps {
+  const { role, tab, trackView, toScoreCount, baselineCount, go } = args;
+  const inTeacherTrack = role === "teacher" && tab === "track";
+  const title =
+    role === "para" ? "Your students today" : tab === "plan" ? "Plan" : SCREEN_TITLES[trackView];
+  const onBack = inTeacherTrack && trackView !== "dashboard" ? () => go("dashboard") : undefined;
+  const nav: ShellNav | undefined = inTeacherTrack
+    ? {
+        toScoreCount,
+        baselineCount,
+        onToScore: () => go("toscore"),
+        onBaseline: () => go("baseline"),
+        onNewGoal: () => go("new_goal"),
+      }
+    : undefined;
+  return { title, onBack, nav };
+}
 
 interface Sessions {
   readonly teacher: Session;
@@ -136,6 +193,7 @@ function ReadyApp({
   readonly now: Date;
 }) {
   const { records, apply, refresh } = useSessionRecords(teacher);
+  const isDesktop = useIsDesktop();
   const [role, setRole] = useState<Role>("teacher");
   const [tab, setTab] = useState<Tab>("track");
   const [trackView, setTrackView] = useState<TrackView>("dashboard");
@@ -316,8 +374,62 @@ function ReadyApp({
 
   const detailGoal =
     detailGoalId !== null ? records.goals.find((g) => g.goal_id === detailGoalId) : undefined;
-  const detailPeriodLabel =
-    detailGoal !== undefined ? periodLabelByStudent(detailGoal.student_id) : null;
+
+  // ── U7 desktop shell wiring (design §2/§3.1). Inert on mobile: the mobile chrome and
+  // the mobile DashboardScreen path ignore isDesktop/renderDetailPane/validationStrip. ──
+  const toScoreCount = buildToScoreQueue(records.points).length;
+  const baselineCount = records.goals.filter((g) => g.status === "proposed").length;
+
+  // The shared Goal Detail props for a goal — assembled once so the master-detail pane
+  // and the deep-linked full screen never drift (a new GoalDetailBody prop is added here,
+  // not in two call sites). The two sites differ only in layout vs onBack.
+  const goalBodyProps = useCallback(
+    (g: IEPGoal): Omit<GoalDetailScreenProps, "onBack"> => ({
+      goal: g,
+      points: records.points,
+      observations: records.observations,
+      initials: lk.initialsById.get(g.student_id) ?? "??",
+      periodLabel: periodLabelByStudent(g.student_id),
+      probeLabel: lk.probeByGoal.get(g.goal_id)?.label ?? "probe",
+      isNonInstructional: isNonInstructionalWeek,
+      onAddPoint: () => setSheetTarget(targetForGoal(g, lk, today)),
+      onEditPoint: (point) => setSheetTarget(targetForGoal(g, lk, today, point)),
+      onAckMastery: (candidate) => void apply(acknowledgeMasteryMutator(candidate)),
+    }),
+    [records.points, records.observations, lk, periodLabelByStudent, today, apply],
+  );
+
+  // The master-detail right pane: the selected goal's full Goal Detail (pane layout).
+  const renderDetailPane = useCallback(
+    (goalId: OpaqueId): ReactNode => {
+      const g = records.goals.find((x) => x.goal_id === goalId);
+      return g === undefined ? null : <GoalDetailBody {...goalBodyProps(g)} layout="pane" />;
+    },
+    [records.goals, goalBodyProps],
+  );
+
+  // The full-width "Needs your OK" table strip (desktop dashboard); reuses the teacher
+  // validate handlers. Null when nothing is pending.
+  const validationStrip =
+    paraQueue.length > 0 ? (
+      <ValidationStrip
+        queue={paraQueue}
+        initialsById={lk.initialsById}
+        goalTextById={lk.goalTextById}
+        periodLabelByStudent={periodLabelByStudent}
+        onConfirm={confirmPara}
+        onFix={fixPara}
+      />
+    ) : null;
+
+  const shell = buildShellProps({
+    role,
+    tab,
+    trackView,
+    toScoreCount,
+    baselineCount,
+    go: setTrackView,
+  });
 
   const track = (() => {
     if (trackView === "new_goal") {
@@ -362,19 +474,7 @@ function ReadyApp({
     }
     if (trackView === "goal_detail" && detailGoal !== undefined) {
       return (
-        <GoalDetailScreen
-          goal={detailGoal}
-          points={records.points}
-          observations={records.observations}
-          initials={lk.initialsById.get(detailGoal.student_id) ?? "??"}
-          periodLabel={detailPeriodLabel}
-          probeLabel={lk.probeByGoal.get(detailGoal.goal_id)?.label ?? "probe"}
-          isNonInstructional={isNonInstructionalWeek}
-          onBack={() => setTrackView("dashboard")}
-          onAddPoint={() => setSheetTarget(targetForGoal(detailGoal, lk, today))}
-          onEditPoint={(point) => setSheetTarget(targetForGoal(detailGoal, lk, today, point))}
-          onAckMastery={(candidate) => void apply(acknowledgeMasteryMutator(candidate))}
-        />
+        <GoalDetailScreen {...goalBodyProps(detailGoal)} onBack={() => setTrackView("dashboard")} />
       );
     }
     return (
@@ -390,6 +490,9 @@ function ReadyApp({
         onOpenScore={setSheetTarget}
         onOpenDetail={openDetail}
         apply={apply}
+        isDesktop={isDesktop}
+        renderDetailPane={renderDetailPane}
+        validationStrip={validationStrip}
       />
     );
   })();
@@ -406,6 +509,7 @@ function ReadyApp({
 
   return (
     <AppShell
+      isDesktop={isDesktop}
       online={online}
       role={role}
       onRole={setRole}
@@ -413,6 +517,10 @@ function ReadyApp({
       onThemeCycle={theme.cycle}
       tab={tab}
       onTab={onTab}
+      title={shell.title}
+      onBack={shell.onBack}
+      nav={shell.nav}
+      paraContext={PARA_CONTEXT}
       overlay={overlay}
     >
       {role === "para" ? (

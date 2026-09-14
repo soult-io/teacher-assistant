@@ -1,11 +1,17 @@
-// Weekly Dashboard (U2 + U3 writes) — the 3-lens owes-first list over the M3
-// store projections. U3 adds the write surfaces: tapping an owes row opens the
-// Quick-Score sheet; tapping a scored row opens it for an audited [Fix]; the ⚑
-// flag now WRITES a score-later bookmark (M5 queued point) — its "on" state is
-// the presence of that queued point; a "To-score (N)" button opens the queue.
+// Weekly Dashboard (U2 + U3 writes; U7 desktop master-detail) — the 3-lens
+// owes-first list over the M3 store projections.
 //
-// Grouping + within-group ordering come from the store; the app-local
-// dashboard-vm only resolves display + orders groups (see dashboard-vm.ts).
+// MOBILE (<900px): the validated single column — tapping an owes row opens the
+// Quick-Score sheet; tapping a scored row opens it for an audited [Fix]; the ⚑ flag
+// WRITES a score-later bookmark; a "To-score (N)" button opens the queue.
+//
+// DESKTOP (>=900px): MASTER-DETAIL (design §3.1). The owes-first list (master) sits
+// left; clicking a row SELECTS it into the right pane, which renders that goal's full
+// Goal Detail (trend + draft statement + consistency + quarterly + ARC). The first
+// owed goal auto-selects so the pane is never empty. Pending para points render as a
+// full-width table strip above the master-detail; the by-student lens becomes a
+// full-width card grid (no pane). Same render functions throughout — only the host
+// containers are re-laid-out (the mobile path is unchanged).
 
 import { asTimestamp, type OpaqueId, type ProgressDataPoint } from "@teacher-assistant/schema";
 import {
@@ -16,7 +22,14 @@ import {
   nextLens,
   renderHeader,
 } from "@teacher-assistant/store";
-import { type ReactElement, useCallback, useMemo, useState } from "react";
+import {
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
 import { isNonInstructionalWeek } from "../../data/calendar.js";
 import { isoDateOf } from "../../data/date.js";
 import type { DecryptedRecords } from "../../data/repository.js";
@@ -43,12 +56,134 @@ const LENS_LABEL: Readonly<Record<DashboardLens, string>> = {
   by_student: "by student",
 };
 
+type DashboardHeader = Parameters<typeof renderHeader>[0];
+type DashboardGroups = ReturnType<typeof groupDashboard>;
+
 function SectionLabel({ text, owes = false }: { readonly text: string; readonly owes?: boolean }) {
   return (
     <div className={`grouplabel${owes ? " owes" : ""}`}>
       <span>{text}</span>
       <span className="ln" />
     </div>
+  );
+}
+
+/** The three-state honesty header. The pending-note button is mobile-only (desktop uses the strip). */
+function Headline({
+  header,
+  pendingCount,
+  onValidate,
+  showPendButton,
+}: {
+  readonly header: DashboardHeader;
+  readonly pendingCount: number;
+  readonly onValidate: () => void;
+  readonly showPendButton: boolean;
+}) {
+  return (
+    <div className="headline">
+      <div className="weeknav">
+        <span className="wk">This week</span>
+      </div>
+      <div className="three">
+        <div className="stat scored">
+          <b>{header.scored}</b>
+          <span>scored</span>
+        </div>
+        <div className="stat excused">
+          <b>{header.excused}</b>
+          <span>excused</span>
+        </div>
+        <div className="stat owe">
+          <b>{header.owe}</b>
+          <span>owe</span>
+        </div>
+      </div>
+      <p className="sub" data-testid="header-line">
+        {renderHeader(header)}
+      </p>
+      {showPendButton && pendingCount > 0 ? (
+        <button
+          type="button"
+          className="pendnote pendbtn"
+          data-testid="validate-note"
+          onClick={onValidate}
+        >
+          ⏳ {pendingCount} para point{pendingCount > 1 ? "s" : ""} awaiting your OK
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function GroupToggle({
+  lens,
+  onCycle,
+}: {
+  readonly lens: DashboardLens;
+  readonly onCycle: () => void;
+}) {
+  return (
+    <button type="button" className="btn small ghost" onClick={onCycle} data-testid="group-toggle">
+      Group: {LENS_LABEL[lens]}
+    </button>
+  );
+}
+
+interface CardHandlers {
+  readonly queuedGoalIds: ReadonlySet<string>;
+  readonly onScoreLater: (vm: RowVM) => void;
+  readonly onOpenScore: (vm: RowVM) => void;
+  readonly onOpenDetail: (vm: RowVM) => void;
+}
+
+/** The grouped body for a lens. `renderRow` differs per layout (mobile scores; desktop selects). */
+function DashboardBody({
+  lens,
+  groups,
+  lk,
+  renderRow,
+  cards,
+}: {
+  readonly lens: DashboardLens;
+  readonly groups: DashboardGroups;
+  readonly lk: Lookups;
+  readonly renderRow: (vm: RowVM) => ReactElement;
+  readonly cards: CardHandlers;
+}) {
+  if (lens === "by_student") {
+    return (
+      <>
+        {buildStudentCards(groups, lk).map((card) => (
+          <StudentCard
+            key={card.studentId}
+            card={card}
+            queuedGoalIds={cards.queuedGoalIds}
+            onScoreLater={cards.onScoreLater}
+            onOpenScore={cards.onOpenScore}
+            onOpenDetail={cards.onOpenDetail}
+          />
+        ))}
+      </>
+    );
+  }
+  if (lens === "by_period") {
+    return (
+      <>
+        {orderPeriodGroups(groups, lk).map((group) => (
+          <div key={group.key}>
+            <SectionLabel text={`Period ${periodLabelOfGroup(group, lk)}`} />
+            {orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))).map(renderRow)}
+          </div>
+        ))}
+      </>
+    );
+  }
+  return (
+    <OwesFirst
+      rows={(groups[0]?.rows ?? []).map((row) => toRowVM(row, lk))}
+      renderRow={renderRow}
+    />
   );
 }
 
@@ -68,6 +203,12 @@ export interface DashboardScreenProps {
   /** Open Goal Detail for a goal (trend + history) — reachable from every row. */
   readonly onOpenDetail: (goalId: OpaqueId) => void;
   readonly apply: (mutator: DocMutator) => Promise<void>;
+  /** Desktop master-detail (design §3.1). Absent/false → the validated mobile layout. */
+  readonly isDesktop?: boolean;
+  /** Desktop only: render the selected goal's full Goal Detail into the right pane. */
+  readonly renderDetailPane?: (goalId: OpaqueId) => ReactNode;
+  /** Desktop only: the full-width para-validation table strip, above the master-detail. */
+  readonly validationStrip?: ReactNode;
 }
 
 export function DashboardScreen(props: DashboardScreenProps) {
@@ -83,8 +224,12 @@ export function DashboardScreen(props: DashboardScreenProps) {
     onOpenScore,
     onOpenDetail,
     apply,
+    isDesktop = false,
+    renderDetailPane,
+    validationStrip,
   } = props;
   const [lens, setLens] = useState<DashboardLens>("owes_first");
+  const [selectedGoalId, setSelectedGoalId] = useState<OpaqueId | null>(null);
   const today = isoDateOf(now);
 
   const dashboard = useMemo(
@@ -112,6 +257,24 @@ export function DashboardScreen(props: DashboardScreenProps) {
   );
   const pendingCount = paraPendingCount;
   const groups = groupDashboard(dashboard.rows, lens);
+
+  // Desktop pane default (design Q1): the first owed goal, else the first row, so the
+  // pane is never empty. Derived from the owes-first ordering the list itself uses.
+  const firstPick = useMemo(() => {
+    const owesFirst = groupDashboard(dashboard.rows, "owes_first")[0]?.rows ?? [];
+    const ordered = orderRowsByStudent(owesFirst.map((row) => toRowVM(row, lk)));
+    const pick = ordered.find((vm) => vm.state === "owes") ?? ordered[0];
+    return pick?.goalId ?? null;
+  }, [dashboard.rows, lk]);
+
+  const paneActive = isDesktop && renderDetailPane !== undefined;
+  const selectedValid =
+    selectedGoalId !== null && dashboard.rows.some((r) => r.goalId === selectedGoalId);
+  useEffect(() => {
+    if (paneActive && !selectedValid && firstPick !== null) {
+      setSelectedGoalId(firstPick);
+    }
+  }, [paneActive, selectedValid, firstPick]);
 
   const toggleLater = useCallback(
     (vm: RowVM) => {
@@ -157,6 +320,13 @@ export function DashboardScreen(props: DashboardScreenProps) {
 
   const openDetail = useCallback((vm: RowVM) => onOpenDetail(vm.goalId), [onOpenDetail]);
 
+  const cards: CardHandlers = {
+    queuedGoalIds,
+    onScoreLater: toggleLater,
+    onOpenScore: openScore,
+    onOpenDetail: openDetail,
+  };
+
   const renderRow = (vm: RowVM): ReactElement => (
     <GoalRow
       key={vm.goalId}
@@ -168,78 +338,90 @@ export function DashboardScreen(props: DashboardScreenProps) {
     />
   );
 
-  const h = dashboard.header;
+  // Desktop rows select into the pane instead of scoring (design §4).
+  const renderSelectableRow = (vm: RowVM): ReactElement => (
+    <GoalRow
+      key={vm.goalId}
+      vm={vm}
+      scoreLater={queuedGoalIds.has(vm.goalId)}
+      onScoreLater={toggleLater}
+      onOpenScore={openScore}
+      onOpenDetail={openDetail}
+      onSelect={(picked) => setSelectedGoalId(picked.goalId)}
+      selected={vm.goalId === selectedGoalId}
+    />
+  );
+
+  const header = dashboard.header;
+
+  if (paneActive) {
+    return (
+      <div>
+        <Headline
+          header={header}
+          pendingCount={pendingCount}
+          onValidate={onValidate}
+          showPendButton={false}
+        />
+        {validationStrip}
+        {lens === "by_student" ? (
+          <>
+            <div className="listtoolbar">
+              <GroupToggle lens={lens} onCycle={() => setLens(nextLens(lens))} />
+            </div>
+            <div className="scardgrid" data-testid="dashboard-body">
+              <DashboardBody
+                lens={lens}
+                groups={groups}
+                lk={lk}
+                renderRow={renderRow}
+                cards={cards}
+              />
+            </div>
+          </>
+        ) : (
+          <div className="md">
+            <div className="mdlist">
+              <div className="listtoolbar">
+                <GroupToggle lens={lens} onCycle={() => setLens(nextLens(lens))} />
+              </div>
+              <div data-testid="dashboard-body">
+                <DashboardBody
+                  lens={lens}
+                  groups={groups}
+                  lk={lk}
+                  renderRow={renderSelectableRow}
+                  cards={cards}
+                />
+              </div>
+            </div>
+            <div className="mddetail" data-testid="detail-pane">
+              {selectedGoalId !== null && renderDetailPane !== undefined
+                ? renderDetailPane(selectedGoalId)
+                : null}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Mobile — the validated layout (unchanged).
   return (
     <div>
-      <div className="headline">
-        <div className="weeknav">
-          <span className="wk">This week</span>
-        </div>
-        <div className="three">
-          <div className="stat scored">
-            <b>{h.scored}</b>
-            <span>scored</span>
-          </div>
-          <div className="stat excused">
-            <b>{h.excused}</b>
-            <span>excused</span>
-          </div>
-          <div className="stat owe">
-            <b>{h.owe}</b>
-            <span>owe</span>
-          </div>
-        </div>
-        <p className="sub" data-testid="header-line">
-          {renderHeader(h)}
-        </p>
-        {pendingCount > 0 ? (
-          <button
-            type="button"
-            className="pendnote pendbtn"
-            data-testid="validate-note"
-            onClick={onValidate}
-          >
-            ⏳ {pendingCount} para point{pendingCount > 1 ? "s" : ""} awaiting your OK
-          </button>
-        ) : null}
-      </div>
+      <Headline
+        header={header}
+        pendingCount={pendingCount}
+        onValidate={onValidate}
+        showPendButton
+      />
 
       <div className="grouptoggle">
-        <button
-          type="button"
-          className="btn small ghost"
-          onClick={() => setLens(nextLens(lens))}
-          data-testid="group-toggle"
-        >
-          Group: {LENS_LABEL[lens]}
-        </button>
+        <GroupToggle lens={lens} onCycle={() => setLens(nextLens(lens))} />
       </div>
 
       <div data-testid="dashboard-body">
-        {lens === "by_student" ? (
-          buildStudentCards(groups, lk).map((card) => (
-            <StudentCard
-              key={card.studentId}
-              card={card}
-              queuedGoalIds={queuedGoalIds}
-              onScoreLater={toggleLater}
-              onOpenScore={openScore}
-              onOpenDetail={openDetail}
-            />
-          ))
-        ) : lens === "by_period" ? (
-          orderPeriodGroups(groups, lk).map((group) => (
-            <div key={group.key}>
-              <SectionLabel text={`Period ${periodLabelOfGroup(group, lk)}`} />
-              {orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))).map(renderRow)}
-            </div>
-          ))
-        ) : (
-          <OwesFirst
-            rows={(groups[0]?.rows ?? []).map((row) => toRowVM(row, lk))}
-            renderRow={renderRow}
-          />
-        )}
+        <DashboardBody lens={lens} groups={groups} lk={lk} renderRow={renderRow} cards={cards} />
       </div>
 
       <div className="btnrow" style={{ marginTop: "0.9rem" }}>

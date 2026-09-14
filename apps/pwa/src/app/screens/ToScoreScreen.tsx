@@ -21,7 +21,7 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
   const queue = buildToScoreQueue(records.points);
 
   return (
-    <div>
+    <div className="to-score">
       <div className="backrow">
         <button type="button" className="back" onClick={onBack}>
           ‹ Dashboard

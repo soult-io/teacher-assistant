@@ -11,16 +11,10 @@
 import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { Avatar } from "../../../design/Avatar.js";
-import { OBS_LABEL, SETTING_LABEL } from "./labels.js";
+import { OBS_LABEL, pointValueLabel, SETTING_LABEL } from "./labels.js";
 
 function valueLine(p: ProgressDataPoint): string {
-  const parts: string[] = [];
-  if (p.state === "no_data") {
-    parts.push(`⊘ ${p.no_data_reason ?? "no data"}`);
-  } else if (p.numerator !== undefined && p.denominator_used !== undefined) {
-    const pct = Math.round((p.numerator / p.denominator_used) * 100);
-    parts.push(`${p.numerator}/${p.denominator_used} = ${pct}%`);
-  }
+  const parts: string[] = [pointValueLabel(p)];
   parts.push(p.admin_date);
   // §A.5: the teacher must see the SETTING the para recorded to validate honestly.
   parts.push(SETTING_LABEL[p.setting]);

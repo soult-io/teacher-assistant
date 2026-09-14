@@ -275,20 +275,22 @@ export function BaselineScreen(props: BaselineScreenProps) {
       {proposed.length === 0 ? (
         <div className="card">No proposed goals. Draft one to start baselining.</div>
       ) : (
-        proposed.map((goal) => (
-          <ProposedCard
-            key={goal.goal_id}
-            goal={goal}
-            points={pointsByGoal.get(goal.goal_id) ?? []}
-            initials={initialsById.get(goal.student_id) ?? "??"}
-            periodLabel={periodLabelByStudent(goal.student_id)}
-            useMedian={useMedian}
-            isNonInstructional={isNonInstructional}
-            onAddBaselinePoint={props.onAddBaselinePoint}
-            onAdopt={props.onAdopt}
-            onEditArcDate={props.onEditArcDate}
-          />
-        ))
+        <div className="bcardgrid">
+          {proposed.map((goal) => (
+            <ProposedCard
+              key={goal.goal_id}
+              goal={goal}
+              points={pointsByGoal.get(goal.goal_id) ?? []}
+              initials={initialsById.get(goal.student_id) ?? "??"}
+              periodLabel={periodLabelByStudent(goal.student_id)}
+              useMedian={useMedian}
+              isNonInstructional={isNonInstructional}
+              onAddBaselinePoint={props.onAddBaselinePoint}
+              onAdopt={props.onAdopt}
+              onEditArcDate={props.onEditArcDate}
+            />
+          ))}
+        </div>
       )}
 
       <button

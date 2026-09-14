@@ -50,31 +50,65 @@ export interface GoalRowProps {
   readonly onOpenScore: (vm: RowVM) => void;
   /** Open Goal Detail (trend + history) — reachable from EVERY goal (design R3 D2). */
   readonly onOpenDetail: (vm: RowVM) => void;
+  /**
+   * Desktop master-detail (design §3.1/§4): when present, a row CLICK selects this goal
+   * into the right detail pane (no navigation, no scoring) — every row is selectable, and
+   * the selected one is highlighted. Absent on mobile, where the row-main tap scores.
+   */
+  readonly onSelect?: (vm: RowVM) => void;
+  readonly selected?: boolean;
 }
 
-export function GoalRow({ vm, scoreLater, onScoreLater, onOpenScore, onOpenDetail }: GoalRowProps) {
+function RowBody({ vm, scoreLater }: { readonly vm: RowVM; readonly scoreLater: boolean }) {
+  return (
+    <div className="rowmain">
+      <RowMain vm={vm} scoreLater={scoreLater} />
+    </div>
+  );
+}
+
+export function GoalRow({
+  vm,
+  scoreLater,
+  onScoreLater,
+  onOpenScore,
+  onOpenDetail,
+  onSelect,
+  selected = false,
+}: GoalRowProps) {
   const chip = chipForDashboardState(vm.state);
   const isOwes = vm.state === "owes";
   const tappable = vm.state === "owes" || vm.state === "has_point";
   const right = rightValue(vm);
+  // Desktop: the whole row-main selects into the pane (any state). Mobile: only owes/scored
+  // rows are tappable, and the tap scores (unchanged).
+  const main =
+    onSelect !== undefined ? (
+      <button
+        type="button"
+        className="rowmain tap"
+        aria-label={`open ${vm.goalText}`}
+        onClick={() => onSelect(vm)}
+      >
+        <RowMain vm={vm} scoreLater={scoreLater} />
+      </button>
+    ) : tappable ? (
+      <button
+        type="button"
+        className="rowmain tap"
+        aria-label={`score ${vm.goalText}`}
+        onClick={() => onOpenScore(vm)}
+      >
+        <RowMain vm={vm} scoreLater={scoreLater} />
+      </button>
+    ) : (
+      <RowBody vm={vm} scoreLater={scoreLater} />
+    );
   return (
-    <div className={`row${isOwes ? " owes" : ""}`}>
+    <div className={`row${isOwes ? " owes" : ""}${selected ? " selected" : ""}`}>
       <StatusChip chip={chip} label={STATE_LABEL[vm.state]} />
       <Avatar initials={vm.initials} />
-      {tappable ? (
-        <button
-          type="button"
-          className="rowmain tap"
-          aria-label={`score ${vm.goalText}`}
-          onClick={() => onOpenScore(vm)}
-        >
-          <RowMain vm={vm} scoreLater={scoreLater} />
-        </button>
-      ) : (
-        <div className="rowmain">
-          <RowMain vm={vm} scoreLater={scoreLater} />
-        </div>
-      )}
+      {main}
       {right !== null ? <div className="rowright">{right}</div> : null}
       <div className="rowactions">
         {isOwes ? (
