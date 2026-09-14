@@ -15,7 +15,7 @@ import { asTimestamp, newOpaqueId, newScopeTag } from "@teacher-assistant/schema
 import { buildWeeklyDashboard, renderHeader } from "@teacher-assistant/store";
 import { EncryptedStream, InMemoryPersistence } from "@teacher-assistant/sync";
 import type { VerifiedAuthenticationResponse } from "@simplewebauthn/server";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isoDateOf } from "./date.js";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
@@ -152,6 +152,57 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
         now: NOW,
       }),
     ).rejects.toBeInstanceOf(AuthRequiredError);
+  });
+});
+
+describe("bootstrapTeacherSession — offline-first when the relay fails", () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+  });
+
+  it("unlocks + reconciles to offline when every relay pull 404s (un-enrolled device — the ta-qa repro)", async () => {
+    // The relay is REACHABLE but 404s this device's streams (H-PUB-3: a device the
+    // relay has no ACL grant for gets the same 404 as an unknown doc). Unlock must
+    // still succeed from the local encrypted store, and the best-effort reconcile must
+    // degrade to offline WITHOUT throwing — it must never surface as a passkey failure.
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: "not_found", record_id: "r" }), {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      })) as typeof fetch;
+
+    const session = await bootstrapTeacherSession({
+      persistence: new InMemoryPersistence(),
+      relayBaseUrl: "https://relay.example",
+      now: NOW,
+    });
+    // Local store opened + projections available regardless of the relay.
+    expect(session.role).toBe("teacher");
+    expect(session.records.students).toHaveLength(4);
+    expect(session.readParaQueue()).toHaveLength(2);
+
+    await expect(session.sync()).resolves.toBe(false); // offline, no throw
+  });
+
+  it("unlocks + reconciles to offline for BOTH streams when the relay is unreachable", async () => {
+    globalThis.fetch = (async () => {
+      throw new TypeError("Failed to fetch");
+    }) as typeof fetch;
+
+    const teacher = await bootstrapTeacherSession({
+      persistence: new InMemoryPersistence(),
+      relayBaseUrl: "https://relay.example",
+      now: NOW,
+    });
+    expect(teacher.records.students).toHaveLength(4);
+    await expect(teacher.sync()).resolves.toBe(false);
+
+    // The para session bootstraps and degrades offline too (the second stream).
+    const para = await bootstrapParaSession(teacher.paraHandoff);
+    expect(para.role).toBe("para");
+    expect(para.paraRecords.roster.length).toBeGreaterThan(0);
+    await expect(para.sync()).resolves.toBe(false);
   });
 });
 

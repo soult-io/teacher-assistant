@@ -17,7 +17,6 @@ import { InMemoryRelayStore } from "@teacher-assistant/sync-relay/store";
 import { beforeAll, describe, expect, it } from "vitest";
 import { EncryptedStream } from "./doc.js";
 import { SyncEngine } from "./engine.js";
-import { RelayRequestError } from "./errors.js";
 import { InMemoryPersistence } from "./persistence.js";
 import {
   RelayClient,
@@ -130,8 +129,8 @@ describe("Phase-0 EXIT TEST — offline A reconciles to B, zero PII on server", 
   });
 });
 
-describe("identity-clean client errors + unauthorized gets zero bytes (H-PUB-3)", () => {
-  it("an unauthorized device's pull fails 404 with no student payload in the error", async () => {
+describe("unauthorized gets zero bytes + zero existence signal (H-PUB-3)", () => {
+  it("the relay answers an unauthorized pull with a byte-identical, identity-clean 404 that the client degrades to an empty pull", async () => {
     const store = new InMemoryRelayStore();
     const app = buildApp(store);
     const period = generatePeriodKey(newScopeTag());
@@ -143,24 +142,109 @@ describe("identity-clean client errors + unauthorized gets zero bytes (H-PUB-3)"
     await a.engine.capture((doc) => doc.getMap("points").set("p1", { note: MARKER }));
     await a.engine.sync();
 
-    // An UN-authorized device (signing key never granted the scope) tries to pull the same doc.
-    const outsiderSigning = generateSigningKeypair();
+    // An UN-authorized device (signing key never granted the scope) pulls the same doc.
+    // Record the raw relay response so BOTH invariants are asserted: the server-side
+    // zero-existence 404 AND the client's offline-first degradation of it.
+    let lastResponse: RelayHttpResponse | null = null;
+    const inject = injectTransport(app, sent);
+    const recording: Transport = async (req) => {
+      const res = await inject(req);
+      lastResponse = res;
+      return res;
+    };
     const outsider = new RelayClient({
-      transport: injectTransport(app, sent),
-      signingKeypair: outsiderSigning,
+      transport: recording,
+      signingKeypair: generateSigningKeypair(),
     });
-    await expect(outsider.pull(docId, period.scopeTag, null)).rejects.toBeInstanceOf(
-      RelayRequestError,
-    );
-    try {
-      await outsider.pull(docId, period.scopeTag, null);
-    } catch (err) {
-      const e = err as RelayRequestError;
-      expect(e.status).toBe(404); // zero bytes + zero existence signal
-      // The error references the opaque doc id only — no initials/goal text/score.
-      expect(e.message).toContain(docId);
-      expect(e.message).not.toContain(MARKER);
-    }
+
+    // Client side (offline-first): a 404 is the relay's deliberately-ambiguous "no state
+    // for you" — the client must NOT throw, it degrades to an empty pull (zero bytes).
+    const result = await outsider.pull(docId, period.scopeTag, null);
+    expect(result).toEqual({ cursor: "", updates: [] });
+
+    // Server side (the H-PUB-3 invariant): the relay actually answered 404 — the
+    // byte-identical response an unknown doc gets, so stream membership cannot be probed…
+    const raw = lastResponse as RelayHttpResponse | null;
+    expect(raw?.status).toBe(404);
+    // …with an identity-clean body: exactly {error, record_id}, no student payload.
+    const body = JSON.parse(new TextDecoder().decode(raw?.body ?? new Uint8Array())) as Record<
+      string,
+      unknown
+    >;
+    expect(Object.keys(body).sort()).toEqual(["error", "record_id"]);
+    expect(JSON.stringify(body)).not.toContain(MARKER);
+  });
+
+  it("an unauthorized pull for an EXISTING vs an UNKNOWN doc is the byte-identical 404 (membership cannot be probed)", async () => {
+    const store = new InMemoryRelayStore();
+    const app = buildApp(store);
+    const period = generatePeriodKey(newScopeTag());
+    const existingDocId = newOpaqueId();
+    const sent: Uint8Array[] = [];
+
+    // Authorized device A writes an EXISTING doc.
+    const a = makeDevice(app, store, existingDocId, period, sent);
+    await a.engine.capture((doc) => doc.getMap("points").set("p1", { note: MARKER }));
+    await a.engine.sync();
+
+    let raw: RelayHttpResponse | null = null;
+    const inject = injectTransport(app, sent);
+    const outsider = new RelayClient({
+      transport: async (req) => {
+        const res = await inject(req);
+        raw = res;
+        return res;
+      },
+      signingKeypair: generateSigningKeypair(), // never granted the scope
+    });
+
+    const shapeOf = async (docId: string): Promise<{ status: number; keys: string[] }> => {
+      const result = await outsider.pull(docId, period.scopeTag, null);
+      expect(result).toEqual({ cursor: "", updates: [] }); // client degrades both to empty
+      const r = raw as RelayHttpResponse | null;
+      const body = JSON.parse(new TextDecoder().decode(r?.body ?? new Uint8Array())) as Record<
+        string,
+        unknown
+      >;
+      return { status: r?.status ?? 0, keys: Object.keys(body).sort() };
+    };
+
+    // The doc that EXISTS and one that never existed are structurally indistinguishable —
+    // both 404 with the same body shape — so the outsider cannot tell which docs exist.
+    const existing = await shapeOf(existingDocId);
+    const unknown = await shapeOf(newOpaqueId());
+    expect(existing).toEqual({ status: 404, keys: ["error", "record_id"] });
+    expect(unknown).toEqual(existing);
+  });
+});
+
+describe("authorized never-synced doc pulls 200-empty (the invariant the 404-handling relies on)", () => {
+  it("an AUTHORIZED device's unwritten doc returns 200 with no updates — NOT a 404", async () => {
+    // The client treats a 404 as an empty pull, which is only safe because the relay
+    // never 404s an authorized device's own never-synced doc (it serves 200-empty). Pin
+    // that: if a future relay change ever 404s an authorized doc, the client would
+    // silently treat real remote state as empty — this test catches that regression.
+    const store = new InMemoryRelayStore();
+    const app = buildApp(store);
+    const period = generatePeriodKey(newScopeTag());
+
+    const signing = generateSigningKeypair();
+    store.authorize(toBase64(signing.publicKey), period.scopeTag);
+
+    let raw: RelayHttpResponse | null = null;
+    const inject = injectTransport(app, []);
+    const client = new RelayClient({
+      transport: async (req) => {
+        const res = await inject(req);
+        raw = res;
+        return res;
+      },
+      signingKeypair: signing,
+    });
+
+    const result = await client.pull(newOpaqueId(), period.scopeTag, null);
+    expect(result.updates).toEqual([]); // no server-side state yet
+    expect((raw as RelayHttpResponse | null)?.status).toBe(200); // 200-empty, not 404
   });
 });
 

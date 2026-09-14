@@ -130,6 +130,14 @@ export class RelayClient {
       headers: this.#signedHeaders("GET", path, scope, body),
       body,
     });
+    if (res.status === 404) {
+      // A 404 is the relay's deliberately-ambiguous "no state for you": a never-synced
+      // doc, OR (H-PUB-3) a scope this device is not authorized for — the two are
+      // byte-identical by design so membership cannot be probed. Offline-first, either is
+      // an EMPTY pull, never a hard error: return no updates and the UNCHANGED cursor so
+      // the caller keeps running on local state (unlock must never fail on the relay).
+      return { cursor: since ?? "", updates: [] };
+    }
     if (res.status !== 200) {
       throw new RelayRequestError(res.status, docId, parseRecordId(res.body));
     }
