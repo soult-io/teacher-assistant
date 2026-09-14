@@ -4,6 +4,8 @@ node_modules/
 
 # Build output
 dist/
+# Generated TRACK Verification dashboard (built + published by CI, never committed)
+dist-dashboard/
 build/
 *.tsbuildinfo
 # vite-plugin-pwa dev artifacts

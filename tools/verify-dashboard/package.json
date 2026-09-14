@@ -1,0 +1,15 @@
+{
+  "name": "@teacher-assistant/verify-dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "CI generator for the TRACK Verification dashboard: runs the suites for live counts, captures per-view app screenshots via Playwright, reads CI status, fills template.html -> a static index.html published to GitHub Pages. Not shipped in any image.",
+  "type": "module",
+  "scripts": {
+    "generate": "node src/generate.mjs",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "playwright": "1.62.0",
+    "vitest": "~4.1.10"
+  }
+}

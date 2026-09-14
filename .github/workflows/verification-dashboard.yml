@@ -1,0 +1,74 @@
+name: verification-dashboard
+
+# Regenerates the live TRACK Verification dashboard from main and publishes it to
+# GitHub Pages. On a PR it builds the page as an artifact only (no deploy) so the
+# generator is validated before merge; on push to main it deploys.
+# Pages source must be set to "GitHub Actions" in repo settings (one-time).
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # the generator reads other workflows' run status via the Actions API
+    # Official Playwright image matching the lockfile version: chromium + its
+    # system libraries are baked in (same base as e2e.yml).
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build first: vitest cross-package imports and the PWA `vite preview`
+      # both resolve to dist.
+      - name: Build all workspaces
+        run: pnpm -r run build
+
+      - name: Verify Playwright chromium
+        run: pnpm --filter @teacher-assistant/verify-dashboard exec playwright install chromium
+
+      - name: Generate dashboard
+        run: pnpm --filter @teacher-assistant/verify-dashboard run generate
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist-dashboard
+
+  deploy:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
