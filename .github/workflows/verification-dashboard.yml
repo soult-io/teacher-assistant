@@ -1,9 +1,12 @@
 name: verification-dashboard
 
-# Regenerates the live TRACK Verification dashboard from main and publishes it to
-# GitHub Pages. On a PR it builds the page as an artifact only (no deploy) so the
-# generator is validated before merge; on push to main it deploys.
-# Pages source must be set to "GitHub Actions" in repo settings (one-time).
+# Regenerates the live TRACK Verification dashboard from main and publishes it as a
+# small static nginx image to GHCR (ghcr.io/<owner>/teacher-assistant-verify). On a PR
+# it builds the page and validates the image build (no push); on push to main it pushes
+# sha-<commit> + latest. The deploy stack (nsoult-agentic/stack-lexington-teacher-assistant)
+# pins the image by tag + digest and serves it PRIVATELY on Lexington behind the NPM
+# (Neil's access gate) — replacing the previous public GitHub Pages target. PII-free/
+# synthetic, same as the app images.
 
 on:
   pull_request:
@@ -14,6 +17,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/teacher-assistant-verify
 
 jobs:
   build:
@@ -53,22 +60,53 @@ jobs:
       - name: Generate dashboard
         run: pnpm --filter @teacher-assistant/verify-dashboard run generate
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
+      # Hand the static output (index.html + images/) to the publish job, which
+      # builds it into the nginx image outside this container (no docker-in-docker).
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v7
         with:
+          name: dashboard
           path: dist-dashboard
+          retention-days: 7
+          if-no-files-found: error
 
-  deploy:
+  publish:
     needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      contents: read
+      packages: write
     steps:
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
+      # Checkout supplies the Dockerfile + nginx.conf; the generated page comes
+      # from the build job's artifact.
+      - uses: actions/checkout@v4
+
+      - name: Download dashboard artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: dashboard
+          path: dist-dashboard
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Validates the Dockerfile on every PR; pushes sha-<commit> + latest only from
+      # main (the stack repo pins by sha/tag + digest, mirroring the app images).
+      - name: Build (and push on main) the static dashboard image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: tools/verify-dashboard/Dockerfile
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
