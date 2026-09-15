@@ -1451,16 +1451,24 @@ button.rowmain {
        values, so <900px is unaffected. Change a step here, not N one-off values, to
        re-tune — that is what prevents the padding from drifting out of step again. */
     --pad-card: 0.85rem;
-    --mb-card: 0.7rem;
     --pad-mddetail: 1rem;
     --pad-headline: 0.9rem;
-    --mb-headline: 0.8rem;
     --pad-stat: 0.5rem 0.55rem;
     --gap-three: 0.4rem;
     --pad-cell: 0.3rem 0.45rem;
     --pad-cell-edge: 0.4rem;
     --gap-md: 1.1rem;
     --pad-screen-y: 1.1rem;
+
+    /* ── Section rhythm (hierarchy) ────────────────────────────────────────────
+       The dashboard's vertical gaps were near-equal (section ~0.9 / card ~0.7 /
+       row ~0.5rem), so proximity signalled no grouping. These give a BIG gap
+       between sections and a SMALL gap between items within one, so the eye reads
+       the groups. Flat, not width-scaled — the tiers are a ratio, not a function of
+       width — and desktop-only; mobile keeps its literal margins. */
+    --sec-gap: 2rem;
+    --item-gap: 0.6rem;
+    --label-gap: 0.35rem;
   }
   /* The band is full-bleed (background + bottom divider span the whole main column); its
      content sits in `.topbar-inner`, the SAME centered 1180px column as `.screen-inner`.
@@ -1527,11 +1535,11 @@ button.rowmain {
      column. Desktop-scoped: these only exist >=900px; <900px keeps the literals. */
   .card {
     padding: var(--pad-card);
-    margin-bottom: var(--mb-card);
+    margin-bottom: var(--item-gap);
   }
   .headline {
     padding: var(--pad-headline);
-    margin-bottom: var(--mb-headline);
+    margin-bottom: var(--sec-gap);
   }
   .three {
     gap: var(--gap-three);
@@ -1540,7 +1548,7 @@ button.rowmain {
     padding: var(--pad-stat);
   }
   .validate-strip {
-    margin-bottom: var(--mb-headline);
+    margin-bottom: var(--sec-gap);
   }
   .tablewrap th,
   .tablewrap td {
@@ -1552,6 +1560,93 @@ button.rowmain {
   }
   .tablewrap tbody tr:first-child td {
     padding-top: var(--pad-cell-edge);
+  }
+
+  /* ── Section hierarchy (IA) ─────────────────────────────────────────────────
+     Grouping read flat because nothing marked a section's start. Promote the two
+     TOP-LEVEL section starts — the "This week" header-card title and the "Needs your
+     OK" para-strip eyebrow (the `.grouplabel.section`) — to full ink + a hairline
+     rule, a tier ABOVE the dim sub-group labels (OWES A POINT / DONE THIS WEEK),
+     which stay unchanged. Paired with the section/item gap contrast above. */
+  .grouplabel.section {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: var(--label-gap);
+    margin-bottom: var(--label-gap);
+  }
+  .grouplabel.section span {
+    color: var(--text);
+    font-size: 0.8rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+  }
+  /* The hairline rule replaces the flex filler line for the promoted variant. */
+  .grouplabel.section .ln {
+    display: none;
+  }
+  /* "This week" is already full-ink bold (not a dim grouplabel), so it only needs the
+     matching section-start rule under the header-card title. */
+  .headline .weeknav {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: var(--label-gap);
+    margin-bottom: 0.6rem;
+  }
+  .headline .weeknav .wk {
+    letter-spacing: 0.04em;
+  }
+
+  /* ── Detail pane reads as ONE goal (design §3.1) ── */
+  /* `.mddetail` is already a surface (rule above); its inner blocks were separate
+     white `.card` boxes, so the goal read as a stack of cards. Demote the plain cards
+     to hairline-separated sub-panels and make the goal header the pane title. The two
+     export-ready surfaces (`.qsummary`, `.draftstmt`) keep their card so they stay
+     visibly liftable for the IC report. */
+  .mddetail {
+    box-shadow: inset 4px 0 0 var(--accent); /* selected-goal rail, like .row.selected */
+  }
+  .mddetail > .detailhead {
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.6rem;
+    margin-bottom: 0.2rem;
+  }
+  .mddetail > .card:not(.qsummary):not(.draftstmt) {
+    background: transparent;
+    border: 0;
+    border-top: 1px solid var(--border);
+    border-radius: 0;
+    padding: 0.85rem 0;
+    margin: 0;
+  }
+  /* First sub-panel sits under the header rule — avoid a doubled line. */
+  .mddetail > .detailhead + .card:not(.qsummary):not(.draftstmt) {
+    border-top: 0;
+  }
+
+  /* ── Para-strip caption belongs to its table ── */
+  /* Frame the para table as a rounded panel and render its caption as the table's
+     footer inside that frame, instead of an orphaned sibling floating below it. */
+  .validate-strip .tablewrap {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .validate-strip .tablewrap tbody tr:last-child td {
+    border-bottom: 0;
+  }
+  .validate-strip .tablewrap .note {
+    margin: 0;
+    padding: 0.45rem 0.7rem;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+    font-size: 0.72rem;
+    font-style: italic;
+    color: var(--text-dim);
+  }
+
+  /* Tabular figures so numeric tallies/columns align on the wide layout. */
+  .stat b,
+  .rowval,
+  .qsummary .big,
+  .validate-strip .tablewrap td {
+    font-variant-numeric: tabular-nums;
   }
 
   /* The in-screen "‹ Dashboard" backrow is replaced by the top-bar back affordance. */
@@ -1718,10 +1813,8 @@ button.rowmain {
   .main {
     --content-max: 1360px;
     --pad-card: 0.95rem 1rem;
-    --mb-card: 0.85rem;
     --pad-mddetail: 1.15rem;
     --pad-headline: 1rem 1.15rem;
-    --mb-headline: 1rem;
     --pad-stat: 0.65rem 0.55rem;
     --gap-three: 0.55rem;
     --pad-cell: 0.4rem 0.55rem;
@@ -1741,10 +1834,8 @@ button.rowmain {
   .main {
     --content-max: 1600px;
     --pad-card: 1.05rem 1.15rem;
-    --mb-card: 0.95rem;
     --pad-mddetail: 1.25rem;
     --pad-headline: 1.1rem 1.3rem;
-    --mb-headline: 1.15rem;
     --pad-stat: 0.8rem 0.6rem;
     --gap-three: 0.65rem;
     --pad-cell: 0.5rem 0.6rem;
@@ -1766,10 +1857,8 @@ button.rowmain {
        cap in to ~1760px so the column keeps a balanced ~280px gutter each side. */
     --content-max: 1760px;
     --pad-card: 1.15rem 1.25rem;
-    --mb-card: 1.1rem;
     --pad-mddetail: 1.4rem;
     --pad-headline: 1.25rem 1.5rem;
-    --mb-headline: 1.4rem;
     --pad-stat: 0.95rem 0.6rem;
     --gap-three: 0.8rem;
     --pad-cell: 0.6rem 0.7rem;

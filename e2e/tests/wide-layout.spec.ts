@@ -95,6 +95,34 @@ test.describe("wide-monitor content column", () => {
     expect(await computedPx(page, ".md", "column-gap")).toBeGreaterThanOrEqual(28);
   });
 
+  test("2560px: section hierarchy — big section gap, promoted eyebrow, caption inside table", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    await unlockToDesktopShell(page);
+
+    // The gaps must now signal grouping: a large gap BELOW a section (`.headline`
+    // margin-bottom = --sec-gap 2rem/32px) far exceeds the small gap between items
+    // within a group (a `.row`'s margin-bottom 0.5rem/8px). Both elements always render.
+    const sectionGap = await computedPx(page, ".headline", "margin-bottom");
+    const itemGap = await computedPx(page, ".mdlist .row", "margin-bottom");
+    expect(sectionGap).toBeGreaterThanOrEqual(28);
+    expect(sectionGap).toBeGreaterThan(itemGap * 2);
+
+    // The top-level para eyebrow is promoted to full-ink bold with a hairline rule,
+    // and its caption is reparented INSIDE the table frame (not an orphaned sibling).
+    const strip = page.locator('[data-testid="validation-strip"]');
+    if ((await strip.count()) > 0) {
+      const eyebrowWeight = await computedPx(page, ".grouplabel.section span", "font-weight");
+      expect(eyebrowWeight).toBeGreaterThanOrEqual(700);
+      const ruleWidth = await computedPx(page, ".grouplabel.section", "border-bottom-width");
+      expect(ruleWidth).toBeGreaterThan(0);
+      // Caption now lives inside .tablewrap; nothing orphaned as a direct .validate-strip child.
+      expect(await page.locator(".validate-strip .tablewrap .note").count()).toBe(1);
+      expect(await page.locator(".validate-strip > .note").count()).toBe(0);
+    }
+  });
+
   test("1920px: content column scaled up, still balanced", async ({ page }) => {
     await page.setViewportSize({ width: 1920, height: 1080 });
     await unlockToDesktopShell(page);
