@@ -30,7 +30,7 @@ export function ValidationStrip({
 }: ValidationStripProps) {
   return (
     <div className="validate-strip" data-testid="validation-strip">
-      <div className="grouplabel">
+      <div className="grouplabel section">
         <span>Needs your OK — para points</span>
         <span className="ln" />
       </div>
@@ -98,10 +98,11 @@ export function ValidationStrip({
             })}
           </tbody>
         </table>
-      </div>
-      <div className="note">
-        Each point itemized, values visible, individually correctable — no collapsed "confirm all".
-        A mismatch stays in the audit, excluded from the consistency window until resolved.
+        <div className="note">
+          Note — Each point itemized, values visible, individually correctable — no collapsed
+          "confirm all". A mismatch stays in the audit, excluded from the consistency window until
+          resolved.
+        </div>
       </div>
     </div>
   );

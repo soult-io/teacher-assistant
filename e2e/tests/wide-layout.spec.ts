@@ -4,13 +4,19 @@ import { expect, type Page, test } from "@playwright/test";
  * Wide-monitor desktop layout guard.
  *
  * The desktop shell centers the content column (`.screen-inner`) inside the main
- * column (`.main`, the area right of the 15rem sidebar). Originally the column was
- * capped at a fixed 1180px, which on a 2560px display stranded ~570px of dead grey
- * either side — the owner's "wonky margins". The fix scales the cap up in steps on
- * wide viewports so the column fills most of the main area with balanced, modest
- * margins, while staying capped on laptops. This proves the built app actually lays
- * out that way in a real browser (jsdom has no layout engine) and fails if the cap
- * is ever collapsed back to a fixed width.
+ * column (`.main`, the area right of the 15rem sidebar) and caps its width at
+ * `--content-max`, which steps up on wide viewports.
+ *
+ * Two things the owner flagged at 2560px, both guarded here:
+ *   1. Outer gutter. A 2000px cap left only ~160px each side — too tight. The cap is
+ *      pulled to 1760px so a balanced ~280px gutter remains. This test fails if the
+ *      column ever balloons back toward full width (gutter collapses) OR is collapsed
+ *      to a fixed narrow strip.
+ *   2. Component padding. The card/cell/stat padding was tuned for the ~1180px column
+ *      and never scaled, so text sat pinned to the edges on a wide column. It now scales
+ *      on the same breakpoint ladder as the cap; this test measures the real computed
+ *      padding/gaps in a browser (jsdom has no layout engine) and fails if they stop
+ *      scaling — while proving 1280px is NOT inflated.
  */
 
 async function unlockToDesktopShell(page: Page): Promise<void> {
@@ -48,20 +54,73 @@ async function columnGeometry(page: Page): Promise<{
   };
 }
 
+/** Computed value of a CSS length property (px) for the first match of `selector`. */
+async function computedPx(page: Page, selector: string, prop: string): Promise<number> {
+  return page
+    .locator(selector)
+    .first()
+    .evaluate((el, p) => Number.parseFloat(getComputedStyle(el).getPropertyValue(p)) || 0, prop);
+}
+
 test.describe("wide-monitor content column", () => {
-  test("2560px: content fills most of the main column, balanced margins", async ({ page }) => {
+  test("2560px: balanced ~280px gutter, capped column, no overflow", async ({ page }) => {
     await page.setViewportSize({ width: 2560, height: 1440 });
     await unlockToDesktopShell(page);
     const g = await columnGeometry(page);
 
-    // Scales well past the old fixed 1180px cap (the bug left it at ~1180 here).
-    expect(g.innerWidth).toBeGreaterThanOrEqual(1800);
-    // Fills most of the main column rather than stranding a narrow strip.
-    expect(g.innerWidth / g.mainWidth).toBeGreaterThanOrEqual(0.75);
+    // Scales well past the old fixed 1180px cap, but stays capped near 1760px so a
+    // generous gutter remains (the fix pulled 2000 -> 1760 after owner review).
+    expect(g.innerWidth).toBeGreaterThanOrEqual(1700);
+    expect(g.innerWidth).toBeLessThanOrEqual(1820);
+    // The owner's #1 complaint: gutter too tight. Guard a real floor (~280px each side).
+    expect(g.leftGap).toBeGreaterThanOrEqual(220);
     // Centered: the two side gaps match within a scrollbar's width.
     expect(Math.abs(g.leftGap - g.rightGap)).toBeLessThanOrEqual(16);
     // No horizontal overflow in the real scroll container (`.main .screen`).
     expect(g.screenOverflow).toBeLessThanOrEqual(1);
+  });
+
+  test("2560px: component padding scaled up off the edges", async ({ page }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    await unlockToDesktopShell(page);
+
+    // Root cause #2: padding must scale on a wide column, not stay at the 1180px values.
+    // Wide-end targets: .headline 1.25rem/20px top, .mddetail 1.4rem/22.4px,
+    // .three gap 0.8rem/12.8px, .md gap 2rem/32px.
+    expect(await computedPx(page, ".headline", "padding-top")).toBeGreaterThanOrEqual(18);
+    expect(
+      await computedPx(page, '[data-testid="detail-pane"]', "padding-top"),
+    ).toBeGreaterThanOrEqual(20);
+    expect(await computedPx(page, ".three", "column-gap")).toBeGreaterThanOrEqual(11);
+    expect(await computedPx(page, ".md", "column-gap")).toBeGreaterThanOrEqual(28);
+  });
+
+  test("2560px: section hierarchy — big section gap, promoted eyebrow, caption inside table", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 2560, height: 1440 });
+    await unlockToDesktopShell(page);
+
+    // The gaps must now signal grouping: a large gap BELOW a section (`.headline`
+    // margin-bottom = --sec-gap 2rem/32px) far exceeds the small gap between items
+    // within a group (a `.row`'s margin-bottom 0.5rem/8px). Both elements always render.
+    const sectionGap = await computedPx(page, ".headline", "margin-bottom");
+    const itemGap = await computedPx(page, ".mdlist .row", "margin-bottom");
+    expect(sectionGap).toBeGreaterThanOrEqual(28);
+    expect(sectionGap).toBeGreaterThan(itemGap * 2);
+
+    // The top-level para eyebrow is promoted to full-ink bold with a hairline rule,
+    // and its caption is reparented INSIDE the table frame (not an orphaned sibling).
+    const strip = page.locator('[data-testid="validation-strip"]');
+    if ((await strip.count()) > 0) {
+      const eyebrowWeight = await computedPx(page, ".grouplabel.section span", "font-weight");
+      expect(eyebrowWeight).toBeGreaterThanOrEqual(700);
+      const ruleWidth = await computedPx(page, ".grouplabel.section", "border-bottom-width");
+      expect(ruleWidth).toBeGreaterThan(0);
+      // Caption now lives inside .tablewrap; nothing orphaned as a direct .validate-strip child.
+      expect(await page.locator(".validate-strip .tablewrap .note").count()).toBe(1);
+      expect(await page.locator(".validate-strip > .note").count()).toBe(0);
+    }
   });
 
   test("1920px: content column scaled up, still balanced", async ({ page }) => {
@@ -75,7 +134,7 @@ test.describe("wide-monitor content column", () => {
     expect(g.screenOverflow).toBeLessThanOrEqual(1);
   });
 
-  test("1280px: laptop cap still fills the column (no regression)", async ({ page }) => {
+  test("1280px: laptop fills the column and padding is NOT inflated", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
     await unlockToDesktopShell(page);
     const g = await columnGeometry(page);
@@ -84,5 +143,8 @@ test.describe("wide-monitor content column", () => {
     // the content fills it (only the content padding + scrollbar gutter remain).
     expect(g.innerWidth / g.mainWidth).toBeGreaterThanOrEqual(0.85);
     expect(g.screenOverflow).toBeLessThanOrEqual(1);
+    // 1280 is below the first wide breakpoint (1400), so padding stays at the base
+    // value (.headline 0.9rem/14.4px) — proving the scaling does not over-inflate laptops.
+    expect(await computedPx(page, ".headline", "padding-top")).toBeLessThanOrEqual(16);
   });
 });
