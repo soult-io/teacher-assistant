@@ -1632,12 +1632,67 @@ button.rowmain {
     gap: 0.7rem;
     align-items: start;
   }
+
+  /* The M8 draft-statement sentence is the one long-prose block on the detail
+     surfaces. As the content column scales up on wide monitors (see the wide
+     breakpoints below) its card can grow past a comfortable reading measure, so
+     cap the paragraph itself — the card still fills its column; only the text
+     holds a readable line length. */
+  .stmttext {
+    max-width: 66ch;
+  }
 }
 
-/* Wide screens (design §1, >=1400px): the fluid card grids gain a third column. */
+/* ══════════════════════════════════════════════════════════════════════════════
+   Wide monitors — scale the content column up in steps instead of stranding it.
+
+   The desktop shell caps content at `--content-max` (base 1180px), centered in the
+   main column. On a laptop that leaves a comfortable gutter, but on a 2560px display
+   the 240px sidebar plus a fixed 1180px column leaves ~570px of dead grey either
+   side — the content reads as a narrow strip marooned in empty space. Rather than a
+   single fixed cap, `--content-max` grows at wide breakpoints so the column fills
+   most of the main area with modest, intentional margins at every size. The growth
+   goes to structure that wants width — the master-detail list column and the fluid
+   card grids — while prose keeps a readable measure (see `.stmttext` above; forms
+   stay capped at `.new-goal .form` / `.to-score`). Values are deliberately below the
+   full main-column width so a balanced gutter remains and the layout reads as
+   designed, not edge-to-edge.
+   ══════════════════════════════════════════════════════════════════════════════ */
+
+/* >=1400px: first step up; the fluid card grids also gain a third column (design §1). */
 @media (min-width: 1400px) {
+  .main {
+    --content-max: 1360px;
+  }
   .scardgrid,
   .bcardgrid {
     grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* >=1760px: the content column widens further and the master-detail list column
+   gains room (more roster context) while the detail pane grows with it. */
+@media (min-width: 1760px) {
+  .main {
+    --content-max: 1600px;
+  }
+  .md {
+    grid-template-columns: 28rem 1fr;
+  }
+}
+
+/* >=2200px (2560px-class displays): the column fills most of the main area with a
+   balanced gutter; the list column widens again and the card grids gain a fourth
+   column so cards stay a sensible size rather than stretching. */
+@media (min-width: 2200px) {
+  .main {
+    --content-max: 2000px;
+  }
+  .md {
+    grid-template-columns: 32rem 1fr;
+  }
+  .scardgrid,
+  .bcardgrid {
+    grid-template-columns: repeat(4, 1fr);
   }
 }
