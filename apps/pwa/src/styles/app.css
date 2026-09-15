@@ -1522,9 +1522,15 @@ button.rowmain {
     border-radius: var(--radius);
     padding: 1rem;
   }
+  /* The group toggle belongs to the list it controls, so on desktop it sits at the
+     LEFT edge — aligned with the "Owes a point" section label and the cards below it
+     (and, in the by-student lens, with the card grid's first column). Right-aligning it
+     floated it disconnected over the narrow master column, next to but not part of the
+     detail pane. (Mobile is a different element, the sibling `.grouptoggle`, and keeps
+     its own right alignment above the full-width column — this rule does not affect it.) */
   .listtoolbar {
     display: flex;
-    justify-content: flex-end;
+    justify-content: flex-start;
     margin-bottom: 0.3rem;
   }
   /* Rows get a pointer + hover cue on desktop (mouse, not thumb). */

@@ -596,13 +596,17 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
           <div className="gdcol">
             {chart}
             {consistency}
-            {history}
           </div>
           <div className="gdcol">
             {stmt}
             {quarterly}
           </div>
         </div>
+        {/* The ARC audit is a wide multi-column table; kept inside the 1.4fr left column it
+            overflowed and clipped the "Fix" action behind a horizontal scrollbar. It spans
+            the full content width below the two-column honesty surfaces so every column —
+            and the per-row Fix — is visible without scrolling. */}
+        {history}
       </>
     );
   }
