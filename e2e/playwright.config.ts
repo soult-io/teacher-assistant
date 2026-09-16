@@ -18,13 +18,32 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
+  // JSON reporter (results.json) is the machine-readable evidence the verification
+  // pipeline consumes; github + html are the human-facing views. All land under
+  // test-results/ (outputFile below + the default outputDir) so one artifact upload
+  // captures results.json alongside the per-test videos and traces.
+  reporter: process.env.CI
+    ? [
+        ["github"],
+        ["json", { outputFile: "test-results/results.json" }],
+        ["html", { open: "never" }],
+      ]
+    : [["list"]],
   use: {
     baseURL: liveBaseUrl ?? "http://127.0.0.1:4173",
-    trace: "on-first-retry",
+    // Full trace + video on every test: these ARE the journey evidence the
+    // dashboard renders, not just failure diagnostics. Screenshots stay
+    // failure-only — video + trace already cover the passing path.
+    trace: "on",
+    video: "on",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Cross-browser proof: every journey runs on Chromium and Firefox. Kept serial
+  // (workers 1 / fullyParallel false) so evidence capture stays deterministic.
+  projects: [
+    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "firefox", use: { ...devices["Desktop Firefox"] } },
+  ],
   ...(liveBaseUrl
     ? {}
     : {

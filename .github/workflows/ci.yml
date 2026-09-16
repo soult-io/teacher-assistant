@@ -49,6 +49,26 @@ jobs:
       - name: Unit tests (all workspaces)
         run: pnpm -r run test
 
+      # Coverage baseline for the core logic packages (measure-only — NO failing
+      # threshold yet, Phase 1). Emits coverage-summary.json per covered package;
+      # uploaded below as the verification pipeline's coverage evidence.
+      - name: Coverage (core packages)
+        run: pnpm test:coverage
+
+      - name: Upload coverage summaries
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-summary
+          path: |
+            **/coverage/coverage-summary.json
+            !**/node_modules/**
+          # Loud-fail: this upload's whole purpose is to guarantee coverage
+          # evidence exists. If a future rename/path break emits nothing, fail
+          # here rather than let CI stay green with the dashboard silently empty.
+          if-no-files-found: error
+          retention-days: 14
+
   # Build the four deployable images. Validates the Dockerfiles on every PR;
   # pushes sha-<commit> + latest only from main (the stack repo pins by sha/tag).
   build-images:

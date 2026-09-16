@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@simplewebauthn/server": "14.0.1",
@@ -23,6 +24,7 @@
     "@teacher-assistant/schema": "workspace:*"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "~4.1.10",
     "typescript": "~5.9.3",
     "vitest": "~4.1.10"
   }

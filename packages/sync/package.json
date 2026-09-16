@@ -15,7 +15,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@teacher-assistant/crypto": "workspace:*",
@@ -24,6 +25,7 @@
   },
   "devDependencies": {
     "@teacher-assistant/sync-relay": "workspace:*",
+    "@vitest/coverage-v8": "~4.1.10",
     "typescript": "~5.9.3",
     "vitest": "~4.1.10"
   }
