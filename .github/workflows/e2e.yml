@@ -14,10 +14,12 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20   # fail fast on hangs — never sit on the 6h default
-    # Official Playwright image matching the lockfile version: chromium + its
-    # system libraries are baked in, removing the flaky per-run apt/CDN fetches.
+    # Official Playwright image matching the lockfile version (@playwright/test
+    # 1.63.0): chromium, firefox + their system libraries are baked in, removing
+    # the flaky per-run apt/CDN browser fetches. Keep this tag in lockstep with
+    # @playwright/test — a skew silently reintroduces the runtime browser download.
     container:
-      image: mcr.microsoft.com/playwright:v1.62.0-noble
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
     steps:
       - uses: actions/checkout@v4
 
@@ -36,16 +38,32 @@ jobs:
       - name: Build (PWA + workspace deps)
         run: pnpm -r run build
 
-      - name: Verify Playwright chromium
-        run: pnpm --filter @teacher-assistant/e2e exec playwright install chromium
+      - name: Verify Playwright browsers
+        run: pnpm --filter @teacher-assistant/e2e exec playwright install chromium firefox
 
       - name: E2E (Playwright)
+        # Actions runs this container as root but sets $HOME=/github/home (owned
+        # by the image's pwuser). Firefox refuses to launch as root when $HOME
+        # isn't owned by the current user; point it at root's own home. Chromium
+        # tolerates the mismatch, which is why this only bites once Firefox is added.
+        env:
+          HOME: /root
         run: pnpm --filter @teacher-assistant/e2e e2e
 
-      - name: Upload Playwright report on failure
-        if: failure()
+      # Always upload, pass or fail: on green these artifacts ARE the journey
+      # evidence (videos, traces, results.json) the verification dashboard renders.
+      - name: Upload Playwright test-results (videos, traces, results.json)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: playwright-test-results
+          path: e2e/test-results/
+          retention-days: 14
+
+      - name: Upload Playwright HTML report
+        if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
           name: playwright-report
           path: e2e/playwright-report/
-          retention-days: 7
+          retention-days: 14

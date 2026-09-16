@@ -1,8 +1,2 @@
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  test: {
-    include: ["src/**/*.test.ts"],
-    environment: "node",
-  },
-});
+// Shared node config (test setup + coverage policy) — see /vitest.shared.ts.
+export { nodeVitestConfig as default } from "../../vitest.shared";
