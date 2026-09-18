@@ -158,6 +158,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           <div className="pathseg">
             <button
               type="button"
+              data-testid="ng-path-adopt"
               className={form.path === "adopt" ? "on" : ""}
               onClick={() => set("path", "adopt")}
             >
@@ -165,6 +166,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             </button>
             <button
               type="button"
+              data-testid="ng-path-draft"
               className={form.path === "draft" ? "on" : ""}
               onClick={() => set("path", "draft")}
             >
@@ -176,6 +178,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
         <Field label="Student initials" hint="(Audience)" required>
           <input
             className="tin"
+            data-testid="ng-initials"
             value={form.initials}
             placeholder="e.g. AB"
             onChange={(e) => set("initials", e.target.value)}
@@ -184,6 +187,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
         <Field label="Behavior" hint="(what the student will do)" required>
           <input
             className="tin"
+            data-testid="ng-behavior"
             value={form.behavior}
             placeholder="solve two-step equations"
             onChange={(e) => set("behavior", e.target.value)}
@@ -192,6 +196,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
         <Field label="Circumstance" hint="(given…)" required>
           <input
             className="tin"
+            data-testid="ng-circumstance"
             value={form.circumstance}
             placeholder="given a 5-item probe and a number line"
             onChange={(e) => set("circumstance", e.target.value)}
@@ -201,6 +206,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           <div className="two">
             <input
               className="tin"
+              data-testid="ng-level"
               inputMode="numeric"
               value={form.level}
               placeholder="level % e.g. 80"
@@ -209,6 +215,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             />
             <input
               className="tin"
+              data-testid="ng-consistency"
               inputMode="numeric"
               value={form.consistency}
               placeholder="consistency e.g. 4"
@@ -221,6 +228,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           <div className="two">
             <select
               className="tin"
+              data-testid="ng-method-general"
               value={form.methodGeneral}
               aria-label="method general"
               onChange={(e) => set("methodGeneral", e.target.value as MethodGeneral)}
@@ -233,6 +241,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             </select>
             <input
               className="tin"
+              data-testid="ng-method-tool"
               value={form.methodTool}
               placeholder="tool e.g. enVision worksheet"
               aria-label="method tool"
@@ -258,6 +267,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           <div className="pathseg">
             <button
               type="button"
+              data-testid="ng-basis-fixed"
               className={!variable ? "on" : ""}
               onClick={() => set("denominatorBasis", "fixed" as DenominatorBasis)}
             >
@@ -265,6 +275,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             </button>
             <button
               type="button"
+              data-testid="ng-basis-variable"
               className={variable ? "on" : ""}
               onClick={() => set("denominatorBasis", "variable" as DenominatorBasis)}
             >
@@ -282,6 +293,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           <Field label="Total items per probe" hint="(the fixed basis)" required>
             <input
               className="tin"
+              data-testid="ng-total"
               inputMode="numeric"
               value={form.total}
               placeholder="e.g. 5"
@@ -311,6 +323,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
         >
           <select
             className="tin"
+            data-testid="ng-accom"
             value={form.accomMod}
             aria-label="accommodation category"
             onChange={(e) => set("accomMod", e.target.value as AccomMod)}
@@ -325,6 +338,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
         <Field label="Accom / mod detail" hint="teacher reference only — not in the IC statement">
           <input
             className="tin"
+            data-testid="ng-accom-detail"
             value={form.accomDetail}
             placeholder="e.g. read-aloud + extended time"
             aria-label="accommodation detail"
@@ -336,6 +350,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           <Field label="Baseline %" hint="(already collected)" required>
             <input
               className="tin"
+              data-testid="ng-baseline"
               inputMode="numeric"
               value={form.baseline}
               placeholder="e.g. 20"
@@ -355,6 +370,7 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
         </div>
         <button
           type="button"
+          data-testid="ng-submit"
           className="btn primary wide ngsubmit"
           disabled={!ready}
           onClick={() => onSubmit(form)}
