@@ -188,7 +188,12 @@ export function ParaCaptureSheet({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: decorative backdrop; the Cancel button is the control */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: decorative backdrop; the Cancel button is the control */}
       <div className="scrim open" onClick={onClose} />
-      <div className="sheet open" role="dialog" aria-label="para score entry">
+      <div
+        className="sheet open"
+        role="dialog"
+        aria-label="para score entry"
+        data-testid="para-capture-sheet"
+      >
         <div className="grip" />
         <button type="button" className="modal-close" aria-label="close" onClick={onClose}>
           ✕
