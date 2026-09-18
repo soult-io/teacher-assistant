@@ -2,7 +2,7 @@
   "name": "@teacher-assistant/verify-dashboard",
   "version": "0.0.0",
   "private": true,
-  "description": "CI generator for the TRACK Verification dashboard: runs the suites for live counts, captures per-view app screenshots via Playwright, reads CI status, fills template.html -> a static index.html + images/ packaged into the teacher-assistant-verify nginx image (GHCR) and served privately on Lexington. Not shipped in any app image.",
+  "description": "CI generator for the TRACK Verification dashboard: a product-agnostic engine/ (journey ingest from Playwright evidence, provenance/UNVERIFIED, counts, CI pills, renderers) driven by a per-product config/. Produces a static index.html + images/videos/traces packaged into the teacher-assistant-verify nginx image (GHCR), served privately on Lexington. Not shipped in any app image.",
   "type": "module",
   "scripts": {
     "generate": "node src/generate.mjs",

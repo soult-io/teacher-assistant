@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TRACK Verification</title>
-<meta name="description" content="Test suite, CI status, and every screen of the Teacher Assistant TRACK app — verified visually. Auto-generated from main by CI.">
+<title>{{PAGE_TITLE}}</title>
+<meta name="description" content="{{PAGE_DESCRIPTION}}">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -116,6 +116,32 @@
   .callout h4 { margin:0 0 .25rem; font-size:.85rem; font-family:var(--mono); font-weight:600; text-transform:uppercase; letter-spacing:.05em; color:var(--dim); }
   .callout p { margin:0; font-size:.88rem; color:var(--ink); }
 
+  /* journey cards (Phase 3a minimal — full JourneyCard is 3b) */
+  .jlist { display:grid; grid-template-columns:repeat(auto-fill,minmax(320px,1fr)); gap:1rem; }
+  .jcard { background:var(--surface); border:1px solid var(--border); border-radius:13px; padding:1rem 1.1rem 1.1rem; box-shadow:var(--shadow-sm); display:flex; flex-direction:column; gap:.6rem; }
+  .jcard.j-failed { border-color:color-mix(in srgb,var(--fail) 45%,var(--border)); }
+  .jcard.unverified { border-style:dashed; border-color:var(--border-2); background:var(--surface-2); opacity:.85; }
+  .jhead { display:flex; align-items:flex-start; gap:.7rem; justify-content:space-between; }
+  .jhead h3 { font-size:1rem; font-weight:600; letter-spacing:-.01em; }
+  .jbadge { font-family:var(--mono); font-size:.68rem; font-weight:600; text-transform:uppercase; letter-spacing:.06em; padding:.2rem .5rem; border-radius:999px; border:1px solid; white-space:nowrap; }
+  .jbadge.pass { color:var(--pass); background:var(--pass-soft); border-color:color-mix(in srgb,var(--pass) 30%,transparent); }
+  .jbadge.fail { color:var(--fail); background:var(--fail-soft); border-color:color-mix(in srgb,var(--fail) 30%,transparent); }
+  .jbadge.warn { color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb,var(--warn) 30%,transparent); }
+  .jbadge.note { color:var(--pend); background:var(--pend-soft); border-color:color-mix(in srgb,var(--pend) 30%,transparent); }
+  .jbadge.unver { color:var(--faint); background:transparent; border-color:var(--border-2); border-style:dashed; }
+  .jprov { font-size:.68rem; color:var(--dim); display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; line-height:1.4; }
+  .jprov .sep { color:var(--faint); }
+  .jchips { display:flex; flex-wrap:wrap; gap:.4rem; }
+  .chip { display:inline-flex; align-items:center; gap:.35rem; font-family:var(--mono); font-size:.72rem; font-weight:500; padding:.22rem .5rem; border-radius:999px; border:1px solid; }
+  .chip.pass { color:var(--pass); background:var(--pass-soft); border-color:color-mix(in srgb,var(--pass) 30%,transparent); }
+  .chip.fail { color:var(--fail); background:var(--fail-soft); border-color:color-mix(in srgb,var(--fail) 30%,transparent); }
+  .chip.warn { color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb,var(--warn) 30%,transparent); }
+  .chip.note { color:var(--pend); background:var(--pend-soft); border-color:color-mix(in srgb,var(--pend) 30%,transparent); }
+  .jmeta { font-size:.74rem; color:var(--dim); display:flex; flex-wrap:wrap; gap:.35rem; align-items:center; }
+  .jmeta .sep { color:var(--faint); }
+  .jmeta.unver { color:var(--faint); font-family:var(--mono); text-transform:uppercase; letter-spacing:.05em; font-size:.7rem; }
+  .jempty { color:var(--dim); font-size:.9rem; }
+
   /* view gallery */
   .gallery { display:grid; grid-template-columns:repeat(auto-fill,minmax(238px,1fr)); gap:1.3rem; }
   .view { background:var(--surface); border:1px solid var(--border); border-radius:13px; overflow:hidden; box-shadow:var(--shadow); display:flex; flex-direction:column; }
@@ -165,9 +191,9 @@
 <div class="wrap">
   <header class="top">
     <div>
-      <div class="eyebrow">Teacher Assistant · TRACK loop</div>
-      <h1>TRACK Verification</h1>
-      <p class="lede">The shippable IEP progress-tracking MVP — every test suite, CI check, and screen, so the work can be verified at a glance. Offline-first, end-to-end encrypted, synthetic data only.</p>
+      <div class="eyebrow">{{EYEBROW}}</div>
+      <h1>{{HEADING}}</h1>
+      <p class="lede">{{LEDE}}</p>
     </div>
     <div class="meta">
       <button class="themetoggle" id="tt" type="button">◐ theme</button>
@@ -181,104 +207,11 @@
     {{CI_PILLS}}
   </div>
 
-  <section>
-    <div class="sechead"><h2>Test suite</h2><span class="k">run live by CI · {{GENERATED_DATE}}</span></div>
-    <div class="tiles">
-      <div class="tile accent"><div class="n tnum">{{UNIT_TOTAL}}</div><div class="t">unit &amp; component tests passing</div></div>
-      <div class="tile"><div class="n tnum">{{FILE_TOTAL}}</div><div class="t">test files across {{PKG_COUNT}} packages</div></div>
-      <div class="tile pass"><div class="n tnum">{{FERPA_COUNT}}</div><div class="t">FERPA-guard assertions (the compliance gate)</div></div>
-      <div class="tile"><div class="n tnum">{{E2E_COUNT}}</div><div class="t">end-to-end test{{E2E_PLURAL}} (Playwright)</div></div>
-    </div>
-
-    <div class="bars">
-      {{BARS}}
-    </div>
-
-    <div class="callouts">
-      <div class="callout info">
-        <h4>Where coverage is deep</h4>
-        <p>The engine ({{ENGINE_COUNT}}) and UI ({{PWA_COUNT}}) carry the weight. The engine tests are where the progress-monitoring rules live — the ≥8-point trend gate, ⊘-as-gap, the consistency window, the denominator-mismatch disposition. Several were caught by adversarial review and are now regression-locked.</p>
-      </div>
-      <div class="callout">
-        <h4>Honest gaps</h4>
-        <p>End-to-end is a single smoke test (the app shell renders); real behavioral coverage is the {{UNIT_TOTAL}} unit/component tests plus the visual captures below. The <span class="mono">content-api</span> and <span class="mono">diff-orchestrator</span> services are scaffolds with no tests — differentiation isn't built yet (<span class="mono">/differentiate</span> returns 501).</p>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="sechead"><h2>Every screen, from the running app</h2><span class="k">real build · synthetic seed</span></div>
-    <div class="gallery">
-      <div class="view">
-        <div class="shot"><img src="images/lock.png" alt="Lock screen" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>Unlock</h3><span class="tag">M0 auth</span></div>
-          <p>Passkey gate. The encrypted store is unreadable until a verified passkey unlocks the device-held keys.</p>
-          <div class="cover">covered · <b>auth · crypto</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/dashboard.png" alt="Weekly dashboard" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>Weekly Dashboard</h3><span class="tag">U2</span></div>
-          <p>The three-state header — scored · excused · owe — owes-first, with para points awaiting the teacher's OK.</p>
-          <div class="cover">covered · <b>pwa · store</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/by-student.png" alt="By-student lens" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>By-student lens</h3><span class="tag">U2</span></div>
-          <p>One of three grouping lenses — student cards with the fixed monogram colours, a goal's context on each.</p>
-          <div class="cover">covered · <b>store projections</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/quickscore.png" alt="Quick-Score sheet" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>Quick-Score</h3><span class="tag">U3</span></div>
-          <p>#correct stepper over a custom total → live %. Save, No-data, or bookmark to score later.</p>
-          <div class="cover">covered · <b>pwa · domain-core</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/nodata.png" alt="No-data flow" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>No-Data</h3><span class="tag">U3</span></div>
-          <p>"A documented gap, not a zero." The five locked reasons, and the honest note: any no-data pauses the run, never breaks it.</p>
-          <div class="cover">covered · <b>domain-core · SME-ruled</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/goal-detail.png" alt="Goal detail" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>Goal Detail</h3><span class="tag">U4</span></div>
-          <p>Trend with ⊘ shown as a gap, quarterly averaged as-is, and the draft IC statement held at <b>Indeterminate</b> under the 8-point gate.</p>
-          <div class="cover">covered · <b>the honesty surface</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/new-goal.png" alt="New goal form" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>New Goal</h3><span class="tag">U5</span></div>
-          <p>The six KY IEP components, baseline-mandatory, fixed vs variable probe basis, accom/mod kept out of the IC statement.</p>
-          <div class="cover">covered · <b>pwa · domain-core</b></div></div>
-      </div>
-      <div class="view">
-        <div class="shot"><img src="images/para.png" alt="Para aide surface" loading="lazy"></div>
-        <div class="body"><div class="vh"><h3>Para surface</h3><span class="tag">U6 · FERPA</span></div>
-          <p>The least-privilege aide view — one class only, catalog labels (no goal text), no trends, no export. A real key boundary, not a filter.</p>
-          <div class="cover">covered · <b>ferpa-guard</b></div></div>
-      </div>
-    </div>
-  </section>
-
-  <section>
-    <div class="sechead"><h2>Desktop layout</h2><span class="k">TEACH-8 · U7 shipped</span></div>
-    <div class="desk">
-      <div class="frame"><img src="images/desktop-dashboard.png" alt="Desktop dashboard — sidebar + master-detail"></div>
-      <div class="note">
-        <h3>Co-equal desktop, shipped</h3>
-        <p>The app is mobile-first, but on a laptop it now renders its own responsive desktop shell: a left sidebar and a master–detail dashboard that puts a goal's whole record beside the list — not a stretched phone strip.</p>
-        <div class="status-line st-done"><span class="dot"></span>U7 built and on main</div>
-        <p style="margin-top:.8rem;font-size:.84rem;">Captured live from the running app at ≥900px. Every token, status glyph, and honesty string carries over verbatim from the verified mobile screens.</p>
-      </div>
-    </div>
-    <div class="frame wide"><img src="images/desktop-para.png" alt="Desktop para surface"></div>
-  </section>
+  {{SECTIONS}}
 
   <footer>
-    <a class="flink" href="https://ta-qa.stabpablo.com" target="_blank" rel="noopener"><span class="lbl">Live staging</span>ta-qa.stabpablo.com</a>
-    <a class="flink" href="https://nsoult-agentic.github.io/teacher-assistant-p0/" target="_blank" rel="noopener"><span class="lbl">Mobile prototype</span>teacher-assistant-p0</a>
-    <a class="flink" href="https://github.com/soult-io/teacher-assistant" target="_blank" rel="noopener"><span class="lbl">Source</span>soult-io/teacher-assistant</a>
-    <p class="foot-note">Auto-generated from soult-io/teacher-assistant @ {{COMMIT}} by CI. Counts run live from the suites; CI status read from GitHub Actions. Synthetic data only — no real student record.</p>
+    {{FOOTER_LINKS}}
+    <p class="foot-note">{{FOOTER_NOTE}}</p>
   </footer>
 </div>
 
