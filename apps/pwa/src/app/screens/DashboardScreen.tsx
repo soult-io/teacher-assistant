@@ -425,7 +425,12 @@ export function DashboardScreen(props: DashboardScreenProps) {
       </div>
 
       <div className="btnrow" style={{ marginTop: "0.9rem" }}>
-        <button type="button" className="btn primary wide" onClick={onNewGoal}>
+        <button
+          type="button"
+          className="btn primary wide"
+          onClick={onNewGoal}
+          data-testid="new-goal-cta"
+        >
           + New goal
         </button>
         <button type="button" className="btn wide" onClick={onToScore} data-testid="to-score">
