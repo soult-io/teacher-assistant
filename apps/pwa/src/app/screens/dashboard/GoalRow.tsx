@@ -23,7 +23,13 @@ function rightValue(vm: RowVM) {
     return null;
   }
   const dim = vm.state === "documented_no_data";
-  return <span className={`rowval${dim ? " dim" : ""}`}>{text}</span>;
+  // The ⊘ no-data value carries a stable marker so a journey can assert the row shows
+  // a documented gap (distinct from a scored %), independent of the reason text/CSS.
+  return (
+    <span className={`rowval${dim ? " dim" : ""}`} data-testid={dim ? "row-nodata" : undefined}>
+      {text}
+    </span>
+  );
 }
 
 function RowMain({ vm, scoreLater }: { readonly vm: RowVM; readonly scoreLater: boolean }) {
@@ -105,7 +111,10 @@ export function GoalRow({
       <RowBody vm={vm} scoreLater={scoreLater} />
     );
   return (
-    <div className={`row${isOwes ? " owes" : ""}${selected ? " selected" : ""}`}>
+    <div
+      className={`row${isOwes ? " owes" : ""}${selected ? " selected" : ""}`}
+      data-testid="goal-row"
+    >
       <StatusChip chip={chip} label={STATE_LABEL[vm.state]} />
       <Avatar initials={vm.initials} />
       {main}
