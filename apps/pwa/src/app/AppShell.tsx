@@ -53,8 +53,10 @@ export interface AppShellProps {
 }
 
 function OfflineBadge({ online }: { readonly online: boolean }) {
+  // data-testid is a stable hook for the J2 offline-sync journey to read reachability
+  // independent of the glyph/copy or the CSS state class (additive; no behaviour change).
   return (
-    <span className={`offline${online ? " online" : ""}`}>
+    <span className={`offline${online ? " online" : ""}`} data-testid="offline-badge">
       {online ? "⇅ online" : "⚡ offline · syncs later"}
     </span>
   );
