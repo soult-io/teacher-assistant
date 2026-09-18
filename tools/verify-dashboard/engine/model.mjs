@@ -1,0 +1,117 @@
+// The product-agnostic Journey model: the reusable contract between the ingest
+// engine and the renderers. No product vocabulary lives here — a journey is just a
+// named, provenance-bound outcome with per-browser results and a step/assertion
+// tree. The same model serves any product whose e2e suite emits journey-evidence.
+
+/** @typedef {"passed"|"failed"|"flaky"|"skipped"|"unverified"} JourneyStatus */
+
+export const JOURNEY_STATUS = Object.freeze({
+  PASSED: "passed",
+  FAILED: "failed",
+  FLAKY: "flaky",
+  SKIPPED: "skipped",
+  UNVERIFIED: "unverified",
+});
+
+const KNOWN_STATUS = new Set(Object.values(JOURNEY_STATUS));
+
+// A journey can only render a green PASS badge from a REAL, verified run. UNVERIFIED
+// is structurally excluded so decoration can never impersonate a passing test.
+export const PASSABLE_STATUS = new Set([JOURNEY_STATUS.PASSED, JOURNEY_STATUS.FLAKY]);
+
+/**
+ * Map one Playwright test outcome/status to a journey status. `outcome` is the
+ * authoritative signal (it already folds retries into flaky); `status` is the
+ * fallback when a runner omits the outcome.
+ * @param {{outcome?: string, status?: string}} result
+ * @returns {JourneyStatus}
+ */
+export function mapTestStatus({ outcome, status } = {}) {
+  switch (outcome) {
+    case "expected":
+      return JOURNEY_STATUS.PASSED;
+    case "unexpected":
+      return JOURNEY_STATUS.FAILED;
+    case "flaky":
+      return JOURNEY_STATUS.FLAKY;
+    case "skipped":
+      return JOURNEY_STATUS.SKIPPED;
+    default:
+      break;
+  }
+  if (status === "passed") return JOURNEY_STATUS.PASSED;
+  if (status === "skipped") return JOURNEY_STATUS.SKIPPED;
+  return JOURNEY_STATUS.FAILED;
+}
+
+// Worst-wins precedence across the browsers a journey ran on: one red engine makes
+// the whole journey red (spec: "any red engine → red card").
+const STATUS_RANK = {
+  [JOURNEY_STATUS.FAILED]: 4,
+  [JOURNEY_STATUS.FLAKY]: 3,
+  [JOURNEY_STATUS.SKIPPED]: 2,
+  [JOURNEY_STATUS.PASSED]: 1,
+};
+
+/**
+ * Reduce per-browser statuses to the journey's overall status (worst wins).
+ * @param {{status: JourneyStatus}[]} browsers
+ * @returns {JourneyStatus}
+ */
+export function deriveJourneyStatus(browsers) {
+  if (!Array.isArray(browsers) || browsers.length === 0) return JOURNEY_STATUS.UNVERIFIED;
+  let worst = JOURNEY_STATUS.PASSED;
+  for (const b of browsers) {
+    if ((STATUS_RANK[b.status] ?? 0) > (STATUS_RANK[worst] ?? 0)) worst = b.status;
+  }
+  return worst;
+}
+
+/**
+ * A manifest journey with no matching run result. It carries the identity the config
+ * declared but NO run/browsers/steps — structurally incapable of a green PASS.
+ * @param {{id: string, name: string}} entry
+ * @param {string} product
+ */
+export function makeUnverified(entry, product) {
+  return {
+    id: entry.id,
+    name: entry.name,
+    product,
+    status: JOURNEY_STATUS.UNVERIFIED,
+    browsers: [],
+    duration_ms: null,
+    run: null,
+    video: null,
+    trace_url: null,
+    steps: [],
+  };
+}
+
+/**
+ * Loud validation — a malformed journey is a broken generator, not a blank card.
+ * Throws with the offending id so a bug surfaces at generate time.
+ * @param {Record<string, unknown>} journey
+ */
+export function assertJourney(journey) {
+  const id = journey?.id;
+  if (!id || typeof id !== "string") throw new Error("journey is missing a string id");
+  if (!journey.name || typeof journey.name !== "string") {
+    throw new Error(`journey ${id} is missing a name`);
+  }
+  if (!KNOWN_STATUS.has(journey.status)) {
+    throw new Error(`journey ${id} has unknown status ${JSON.stringify(journey.status)}`);
+  }
+  if (!Array.isArray(journey.browsers)) throw new Error(`journey ${id} browsers is not an array`);
+  if (!Array.isArray(journey.steps)) throw new Error(`journey ${id} steps is not an array`);
+  // A verified (non-unverified) journey MUST be bound to a real run — a provenance
+  // object of nulls is not a binding. "Provenance or nothing": no run id, no PASS.
+  if (journey.status !== JOURNEY_STATUS.UNVERIFIED && !journey.run?.ci_run_id) {
+    throw new Error(`journey ${id} is ${journey.status} but is not bound to a run id`);
+  }
+  // UNVERIFIED can never be provenance-bound (that would let it show a PASS).
+  if (journey.status === JOURNEY_STATUS.UNVERIFIED && journey.run) {
+    throw new Error(`journey ${id} is unverified but carries run provenance`);
+  }
+  return journey;
+}

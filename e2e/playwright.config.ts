@@ -18,13 +18,16 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: process.env.CI ? 1 : 0,
-  // JSON reporter (results.json) is the machine-readable evidence the verification
-  // pipeline consumes; github + html are the human-facing views. All land under
-  // test-results/ (outputFile below + the default outputDir) so one artifact upload
-  // captures results.json alongside the per-test videos and traces.
+  // journey-evidence.json (our custom reporter) is the step+assertion evidence the
+  // verification dashboard renders — the built-in JSON reporter prunes green runs to
+  // bare test.step titles, so it cannot supply assertion text. results.json stays for
+  // stats/tooling; github + html are the human-facing views. All land under
+  // test-results/ (outputFile paths + the default outputDir) so one artifact upload
+  // captures the evidence alongside the per-test videos and traces.
   reporter: process.env.CI
     ? [
         ["github"],
+        ["./reporters/evidence-reporter.ts", { outputFile: "test-results/journey-evidence.json" }],
         ["json", { outputFile: "test-results/results.json" }],
         ["html", { open: "never" }],
       ]

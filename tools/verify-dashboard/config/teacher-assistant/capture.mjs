@@ -4,6 +4,9 @@
 // detail trigger's name is its aria-label "trend and history <goal>", NOT the
 // "Trend & history" title. Every selector miss THROWS — a blank/wrong shot must
 // fail the run loudly, not slip through (the failure mode of the old harness).
+//
+// Product-specific: the unlock flow + selectors belong to Teacher Assistant, so this
+// lives in config, not the engine. Payroll's config brings its own capture routine.
 
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -29,8 +32,8 @@ async function openLock(page, baseURL) {
 async function unlock(page, baseURL) {
   await openLock(page, baseURL);
   await page.getByTestId("unlock").click();
-  // The role toggle lives in the app-shell status bar and is present after
-  // unlock in both the mobile and desktop layouts — a universal readiness gate.
+  // The role toggle lives in the app-shell status bar and is present after unlock in
+  // both the mobile and desktop layouts — a universal readiness gate.
   await paraButton(page).waitFor({ state: "visible" });
 }
 

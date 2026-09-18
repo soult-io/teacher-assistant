@@ -16,7 +16,7 @@
       "!**/coverage",
       "!docs",
       "!pnpm-lock.yaml",
-      "!tools/verify-dashboard/template.html"
+      "!tools/verify-dashboard/engine/template.html"
     ]
   },
   "formatter": {
