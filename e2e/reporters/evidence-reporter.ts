@@ -38,6 +38,11 @@ interface AssertionRecord {
 interface StepRecord {
   label: string;
   durationMs: number;
+  // Offset of this step's start from the test's start, in ms. The video recording
+  // begins at context creation (~test start), so this doubles as the step's offset
+  // into the recording — what the dashboard uses to place scrubber markers, seek to
+  // a step, and auto-highlight the current step as the video plays.
+  startOffsetMs: number;
   status: AssertionStatus;
   assertions: AssertionRecord[];
 }
@@ -105,13 +110,14 @@ function collectAssertions(steps: TestStep[]): AssertionRecord[] {
   return out;
 }
 
-function collectSteps(steps: TestStep[]): StepRecord[] {
+function collectSteps(steps: TestStep[], testStartMs: number): StepRecord[] {
   const out: StepRecord[] = [];
   for (const step of steps) {
     if (step.category !== "test.step") continue;
     out.push({
       label: step.title,
       durationMs: Math.round(step.duration),
+      startOffsetMs: Math.max(0, Math.round(step.startTime.getTime() - testStartMs)),
       status: step.error ? "failed" : "passed",
       assertions: collectAssertions(step.steps),
     });
@@ -138,7 +144,7 @@ function toRecord(test: TestCase, result: TestResult): TestRecord {
     startTime: result.startTime.toISOString(),
     errors: result.errors.map((e) => cleanError(e.message)).filter(Boolean),
     attachments,
-    steps: collectSteps(result.steps),
+    steps: collectSteps(result.steps, result.startTime.getTime()),
   };
 }
 

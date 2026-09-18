@@ -16,6 +16,20 @@ export function escapeHtml(value) {
   return String(value).replace(/[&<>"]/g, (c) => HTML_ESCAPES[c]);
 }
 
+/**
+ * Human-readable duration from milliseconds: "820ms", "4.2s", "1m 03s". Null/negative
+ * inputs render as an em dash so a card never shows a bare "0ms" for a missing value.
+ */
+export function formatDuration(ms) {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const totalSeconds = ms / 1000;
+  if (totalSeconds < 60) return `${totalSeconds.toFixed(1)}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = Math.round(totalSeconds - minutes * 60);
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
 /** Sum per-package figures into the headline totals. */
 export function aggregate(packages) {
   const unitTotal = packages.reduce((sum, p) => sum + p.pass, 0);

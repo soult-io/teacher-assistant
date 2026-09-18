@@ -3,6 +3,7 @@ import {
   aggregate,
   escapeHtml,
   fillTemplate,
+  formatDuration,
   pillClass,
   renderBars,
   renderCallouts,
@@ -10,6 +11,26 @@ import {
   renderSection,
   renderTiles,
 } from "./lib.mjs";
+
+describe("formatDuration", () => {
+  it("renders sub-second as ms", () => {
+    expect(formatDuration(820)).toBe("820ms");
+    expect(formatDuration(0)).toBe("0ms");
+  });
+  it("renders seconds with one decimal", () => {
+    expect(formatDuration(4200)).toBe("4.2s");
+    expect(formatDuration(59_900)).toBe("59.9s");
+  });
+  it("renders minutes and zero-padded seconds", () => {
+    expect(formatDuration(63_000)).toBe("1m 03s");
+    expect(formatDuration(600_000)).toBe("10m 00s");
+  });
+  it("renders an em dash for null/negative/non-finite", () => {
+    expect(formatDuration(null)).toBe("—");
+    expect(formatDuration(-5)).toBe("—");
+    expect(formatDuration(Number.NaN)).toBe("—");
+  });
+});
 
 describe("escapeHtml", () => {
   it("escapes the four HTML-significant characters", () => {

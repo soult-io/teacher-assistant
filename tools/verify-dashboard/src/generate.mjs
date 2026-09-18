@@ -1,17 +1,21 @@
 // Orchestrator: assemble the live verification dashboard from a per-product config +
 // the engine. Thin on purpose — every product-agnostic mechanic (counts, CI pills,
 // journey ingest, rendering) lives in engine/; every product string (suites,
-// workflows, journey manifest, branding, gallery) lives in config/. Swap the config
+// workflows, journey manifest, branding, page sections) lives in config/. Swap the config
 // import and the same engine renders another product.
 //
-//   engine counts + CI + capture (config-driven)  +  journey-evidence.json (ingest)
+//   engine counts + CI (config-driven)  +  journey-evidence.json (ingest)
 //   -> Journey[] + tiles/bars -> engine/template.html -> <outDir>/index.html
-//      + images/*.png + videos/*.webm + traces/*.zip
+//      + videos/*.webm + traces/*.zip
+//
+// The visual proof of each journey is the run's own video (ingested from the e2e
+// artifacts), so there is no separate screenshot capture step: this generator needs
+// no browser and no preview server.
 //
 // Assumes `pnpm -r run build` has run (the workflow does this first).
 // Usage: node src/generate.mjs [outDir]   (EVIDENCE_FILE env overrides the evidence path)
 
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -22,7 +26,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectCiPills } from "../engine/ci-status.mjs";
 import { collectE2eCount, collectPackageCounts } from "../engine/counts.mjs";
@@ -44,11 +48,8 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const TOOL_DIR = resolve(HERE, "..");
 const ENGINE_DIR = join(TOOL_DIR, "engine");
 const REPO_ROOT = resolve(TOOL_DIR, "..", "..");
-const PREVIEW_PORT = config.captureTarget.previewPort;
-const PREVIEW_URL = `http://127.0.0.1:${PREVIEW_PORT}/`;
 const DEFAULT_EVIDENCE = join(REPO_ROOT, "e2e", "test-results", "journey-evidence.json");
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const passOf = (pkgs, name) => pkgs.find((p) => p.name === name)?.pass ?? 0;
 
 function shortSha() {
@@ -60,58 +61,6 @@ function shortSha() {
       .trim();
   } catch {
     return "unknown";
-  }
-}
-
-function startPreview() {
-  const child = spawn(
-    "pnpm",
-    [
-      "--filter",
-      config.pwaPackage,
-      "exec",
-      "vite",
-      "preview",
-      "--host",
-      "127.0.0.1",
-      "--port",
-      String(PREVIEW_PORT),
-      "--strictPort",
-    ],
-    { cwd: REPO_ROOT, detached: true, stdio: "ignore" },
-  );
-  child.on("error", () => {});
-  return child;
-}
-
-function stopPreview(child) {
-  try {
-    process.kill(-child.pid, "SIGTERM");
-  } catch {
-    // already gone
-  }
-}
-
-async function waitForServer(url, timeoutMs = 60_000) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    try {
-      if ((await fetch(url)).ok) return;
-    } catch {
-      // not up yet
-    }
-    await sleep(500);
-  }
-  throw new Error(`preview did not become ready at ${url}`);
-}
-
-async function captureWithPreview(imagesDir) {
-  const preview = startPreview();
-  try {
-    await waitForServer(PREVIEW_URL);
-    await config.captureTarget.captureScreens(PREVIEW_URL, imagesDir);
-  } finally {
-    stopPreview(preview);
   }
 }
 
@@ -132,7 +81,7 @@ function buildMetrics(pkgs, e2eCount) {
 // dashboard, and return its dashboard-relative path. Videos are a few MB — served as
 // files, never inlined as data: URIs. Returns null if the source cannot be located.
 function makeAssetResolver(evidenceFile, outDir) {
-  const artifactRoot = dirname(evidenceFile);
+  const artifactRoot = resolve(dirname(evidenceFile));
   const dirs = { video: "videos", trace: "traces" };
   const exts = { video: "webm", trace: "zip" };
   return (rawPath, kind, journeyId, engine) => {
@@ -143,6 +92,16 @@ function makeAssetResolver(evidenceFile, outDir) {
       const marker = "test-results/";
       const idx = rawPath.indexOf(marker);
       src = idx >= 0 ? join(artifactRoot, rawPath.slice(idx + marker.length)) : rawPath;
+    }
+    // Evidence is untrusted data: confine the copy SOURCE to the artifact tree so a
+    // path in the evidence file can never make us serve an out-of-tree file (a `../`
+    // escape or an absolute path that happens to exist). The dest is already sanitised.
+    const resolvedSrc = resolve(src);
+    if (resolvedSrc !== artifactRoot && !resolvedSrc.startsWith(artifactRoot + sep)) {
+      console.warn(
+        `  asset: ${kind} for ${journeyId}/${engine} resolves outside the artifact tree — skipped`,
+      );
+      return null;
     }
     const relDir = dirs[kind];
     // Sanitise both parts of the served filename so no id/engine value can escape outDir.
@@ -228,10 +187,9 @@ function renderFooterLinks(links) {
 
 async function main() {
   const outDir = resolve(process.argv[2] ?? join(REPO_ROOT, "dist-dashboard"));
-  const imagesDir = join(outDir, "images");
   const evidenceFile = resolve(process.env.EVIDENCE_FILE ?? DEFAULT_EVIDENCE);
   rmSync(outDir, { recursive: true, force: true });
-  mkdirSync(imagesDir, { recursive: true });
+  mkdirSync(outDir, { recursive: true });
 
   console.log(`verify-dashboard: running ${config.packages.length} test suites for live counts`);
   const tmpDir = mkdtempSync(join(tmpdir(), "verify-dashboard-"));
@@ -254,9 +212,6 @@ async function main() {
   console.log(
     `  ${journeys.length} journeys (${verified} verified) bound to run ${provenance.ci_run_id ?? "(local)"}`,
   );
-
-  console.log("verify-dashboard: capturing screenshots (vite preview + Playwright)");
-  await captureWithPreview(imagesDir);
 
   const template = readFileSync(join(ENGINE_DIR, "template.html"), "utf8");
   const html = fillTemplate(template, {

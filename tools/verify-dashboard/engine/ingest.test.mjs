@@ -72,8 +72,8 @@ describe("buildJourneys", () => {
     expect(j1.id).toBe("J1");
     expect(j1.status).toBe("passed");
     expect(j1.browsers).toEqual([
-      { engine: "chromium", status: "passed", duration_ms: 600 },
-      { engine: "firefox", status: "passed", duration_ms: 720 },
+      { engine: "chromium", status: "passed", duration_ms: 600, retries: 0 },
+      { engine: "firefox", status: "passed", duration_ms: 720, retries: 0 },
     ]);
     expect(j1.duration_ms).toBe(720); // max across browsers
     expect(j1.run).toBe(PROVENANCE);
@@ -84,8 +84,75 @@ describe("buildJourneys", () => {
     expect(j1.steps[0]).toMatchObject({
       index: 0,
       label: "Open the dashboard",
+      status: "passed",
       assertions: [{ text: "owe-count is 2", status: "passed", actual: null }],
     });
+  });
+
+  it("carries step status + time offset + assertion actual through ingest", () => {
+    const evidence = {
+      schema: "journey-evidence/1",
+      tests: [
+        record({
+          steps: [
+            {
+              label: "Submit the score",
+              status: "failed",
+              startOffsetMs: 1400,
+              assertions: [
+                { text: "saved toast shows", status: "failed", detail: "expected visible" },
+              ],
+            },
+          ],
+        }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps[0]).toMatchObject({
+      label: "Submit the score",
+      status: "failed",
+      t_start_ms: 1400,
+      screen: null,
+      assertions: [{ text: "saved toast shows", status: "failed", actual: "expected visible" }],
+    });
+  });
+
+  it("defaults t_start_ms to null when the evidence carries no step offset (pre-3b run)", () => {
+    const evidence = {
+      schema: "journey-evidence/1",
+      tests: [record({ steps: [{ label: "Open", assertions: [] }] })],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps[0].t_start_ms).toBeNull();
+    expect(j1.steps[0].status).toBe("passed");
+  });
+
+  it("carries per-browser retry count (for the flaky 'passed on retry N' badge)", () => {
+    const evidence = {
+      schema: "journey-evidence/1",
+      tests: [record({ outcome: "flaky", retries: 2 })],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.status).toBe("flaky");
+    expect(j1.browsers[0].retries).toBe(2);
   });
 
   it("renders a manifest entry with no matching test as UNVERIFIED", () => {
@@ -116,6 +183,52 @@ describe("buildJourneys", () => {
       resolveAsset: echoResolver,
     });
     expect(j1.status).toBe("failed");
+  });
+
+  it("shows the FAILING browser's video + steps under a failed badge (canonical-trap fix)", () => {
+    // chromium passes, firefox fails → the card is failed. The canonical video/steps
+    // must come from firefox (the failing run), not the passing chromium sibling —
+    // otherwise a red badge would sit over a green video.
+    const evidence = {
+      schema: "journey-evidence/1",
+      tests: [
+        record({ steps: [{ label: "chromium OK", status: "passed", assertions: [] }] }),
+        record({
+          project: "firefox",
+          status: "failed",
+          outcome: "unexpected",
+          steps: [{ label: "firefox broke here", status: "failed", assertions: [] }],
+        }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.status).toBe("failed");
+    expect(j1.video.src).toBe("video/J1-firefox.bin");
+    expect(j1.trace_url).toBe("trace/J1-firefox.bin");
+    expect(j1.steps[0].label).toBe("firefox broke here");
+    expect(j1.steps[0].status).toBe("failed");
+  });
+
+  it("prefers chromium when both browsers share the journey's status", () => {
+    const evidence = {
+      schema: "journey-evidence/1",
+      tests: [record(), record({ project: "firefox" })],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.status).toBe("passed");
+    expect(j1.video.src).toBe("video/J1-chromium.bin");
   });
 
   it("disambiguates two tests in one file by title", () => {
