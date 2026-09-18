@@ -29,7 +29,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectCiPills } from "../engine/ci-status.mjs";
-import { collectE2eCount, collectPackageCounts } from "../engine/counts.mjs";
+import { collectPackageCounts, deriveE2eCount } from "../engine/counts.mjs";
 import { buildJourneys, parseEvidence } from "../engine/ingest.mjs";
 import { buildRunProvenance, sha256Hex } from "../engine/provenance.mjs";
 import {
@@ -194,9 +194,23 @@ async function main() {
   console.log(`verify-dashboard: running ${config.packages.length} test suites for live counts`);
   const tmpDir = mkdtempSync(join(tmpdir(), "verify-dashboard-"));
   const pkgs = collectPackageCounts(REPO_ROOT, tmpDir, config.packages);
-  const e2eCount = collectE2eCount(REPO_ROOT, config.e2ePackage);
   for (const p of pkgs) console.log(`  ${p.label}: ${p.pass} pass / ${p.files} files`);
-  console.log(`  e2e: ${e2eCount}`);
+
+  // Ingest journeys BEFORE building metrics: the e2e tile is derived from the same
+  // ingested evidence the journey cards render from, so the count can never contradict
+  // the cards — and the generator needs no browser/Playwright at generate time.
+  console.log(`verify-dashboard: ingesting journeys from ${evidenceFile}`);
+  const { journeys, provenance } = ingestJourneys(evidenceFile, outDir);
+
+  // The tile figure and the "N verified" log line both come from this one engine
+  // result — a single source of truth for "what counts as a verified journey" (null
+  // when none are, so the tile degrades to a dash instead of a misleading 0).
+  const e2eCount = deriveE2eCount(journeys);
+  const verified = e2eCount ?? 0;
+  console.log(
+    `  ${journeys.length} journeys (${verified} verified) bound to run ${provenance.ci_run_id ?? "(local)"}`,
+  );
+  console.log(`  e2e tile: ${e2eCount ?? "— (no verified journey)"}`);
   const metrics = buildMetrics(pkgs, e2eCount);
 
   console.log("verify-dashboard: reading CI status from GitHub Actions");
@@ -204,13 +218,6 @@ async function main() {
     process.env.GITHUB_REPOSITORY,
     process.env.GITHUB_TOKEN,
     config.ciPillSpecs,
-  );
-
-  console.log(`verify-dashboard: ingesting journeys from ${evidenceFile}`);
-  const { journeys, provenance } = ingestJourneys(evidenceFile, outDir);
-  const verified = journeys.filter((j) => j.status !== "unverified").length;
-  console.log(
-    `  ${journeys.length} journeys (${verified} verified) bound to run ${provenance.ci_run_id ?? "(local)"}`,
   );
 
   const template = readFileSync(join(ENGINE_DIR, "template.html"), "utf8");

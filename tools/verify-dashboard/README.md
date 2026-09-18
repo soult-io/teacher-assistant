@@ -25,16 +25,19 @@ only a new config — brain #3654, a hard Phase 3 acceptance criterion.
 On every push to `main` (and on PRs, as a no-deploy build check):
 
 1. Runs each configured workspace's vitest with `--reporter=json` for **live counts**.
-2. Counts Playwright tests via `playwright test --list`.
-3. Reads **CI status** for `main` from the GitHub Actions REST API (best-effort;
-   degrades to neutral pills without a token).
-4. **Ingests journeys** from the latest successful main `e2e` run's
+2. **Ingests journeys** from the latest successful main `e2e` run's
    `journey-evidence.json` (steps + assertion text + per-browser results + video/trace),
    maps them onto the config manifest → `Journey[]`, each stamped with the run's
    provenance (run id/url, commit sha, workflow/job, timestamp, artifact sha256). A
    manifest journey with no matching run result renders **UNVERIFIED** (dashed,
    structurally incapable of a green PASS). Videos/traces are copied out as served
    files (`videos/`, `traces/`), never inlined as data: URIs.
+3. Derives the **e2e tile count** from those same ingested journeys (the verified
+   ones), so it can never contradict the cards below it — no Playwright CLI is invoked
+   at generate time. With no verified journey the tile degrades to a dash, like the
+   UNVERIFIED cards, rather than a misleading `0`.
+4. Reads **CI status** for `main` from the GitHub Actions REST API (best-effort;
+   degrades to neutral pills without a token).
 5. Fills `engine/template.html` → `dist-dashboard/index.html` + `videos/` + `traces/`.
    Each journey renders its own run video and step-synced list — there is no separate
    screenshot capture step, so the generator needs no browser and no preview server.
@@ -53,7 +56,7 @@ nothing is hand-authored.
 - `engine/model.mjs` — Journey status derivation, UNVERIFIED, loud validation.
 - `engine/ingest.mjs` — `journey-evidence.json` + manifest + provenance → `Journey[]`.
 - `engine/provenance.mjs` — run provenance from CI env + artifact sha256.
-- `engine/counts.mjs` — vitest/playwright count mechanics.
+- `engine/counts.mjs` — vitest count mechanics + the journeys→e2e-tile count (`deriveE2eCount`).
 - `engine/ci-status.mjs` — GitHub Actions API → status pills.
 - `engine/render/lib.mjs` — pure builders (tiles, bars, pills, callouts, template fill).
 - `engine/render/journeys.mjs` — the full JourneyCard (video + synced step list +

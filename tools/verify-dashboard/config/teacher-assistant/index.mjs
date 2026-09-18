@@ -29,7 +29,6 @@ export const packages = [
   { name: "@teacher-assistant/sync-relay", label: "sync-relay", sub: "service" },
 ];
 
-export const e2ePackage = "@teacher-assistant/e2e";
 export const ferpaPackage = "@teacher-assistant/ferpa-guard";
 export const enginePackage = "@teacher-assistant/domain-core";
 export const pwaPackage = "@teacher-assistant/pwa";
@@ -115,7 +114,9 @@ export function tiles(metrics) {
       label: "FERPA-guard assertions (the compliance gate)",
       variant: "pass",
     },
-    { value: metrics.e2eCount, label: "end-to-end journey checks (Playwright)" },
+    // e2eCount is null when no journey is verified (no run bound); degrade to a dash
+    // like the UNVERIFIED cards rather than showing a misleading "0".
+    { value: metrics.e2eCount ?? "—", label: "end-to-end journey checks (Playwright)" },
   ];
 }
 

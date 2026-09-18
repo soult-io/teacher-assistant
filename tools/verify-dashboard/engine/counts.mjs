@@ -7,6 +7,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { JOURNEY_STATUS } from "./model.mjs";
 
 /**
  * Reduce one package's vitest JSON report to the two figures the board shows.
@@ -60,24 +61,24 @@ export function collectPackageCounts(repoRoot, tmpDir, packages) {
 }
 
 /**
- * Count e2e tests via `playwright test --list` (no browser launched).
- * @param {string} repoRoot
- * @param {string} e2ePackage workspace name, from config
+ * Derive the e2e tile figure from the ingested journeys — the SAME source the journey
+ * cards render from, so the tile can never contradict the cards, and the generator
+ * needs no browser or Playwright CLI at generate time.
+ *
+ * A journey with any non-UNVERIFIED status (passed/failed/flaky/skipped) is bound to a
+ * real run and is counted — it is a check the run produced. UNVERIFIED journeys have no
+ * run and are not counted.
+ *
+ * Returns null when NO journey is verified (no evidence / no run bound → every card
+ * UNVERIFIED). The tile then degrades honestly to a dash, matching the cards, rather
+ * than asserting a real "0 checks ran" — loud/honest failure over a silent zero.
+ * @param {{status: string}[]} journeys
+ * @returns {number|null}
  */
-export function collectE2eCount(repoRoot, e2ePackage) {
-  try {
-    const out = execFileSync(
-      "pnpm",
-      ["--filter", e2ePackage, "exec", "playwright", "test", "--list"],
-      { cwd: repoRoot, encoding: "utf8" },
-    );
-    const match = out.match(/Total:\s+(\d+)\s+test/);
-    // A regex miss means the CLI output format changed — warn rather than silently
-    // zero the e2e tile (a CI-only degrade, so 0 not a throw, but never silent).
-    if (!match) console.warn("  counts: could not parse `playwright test --list` total; using 0");
-    return match ? Number(match[1]) : 0;
-  } catch (err) {
-    console.warn(`  counts: e2e count unavailable (${err.message}); using 0`);
-    return 0;
-  }
+export function deriveE2eCount(journeys) {
+  if (!Array.isArray(journeys)) return null;
+  const verified = journeys.filter(
+    (j) => j?.status && j.status !== JOURNEY_STATUS.UNVERIFIED,
+  ).length;
+  return verified > 0 ? verified : null;
 }
