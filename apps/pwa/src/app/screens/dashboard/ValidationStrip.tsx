@@ -54,7 +54,7 @@ export function ValidationStrip({
               const initials = initialsById.get(p.student_id) ?? "??";
               const period = periodLabelByStudent(p.student_id as OpaqueId);
               return (
-                <tr key={p.data_point_id}>
+                <tr key={p.data_point_id} data-testid="para-pending-row">
                   <td>
                     <Avatar initials={initials} small />
                   </td>
@@ -79,6 +79,7 @@ export function ValidationStrip({
                     <button
                       type="button"
                       className="btn small primary"
+                      data-testid="para-confirm"
                       aria-label={`confirm ${initials}`}
                       onClick={() => onConfirm(p)}
                     >
@@ -87,6 +88,7 @@ export function ValidationStrip({
                     <button
                       type="button"
                       className="btn small"
+                      data-testid="para-fix"
                       aria-label={`fix ${initials}`}
                       onClick={() => onFix(p)}
                     >
