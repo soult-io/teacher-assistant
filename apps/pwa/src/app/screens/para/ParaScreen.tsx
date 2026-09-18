@@ -44,7 +44,7 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
   };
 
   return (
-    <div className="para">
+    <div className="para" data-testid="para-surface">
       <div className="banner info">
         3rd period · Math 81 Resource · para: JT · scoped to this class only — no other students, no
         trends, no export.
@@ -59,7 +59,11 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
           const initials = initialsById.get(row.studentId) ?? "??";
           const pending = pendingGoalIds.has(row.goalId);
           return (
-            <div className="row" key={`${row.goalId}-${row.probeDefinitionId}`}>
+            <div
+              className="row"
+              data-testid="para-admin-row"
+              key={`${row.goalId}-${row.probeDefinitionId}`}
+            >
               <StatusChip
                 chip={pending ? STATUS_CHIPS.pending : STATUS_CHIPS.owes}
                 label={pending ? "pending" : "to score"}
@@ -77,6 +81,7 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
                   <button
                     type="button"
                     className="btn small primary"
+                    data-testid="para-score"
                     aria-label={`score ${row.administerLabel}`}
                     onClick={() =>
                       setTarget({

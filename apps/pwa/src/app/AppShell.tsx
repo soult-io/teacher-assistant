@@ -67,6 +67,7 @@ function RoleSeg({ role, onRole }: { readonly role: Role; readonly onRole: (role
     <div className="roleseg">
       <button
         type="button"
+        data-testid="role-teacher"
         className={role === "teacher" ? "on" : ""}
         aria-pressed={role === "teacher"}
         onClick={() => onRole("teacher")}
@@ -75,6 +76,7 @@ function RoleSeg({ role, onRole }: { readonly role: Role; readonly onRole: (role
       </button>
       <button
         type="button"
+        data-testid="role-para"
         className={role === "para" ? "on" : ""}
         aria-pressed={role === "para"}
         onClick={() => onRole("para")}
