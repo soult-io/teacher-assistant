@@ -87,7 +87,7 @@ function Headline({
       </div>
       <div className="three">
         <div className="stat scored">
-          <b>{header.scored}</b>
+          <b data-testid="monitoring-complete">{header.scored}</b>
           <span>scored</span>
         </div>
         <div className="stat excused">

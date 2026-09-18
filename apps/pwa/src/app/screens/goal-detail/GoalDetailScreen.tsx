@@ -254,6 +254,7 @@ function StatementCard({ statement }: { readonly statement: AutoStatement }) {
       <button
         type="button"
         className="btn small primary copybtn"
+        data-testid="copy-to-ic"
         onClick={() => copyToClipboard(statement.text)}
       >
         Copy to IC

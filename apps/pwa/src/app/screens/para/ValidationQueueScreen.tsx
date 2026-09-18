@@ -68,7 +68,7 @@ export function ValidationQueueScreen({
         queue.map((p) => {
           const initials = initialsById.get(p.student_id) ?? "??";
           return (
-            <div className="row validate" key={p.data_point_id}>
+            <div className="row validate" data-testid="para-pending-row" key={p.data_point_id}>
               <StatusChip chip={{ glyph: "⏳", className: "pending" }} label="pending" />
               <Avatar initials={initials} />
               <div className="rowmain">
@@ -85,6 +85,7 @@ export function ValidationQueueScreen({
                   <button
                     type="button"
                     className="btn small primary"
+                    data-testid="para-confirm"
                     aria-label={`confirm ${initials}`}
                     onClick={() => onConfirm(p)}
                   >
@@ -93,6 +94,7 @@ export function ValidationQueueScreen({
                   <button
                     type="button"
                     className="btn small"
+                    data-testid="para-fix"
                     aria-label={`fix ${initials}`}
                     onClick={() => onFix(p)}
                   >
