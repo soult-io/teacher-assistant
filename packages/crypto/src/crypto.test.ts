@@ -1,7 +1,9 @@
 // M0 crypto — FUNCTIONAL correctness (the primitives work). The privacy
 // hard-stops (para cannot decrypt; MK never serialised; rotation revokes;
 // opaque-ids not derived; ciphertext-only) are proven in the FERPA-guard suite
-// (tools/ferpa-guard), the dedicated hard-stop gate.
+// (tools/ferpa-guard), the dedicated hard-stop gate — except one co-located
+// negative mirror (a para keyring throws opening a master-scope record) kept here
+// too, next to the primitives it exercises; ferpa-guard holds the gating copy.
 
 import {
   asTimestamp,
@@ -24,6 +26,7 @@ import {
   generateMasterKey,
   generatePeriodKey,
   generateRecoveryCode,
+  NoKeyForScopeError,
   normalizeRecoveryCode,
   ParaKeyring,
   rotatePeriodKey,
@@ -146,6 +149,23 @@ describe("para enrollment + rotation", () => {
     expect(new TextDecoder().decode(para.decryptRecord(env, blob))).toBe("3 of 5");
     // The para keyring holds exactly one scope — its period.
     expect(para.scopes()).toEqual([period.scopeTag]);
+  });
+
+  it("a para keyring actively throws NoKeyForScopeError decrypting a master-scope record", () => {
+    // Mirror of the ferpa-guard M13 active-attempt proof: the para holds only a period
+    // DEK, so opening a teacher master-scope blob throws before any plaintext is yielded.
+    const masterScope = newScopeTag();
+    const teacher = new TeacherKeyring(masterScope, generateMasterKey());
+    const para = new ParaKeyring([generatePeriodKey(newScopeTag())]);
+    expect(para.hasScope(masterScope)).toBe(false); // fixture: the para lacks the master scope
+    const env = envelope(masterScope, "goal");
+    const blob = teacher.encryptRecord(env, utf8("goal definition — synthetic"));
+
+    let leaked: Uint8Array | undefined;
+    expect(() => {
+      leaked = para.decryptRecord(env, blob);
+    }).toThrow(NoKeyForScopeError);
+    expect(leaked).toBeUndefined();
   });
 
   it("rotatePeriodKey mints a distinct scope + key", () => {
