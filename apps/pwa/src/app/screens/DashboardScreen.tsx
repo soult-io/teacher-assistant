@@ -95,7 +95,7 @@ function Headline({
           <span>excused</span>
         </div>
         <div className="stat owe">
-          <b>{header.owe}</b>
+          <b data-testid="owe-count">{header.owe}</b>
           <span>owe</span>
         </div>
       </div>

@@ -169,6 +169,7 @@ function ScoreEntry({
             type="button"
             className="stepbtn"
             aria-label="minus"
+            data-testid="stepper-minus"
             onClick={() => setCorrect((c) => clamp(c - 1, 0, denom))}
           >
             −
@@ -185,6 +186,7 @@ function ScoreEntry({
             type="button"
             className="stepbtn"
             aria-label="plus"
+            data-testid="stepper-plus"
             onClick={() => setCorrect((c) => clamp(c + 1, 0, denom))}
           >
             +
@@ -203,7 +205,7 @@ function ScoreEntry({
             <span className="mismatch"> ⚠ assigned {target.expectedDenominator}</span>
           ) : null}
         </div>
-        <div className="pct">
+        <div className="pct" data-testid="computed-value">
           {pct}
           <small>%</small>
         </div>
@@ -241,10 +243,10 @@ function ScoreEntry({
         </div>
       ) : (
         <div className="btnrow">
-          <button type="submit" className="btn primary wide">
+          <button type="submit" className="btn primary wide" data-testid="save-score">
             Save
           </button>
-          <button type="button" className="btn wide" onClick={toNoData}>
+          <button type="button" className="btn wide" data-testid="no-data" onClick={toNoData}>
             No data
           </button>
         </div>
@@ -287,6 +289,7 @@ function NoDataEntry({
             key={r.value}
             type="button"
             className={`rchip${reason === r.value ? " on" : ""}`}
+            data-testid="reason-chip"
             aria-pressed={reason === r.value}
             onClick={() => setReason(r.value)}
           >
@@ -306,6 +309,7 @@ function NoDataEntry({
         <button
           type="button"
           className="btn primary wide"
+          data-testid="record-no-data"
           disabled={reason === null}
           onClick={() => reason !== null && onCommit(noDataMutator(contextOf(target), reason))}
         >
@@ -357,7 +361,12 @@ export function QuickScoreSheet({
       {/* biome-ignore lint/a11y/noStaticElementInteractions: decorative backdrop; Escape (above) is the keyboard control */}
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: decorative backdrop; Escape (above) is the keyboard control */}
       <div className="scrim open" onClick={onClose} />
-      <div className="sheet open" role="dialog" aria-label="score entry">
+      <div
+        className="sheet open"
+        role="dialog"
+        aria-label="score entry"
+        data-testid="quick-score-sheet"
+      >
         <div className="grip" />
         <button type="button" className="modal-close" aria-label="close" onClick={onClose}>
           ✕
