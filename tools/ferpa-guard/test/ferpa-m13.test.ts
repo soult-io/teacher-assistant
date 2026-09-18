@@ -16,7 +16,15 @@ import {
   type ParaCaptureContext,
   validateParaPoint,
 } from "@teacher-assistant/domain-core";
-import { generatePeriodKey, ParaKeyring, sodiumReady } from "@teacher-assistant/crypto";
+import {
+  generateMasterKey,
+  generatePeriodKey,
+  NoKeyForScopeError,
+  ParaKeyring,
+  sodiumReady,
+  TeacherKeyring,
+  utf8,
+} from "@teacher-assistant/crypto";
 import {
   type AccommodationSubtype,
   asTimestamp,
@@ -25,6 +33,8 @@ import {
   newScopeTag,
   type OpaqueId,
   type ParaObservation,
+  type RecordEnvelope,
+  type ScopeTag,
   type Timestamp,
 } from "@teacher-assistant/schema";
 import { buildParaVisibleProjection } from "@teacher-assistant/store";
@@ -266,6 +276,60 @@ describe("#9 — the para keyring is scoped to its period; other scopes undecryp
     expect(para.scopes()).toEqual([period3.scopeTag]);
     expect(para.hasScope(otherPeriod)).toBe(false); // cannot read another period
     expect(para.hasScope(masterGoalDefScope)).toBe(false); // cannot read goal definitions
+  });
+
+  // The two assertions above prove scope ABSENCE (hasScope === false). The two below
+  // perform the ACTIVE attempt the architect verdict called out as the one real gap:
+  // encrypt a genuine master-scope blob with the teacher keyring, then open it with the
+  // para keyring and prove the attempt THROWS NoKeyForScopeError, yielding no plaintext.
+  // Least-privilege is key possession — the para holds no master key, so the keyring's
+  // scope lookup throws before any AEAD runs. Both payloads are synthetic.
+  const masterEnvelope = (scope: ScopeTag): RecordEnvelope => ({
+    record_id: newOpaqueId(),
+    record_type: "goal", // an ENCRYPTED master-scope goal_text record
+    scope_tag: scope,
+    crdt_version: {},
+    created_ts: asTimestamp(0),
+    updated_ts: asTimestamp(0),
+    size: 0,
+    deleted: false,
+  });
+
+  it("actively throws NoKeyForScopeError when the para keyring decrypts a teacher master-scope record, yielding no plaintext", () => {
+    const masterScope = newScopeTag();
+    const teacher = new TeacherKeyring(masterScope, generateMasterKey());
+    const para = new ParaKeyring([generatePeriodKey(newScopeTag())]);
+    expect(para.hasScope(masterScope), "fixture: the para must not hold the master scope").toBe(
+      false,
+    );
+
+    const masterEnv = masterEnvelope(masterScope);
+    const masterBlob = teacher.encryptRecord(
+      masterEnv,
+      utf8("goal_text: solves two-step equations to 80% over 3 sessions"),
+    );
+
+    let leaked: Uint8Array | undefined;
+    expect(() => {
+      leaked = para.decryptRecord(masterEnv, masterBlob);
+    }, "the para keyring must not decrypt a master-scope record").toThrow(NoKeyForScopeError);
+    expect(leaked, "no plaintext bytes are yielded to the para").toBeUndefined();
+  });
+
+  it("actively throws NoKeyForScopeError when the para keyring opens a teacher master-scope sealed sync update (the CRDT path)", () => {
+    const masterScope = newScopeTag();
+    const teacher = new TeacherKeyring(masterScope, generateMasterKey());
+    const para = new ParaKeyring([generatePeriodKey(newScopeTag())]);
+    expect(para.hasScope(masterScope), "fixture: the para must not hold the master scope").toBe(
+      false,
+    );
+    const aad = utf8("opaque-doc-id"); // opaque doc-id context, bound as AEAD additional data
+
+    const sealedUpdate = teacher.sealUpdate(masterScope, aad, utf8("crdt op: set goal_text"));
+    expect(
+      () => para.openUpdate(masterScope, aad, sealedUpdate),
+      "the para keyring must not open a master-scope sync update",
+    ).toThrow(NoKeyForScopeError);
   });
 });
 
