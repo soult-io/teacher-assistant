@@ -61,7 +61,7 @@ jobs:
       # evidence. Bounding to one run keeps artifact handling to a single set.
       - name: Resolve latest main e2e run
         id: e2e
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const runs = await github.rest.actions.listWorkflowRuns({
