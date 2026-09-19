@@ -70,12 +70,23 @@ function oneRecordPerEngine(records) {
   );
 }
 
-function pickCanonical(records) {
+/**
+ * Choose the browser whose video + steps stand in for the journey. It must MATCH the
+ * card's aggregate badge, or the video could contradict the verdict — a failed card
+ * (one red engine) must not show a passing sibling's green video. So prefer a browser
+ * whose own status equals the journey's worst-wins status, chromium-first within that
+ * set; fall back to chromium-first overall. Per-browser status stays visible in chips.
+ * @param {object[]} records one per engine
+ * @param {string} journeyStatus the derived worst-wins status
+ */
+function pickCanonical(records, journeyStatus) {
+  const matching = records.filter((r) => mapTestStatus(r) === journeyStatus);
+  const pool = matching.length > 0 ? matching : records;
   for (const engine of CANONICAL_ENGINES) {
-    const hit = records.find((r) => r.project === engine);
+    const hit = pool.find((r) => r.project === engine);
     if (hit) return hit;
   }
-  return records[0];
+  return pool[0];
 }
 
 function findAttachment(record, name) {
@@ -86,8 +97,11 @@ function toSteps(record) {
   return record.steps.map((step, index) => ({
     index,
     label: step.label,
+    status: step.status ?? "passed",
     screen: null,
-    t_start_ms: null,
+    // Offset into the recording, when the reporter emitted it. Pre-3b evidence has no
+    // offset → null, and the renderer degrades to a non-seekable list (never a guess).
+    t_start_ms: typeof step.startOffsetMs === "number" ? step.startOffsetMs : null,
     thumbnail: null,
     assertions: step.assertions.map((a) => ({
       text: a.text,
@@ -112,8 +126,10 @@ function buildJourney(entry, records, product, provenance, resolveAsset) {
     engine: r.project,
     status: mapTestStatus(r),
     duration_ms: r.durationMs,
+    retries: r.retries ?? 0,
   }));
-  const canonical = pickCanonical(perEngine);
+  const status = deriveJourneyStatus(browsers);
+  const canonical = pickCanonical(perEngine, status);
   const videoAtt = findAttachment(canonical, "video");
   const traceAtt = findAttachment(canonical, "trace");
   const videoSrc = videoAtt
@@ -127,7 +143,7 @@ function buildJourney(entry, records, product, provenance, resolveAsset) {
     id: entry.id,
     name: entry.name,
     product,
-    status: deriveJourneyStatus(browsers),
+    status,
     browsers,
     duration_ms: Math.max(...browsers.map((b) => b.duration_ms ?? 0)),
     run: provenance,

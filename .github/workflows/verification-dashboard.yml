@@ -28,8 +28,8 @@ jobs:
     permissions:
       contents: read
       actions: read # the generator reads other workflows' run status via the Actions API
-    # Official Playwright image matching the lockfile version: chromium + its
-    # system libraries are baked in (same base as e2e.yml).
+    # Node 22 base matching e2e.yml. The generator ingests the e2e run's videos/traces
+    # and renders — it drives no browser itself, so no Playwright browsers are needed.
     container:
       image: mcr.microsoft.com/playwright:v1.62.0-noble
     env:
@@ -53,9 +53,6 @@ jobs:
       # both resolve to dist.
       - name: Build all workspaces
         run: pnpm -r run build
-
-      - name: Verify Playwright chromium
-        run: pnpm --filter @teacher-assistant/verify-dashboard exec playwright install chromium
 
       # Resolve the newest SUCCESSFUL e2e run on main; its artifacts are the journey
       # evidence. Bounding to one run keeps artifact handling to a single set.
