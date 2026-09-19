@@ -35,7 +35,7 @@ jobs:
     env:
       GITHUB_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
@@ -124,7 +124,7 @@ jobs:
     steps:
       # Checkout supplies the Dockerfile + nginx.conf; the generated page comes
       # from the build job's artifact.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download dashboard artifact
         uses: actions/download-artifact@v7
