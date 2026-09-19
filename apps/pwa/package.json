@@ -24,7 +24,7 @@
     "yjs": "13.6.32"
   },
   "devDependencies": {
-    "@simplewebauthn/server": "14.0.1",
+    "@simplewebauthn/server": "14.0.2",
     "@testing-library/dom": "^10.4.0",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
