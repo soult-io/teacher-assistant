@@ -3,7 +3,7 @@
 # ghcr.io/nsoult-agentic/teacher-assistant-sync-relaye stack).
 
 ## ---- build: install workspace deps, build this service + its workspace deps ----
-FROM node:22-alpine AS build
+FROM node:25-alpine AS build
 RUN npm install -g pnpm@11.17.0
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
@@ -15,7 +15,7 @@ RUN pnpm -r --filter @teacher-assistant/sync-relay... run build
 RUN pnpm deploy --legacy --filter @teacher-assistant/sync-relay --prod /prod/app
 
 ## ---- runtime: node:22-alpine, non-root, healthcheck on /health ----
-FROM node:22-alpine AS runtime
+FROM node:25-alpine AS runtime
 ENV NODE_ENV=production \
     PORT=8931 \
     SECRETS_DIR=/run/secrets
