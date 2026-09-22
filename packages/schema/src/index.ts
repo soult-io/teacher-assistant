@@ -17,6 +17,7 @@ export * from "./materials.js";
 export * from "./material-links.js";
 export * from "./material-validation.js";
 export * from "./completeness.js";
+export * from "./prompt-templates.js";
 export * from "./sync-protocol.js";
 
 /** Schema revision. Bumped as the data-model spec lands in this package. */
