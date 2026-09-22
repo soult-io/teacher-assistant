@@ -309,3 +309,67 @@ describe("M10-U2 test 6 — retire is soft (active=false), retrievable by id", (
     expect(again.revisions).toHaveLength(1);
   });
 });
+
+// M10-U3 fold-in — deferred maintainability guard (from M10-U2 / PR #59).
+//
+// mergeFields (material-store.ts) enumerates every Material field by hand. If a
+// future field is added to Material and NOT added to that enumeration, an edit
+// would silently DROP it. This round-trip guard pins the full field set: it
+// creates a material populating EVERY field (arrays multi-valued, myp_criteria
+// present), edits ONE unrelated field, and asserts every OTHER field survives
+// unchanged. A dropped field makes the whole-record comparison fail loud.
+describe("M10-U3 fold-in — editMaterial preserves the full Material field set", () => {
+  /** An input exercising EVERY facet with a distinctive, non-default value. */
+  function exhaustiveInput(): MaterialInput {
+    return {
+      // A modified_assessment support forces the conditional myp_criteria to be
+      // present (U1 §B) and accom_mod to be `modification` (U1 §A.3), so the
+      // fixture is a VALID material that still populates every optional field.
+      title: "Adapted MYP unit-test packet",
+      content: {
+        kind: "link",
+        url: "https://example.org/adapted-packet",
+        label: "Adapted packet",
+      },
+      standard_codes: ["KY.8.EE.6", "KY.8.F.2"],
+      segment_ids: [newOpaqueId(), newOpaqueId()],
+      support_types: ["adapted_practice", "modified_assessment"],
+      access_band: "foundational_bridge",
+      lesson_blocks: ["we_do", "assessment"],
+      udl_principles: ["representation", "engagement"],
+      cra_stages: ["concrete", "representational"],
+      accom_mod: "modification",
+      origin: "imported_colleague",
+      myp_criteria: ["A", "C"],
+    };
+  }
+
+  it("edits one field and preserves every other Material field", () => {
+    const store = freshStore();
+    const created = store.createMaterial(exhaustiveInput());
+
+    const edited = store.editMaterial(
+      created.material_id,
+      { title: "Renamed packet" },
+      "teacher-1",
+    );
+
+    // The edited field changed; a revision was appended.
+    expect(edited.title).toBe("Renamed packet");
+    expect(edited.revisions).toHaveLength(1);
+
+    // Every OTHER field survives the merge. Strip the edited field and the audit
+    // trail (expected to differ), then compare the whole record: if mergeFields
+    // ever drops a field, this deep-equal fails loud instead of silently losing it.
+    const { title: _createdTitle, revisions: _createdRevs, ...createdRest } = created;
+    const { title: _editedTitle, revisions: _editedRevs, ...editedRest } = edited;
+    expect(editedRest).toEqual(createdRest);
+
+    // Spot-check the fields most at risk of a silent drop (optional / multi-valued).
+    expect(edited.myp_criteria).toEqual(["A", "C"]);
+    expect(edited.segment_ids).toEqual(created.segment_ids);
+    expect(edited.material_id).toBe(created.material_id);
+    expect(edited.created_ts).toBe(created.created_ts);
+    expect(edited.active).toBe(true);
+  });
+});
