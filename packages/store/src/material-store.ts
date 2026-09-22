@@ -24,9 +24,11 @@
 
 import type { TeacherKeyring } from "@teacher-assistant/crypto";
 import {
+  type AccomMod,
   type Material,
   type MaterialConstraintViolation,
   type MaterialContent,
+  type MaterialSeed,
   type MypCriterion,
   type OpaqueId,
   type RecordEnvelope,
@@ -152,6 +154,29 @@ export class MaterialStore {
     this.#validateOrThrow(material);
     this.#persist(material, material.created_ts);
     return material;
+  }
+
+  /**
+   * Copy-on-import (M10-U7, differentiation-architecture §6): COPY a CLEARTEXT
+   * SME `MaterialSeed` into the teacher's library as a NEW ENCRYPTED `material`
+   * (`origin = imported_seed`), carrying every seed facet. Seeding is
+   * import/attach, NEVER generation — no egress, no runtime AI.
+   *
+   * The result is HER copy: a fresh `material_id` is minted (so re-importing the
+   * same seed yields a second, independent material) and subsequent edits go
+   * through `editMaterial`, never touching the shared seed. `accom_mod` is NOT a
+   * seed field (U1: the accommodation/modification posture is the teacher's SDI
+   * call at add-time, never baked into a shared cleartext catalog); the caller
+   * supplies it here and `validateMaterialConstraints` gates it against the
+   * seed's facets exactly as for any create (an invalid seed cannot import).
+   * File content stays rejected (D-ARCH-4a) — inherited from `createMaterial`.
+   */
+  importSeed(seed: MaterialSeed, accomMod: AccomMod): Material {
+    // A seed is "a material minus the SDI posture and lifecycle"; drop the
+    // catalog-only `seed_id` (provenance is the origin tag, not the id) and add
+    // the teacher's posture + origin. The remaining facets ARE MaterialInput.
+    const { seed_id: _seed_id, ...facets } = seed;
+    return this.createMaterial({ ...facets, accom_mod: accomMod, origin: "imported_seed" });
   }
 
   /** The decrypted material, or undefined if unknown. Retired materials ARE retrievable. */
