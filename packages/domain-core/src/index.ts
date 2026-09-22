@@ -48,3 +48,7 @@ export * from "./para-capture.js";
 // M10-U2 — the material library-list projection (spec architecture/m10-u2-spec.md).
 // Pure: active-only, stable order, over already-decrypted PII-free materials.
 export * from "./material-library.js";
+
+// M10-U3 — the multi-facet tag query (spec architecture/m10-u3-spec.md).
+// Pure: filter/search the library by any facet combination, same stable order.
+export * from "./material-query.js";
