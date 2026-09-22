@@ -1,6 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // DOM provides TextEncoder/TextDecoder (the material store serialises a
+    // record to UTF-8 bytes before AEAD) — standard in both browser and Node.
+    // Matches packages/crypto, the peer client-side package that made the same
+    // call. This store is client-side (the local repository); egress control is
+    // architectural (server never decrypts) + the FERPA-guard suite, not the
+    // TS lib set.
+    "lib": ["ES2022", "DOM"],
     "outDir": "dist",
     "rootDir": "src",
     "noEmit": false

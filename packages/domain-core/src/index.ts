@@ -44,3 +44,7 @@ export * from "./auto-statement.js";
 // (phase1-spec §6, field-split §1.4/§2/§3, DECISIONS D-ARCH-FERPA-M13).
 export * from "./para-administer-label.js";
 export * from "./para-capture.js";
+
+// M10-U2 — the material library-list projection (spec architecture/m10-u2-spec.md).
+// Pure: active-only, stable order, over already-decrypted PII-free materials.
+export * from "./material-library.js";

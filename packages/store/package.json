@@ -19,6 +19,7 @@
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
+    "@teacher-assistant/crypto": "workspace:*",
     "@teacher-assistant/domain-core": "workspace:*",
     "@teacher-assistant/schema": "workspace:*"
   },
