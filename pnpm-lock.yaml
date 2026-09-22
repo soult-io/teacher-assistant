@@ -180,6 +180,9 @@ importers:
 
   packages/store:
     dependencies:
+      '@teacher-assistant/crypto':
+        specifier: workspace:*
+        version: link:../crypto
       '@teacher-assistant/domain-core':
         specifier: workspace:*
         version: link:../domain-core
