@@ -30,9 +30,12 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", ".
 const schemaSrc = join(repoRoot, "packages", "schema", "src");
 
 // The PII-FREE curriculum records. NO student-identifying field may appear here.
+// `completeness.ts` (M10-U4) is the scaffold-completeness rubric reference — a
+// coverage-category config that must stay as student-free as the material records.
 const curriculumFiles = [
   join(schemaSrc, "materials.ts"),
   join(schemaSrc, "material-validation.ts"),
+  join(schemaSrc, "completeness.ts"),
 ];
 // The ONLY place the student/goal coupling is allowed to live.
 const linkFile = join(schemaSrc, "material-links.ts");
@@ -62,5 +65,6 @@ describe("FERPA (M10-U1b) — the coupling lives ONLY on the link records", () =
   it("the SME-curated reference records are CLEARTEXT and student-free", () => {
     expect(RECORD_CLASSIFICATION.material_seed).toBe("CLEARTEXT");
     expect(RECORD_CLASSIFICATION.prompt_template).toBe("CLEARTEXT");
+    expect(RECORD_CLASSIFICATION.completeness_template).toBe("CLEARTEXT");
   });
 });

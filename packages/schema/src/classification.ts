@@ -57,6 +57,9 @@ export const RECORD_TYPES = [
   // ── SME-curated differentiation reference (M10). PII-free, content-api. ──
   "material_seed",
   "prompt_template",
+  // The scaffold-completeness rubric config (M10-U4). Names required coverage
+  // CATEGORIES only — no student, no material. CLEARTEXT, like the segment catalog.
+  "completeness_template",
 ] as const;
 
 export type RecordType = (typeof RECORD_TYPES)[number];
@@ -106,6 +109,7 @@ export const RECORD_CLASSIFICATION: Readonly<Record<RecordType, Confidentiality>
   calendar_week: "CLEARTEXT",
   material_seed: "CLEARTEXT",
   prompt_template: "CLEARTEXT",
+  completeness_template: "CLEARTEXT",
 } as const;
 
 /** True iff a record of this type must be persisted only as ciphertext. */

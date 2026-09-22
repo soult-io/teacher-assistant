@@ -52,3 +52,7 @@ export * from "./material-library.js";
 // M10-U3 — the multi-facet tag query (spec architecture/m10-u3-spec.md).
 // Pure: filter/search the library by any facet combination, same stable order.
 export * from "./material-query.js";
+
+// M10-U4 — the scaffold-completeness (gap) projection (spec architecture/m10-u4-spec.md).
+// Pure: score a target's material set against a CompletenessTemplate → covered/gaps.
+export * from "./scaffold-completeness.js";
