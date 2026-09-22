@@ -19,6 +19,21 @@ export {
   MaterialNotFoundError,
 } from "./material-store.js";
 
+// M10-U5 — the material-support link store: writes/reads the two link records
+// (material→goal, material→student) that couple a material to a goal/student.
+// Both ENCRYPTED under the teacher master key, teacher-only; detach is an
+// auditable tombstone. Link `accom_mod` is validated against the material facets.
+export {
+  MaterialSupportStore,
+  type MaterialSupportStoreOptions,
+  type StoredSupportRecord,
+  type LinkConstraintRule,
+  type LinkConstraintViolation,
+  LinkConstraintError,
+  LinkMaterialNotFoundError,
+  SupportNotFoundError,
+} from "./material-support-store.js";
+
 export {
   type DashboardState,
   type DashboardRow,
