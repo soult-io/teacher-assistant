@@ -24,6 +24,8 @@ import {
   LESSON_BLOCKS,
   type Material,
   type MaterialContent,
+  type MaterialGoalSupport,
+  type MaterialStudentSupport,
   MATERIAL_ORIGINS,
   MATERIAL_SUPPORT_TYPES,
   type MaterialSupportType,
@@ -239,6 +241,64 @@ describe("M10-U1 §5 — myp_criteria iff support ∋ modified_assessment", () =
       support_types: ["reference_tool"],
     }).map((v) => v.rule);
     expect(rules).toEqual([]);
+  });
+});
+
+// ── Test group 6 — link records are surface-only: field set PINNED (§A.4/§A.5(1)) ──
+//
+// The material→goal and material→student links are SURFACE-ONLY and must be
+// structurally incapable of a data edge into the monitoring construct (spec
+// §A.4, 707 KAR 1:320 §5(7)). The link record SHAPES are the whole surface: any
+// NEW field on either record could couple it to a goal definition / criterion /
+// baseline, a probe / condition / circumstance, a denominator or
+// denominator_model, a consistency window, an IC value, or an M8 auto-statement
+// — the exact data edge §A.4 forbids. This group PINS the field set of both
+// records so any such addition trips a RED test: a runtime key-set assertion
+// (the package's Object.keys idiom) PLUS a type-level exact-key guard that also
+// catches an OPTIONAL field a runtime sample would silently omit (fails
+// `verify`/tsc at compile time). Removing a field is caught too — "exactly".
+describe("M10-U1 §A.4 — link records are surface-only (field set PINNED, no data edge)", () => {
+  const GOAL_SUPPORT_KEYS = ["support_id", "material_id", "goal_id", "accom_mod"] as const;
+  const STUDENT_SUPPORT_KEYS = ["support_id", "material_id", "student_id"] as const;
+
+  it("MaterialGoalSupport carries EXACTLY {support_id, material_id, goal_id, accom_mod}", () => {
+    const link: MaterialGoalSupport = {
+      support_id: newOpaqueId(),
+      material_id: newOpaqueId(),
+      goal_id: newOpaqueId(),
+      accom_mod: "accommodation",
+    };
+    expect(Object.keys(link).sort()).toEqual([...GOAL_SUPPORT_KEYS].sort());
+  });
+
+  it("MaterialStudentSupport carries EXACTLY {support_id, material_id, student_id}", () => {
+    const link: MaterialStudentSupport = {
+      support_id: newOpaqueId(),
+      material_id: newOpaqueId(),
+      student_id: newOpaqueId(),
+    };
+    expect(Object.keys(link).sort()).toEqual([...STUDENT_SUPPORT_KEYS].sort());
+  });
+
+  it("no field may be added to (or removed from) either link record — type-level exact-key guard", () => {
+    // `keyof T` must equal the pinned literal union in BOTH directions. Adding a
+    // field grows `keyof` and breaks the first direction; removing one breaks the
+    // second. This is a COMPILE-time guard (typecheck covers *.test.ts), so it
+    // catches an optional field that the runtime Object.keys samples above miss.
+    type ExactKeys<T, Expected extends PropertyKey> = [keyof T] extends [Expected]
+      ? [Expected] extends [keyof T]
+        ? true
+        : false
+      : false;
+
+    const goalKeysExact: ExactKeys<MaterialGoalSupport, (typeof GOAL_SUPPORT_KEYS)[number]> = true;
+    const studentKeysExact: ExactKeys<
+      MaterialStudentSupport,
+      (typeof STUDENT_SUPPORT_KEYS)[number]
+    > = true;
+
+    expect(goalKeysExact).toBe(true);
+    expect(studentKeysExact).toBe(true);
   });
 });
 
