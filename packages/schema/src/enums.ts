@@ -192,3 +192,59 @@ export const BLOCK_TYPES = [
   "fluency",
 ] as const;
 export type BlockType = Member<typeof BLOCK_TYPES>;
+
+// ── Differentiation toolkit (M10, D-ARCH-4/4a) ────────────────────────────────
+// Tag facets on a `Material` (a PII-FREE curriculum artifact). LOCKED by the two
+// SME rulings in the M10-U1 spec (§A ky-sped-lbd-sdi-sme, §B ib-myp-math-sme).
+
+/**
+ * `AccessBand` (spec §A.1) — REQUIRED on a material, no default. Describes the
+ * MATERIAL's pitch, NEVER the child (§A.5): it is never a de-facto student level
+ * or disability label and never exports into an IC/Toddle value. Ordered ladder,
+ * most→least grade-level demand. REPLACES the earlier `approaching` placeholder.
+ */
+export const ACCESS_BANDS = [
+  "on_grade",
+  "grade_level_scaffolded",
+  "foundational_bridge",
+  "access_foundational",
+] as const;
+export type AccessBand = Member<typeof ACCESS_BANDS>;
+
+/** Support facet a material provides (spec §A.2, plan §1). Multi-select. */
+export const MATERIAL_SUPPORT_TYPES = [
+  "worked_example_full",
+  "worked_example_faded",
+  "guided_notes",
+  "graphic_organizer",
+  "cra_manipulative",
+  "visual_scaffold",
+  "vocab_keyword",
+  "reference_tool",
+  "step_chunked",
+  "adapted_practice",
+  "modified_assessment",
+] as const;
+export type MaterialSupportType = Member<typeof MATERIAL_SUPPORT_TYPES>;
+
+/** Gradual-release slot a material fits (spec field table). Multi-select. */
+export const LESSON_BLOCKS = ["i_do", "we_do", "you_do", "assessment", "reference"] as const;
+export type LessonBlock = Member<typeof LESSON_BLOCKS>;
+
+/** UDL principle a material serves (plan §3). Multi-select. */
+export const UDL_PRINCIPLES = ["representation", "action_expression", "engagement"] as const;
+export type UdlPrinciple = Member<typeof UDL_PRINCIPLES>;
+
+/** CRA stage a material sits at (plan §3, concrete→representational→abstract). */
+export const CRA_STAGES = ["concrete", "representational", "abstract"] as const;
+export type CraStage = Member<typeof CRA_STAGES>;
+
+/** Provenance of a material (spec field table). Source-agnostic; no runtime AI. */
+export const MATERIAL_ORIGINS = [
+  "teacher_authored",
+  "imported_colleague",
+  "imported_arc_binder",
+  "imported_seed",
+  "purchased",
+] as const;
+export type MaterialOrigin = Member<typeof MATERIAL_ORIGINS>;

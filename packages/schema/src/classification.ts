@@ -29,6 +29,16 @@ export const RECORD_TYPES = [
   "block_goal_attach",
   "plan_week",
   "plan_day",
+  // ── Teacher-private differentiation library (M10). ENCRYPTED under the TEACHER
+  //    master key — NOT because they are student-linked (the curriculum records
+  //    are PII-free), but so the private library + its access_band pitch never
+  //    cross the Period-DEK boundary onto the para surface. The two link records
+  //    ARE the student/goal coupling (initials-only, opaque). material_plan_attach
+  //    is DEFERRED to M10-U8 (it references M9 PlanDay/Block) — NOT defined here. ──
+  "material",
+  "material_asset",
+  "material_goal_support",
+  "material_student_support",
   // ── Non-PII: may live in a server-visible envelope or a plaintext table ──
   "teacher_profile",
   "class_period",
@@ -44,6 +54,9 @@ export const RECORD_TYPES = [
   "lesson_task",
   "calendar_day",
   "calendar_week",
+  // ── SME-curated differentiation reference (M10). PII-free, content-api. ──
+  "material_seed",
+  "prompt_template",
 ] as const;
 
 export type RecordType = (typeof RECORD_TYPES)[number];
@@ -73,6 +86,10 @@ export const RECORD_CLASSIFICATION: Readonly<Record<RecordType, Confidentiality>
   block_goal_attach: "ENCRYPTED",
   plan_week: "ENCRYPTED",
   plan_day: "ENCRYPTED",
+  material: "ENCRYPTED",
+  material_asset: "ENCRYPTED",
+  material_goal_support: "ENCRYPTED",
+  material_student_support: "ENCRYPTED",
   teacher_profile: "CLEARTEXT",
   class_period: "CLEARTEXT",
   para: "CLEARTEXT",
@@ -87,6 +104,8 @@ export const RECORD_CLASSIFICATION: Readonly<Record<RecordType, Confidentiality>
   lesson_task: "CLEARTEXT",
   calendar_day: "CLEARTEXT",
   calendar_week: "CLEARTEXT",
+  material_seed: "CLEARTEXT",
+  prompt_template: "CLEARTEXT",
 } as const;
 
 /** True iff a record of this type must be persisted only as ciphertext. */
