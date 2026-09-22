@@ -13,6 +13,9 @@ export * from "./ids.js";
 export * from "./classification.js";
 export * from "./enums.js";
 export * from "./entities.js";
+export * from "./materials.js";
+export * from "./material-links.js";
+export * from "./material-validation.js";
 export * from "./sync-protocol.js";
 
 /** Schema revision. Bumped as the data-model spec lands in this package. */
