@@ -19,7 +19,7 @@ export function collectFiles(dir: string, exts: readonly string[]): string[] {
     return out; // dir absent (a service/package not yet scaffolded) — nothing to scan
   }
   for (const name of entries) {
-    if (name === "node_modules" || name === "dist" || name === "dev-dist") {
+    if (name === "node_modules" || name === "dist" || name === "dev-dist" || name === ".git") {
       continue;
     }
     const full = join(dir, name);
