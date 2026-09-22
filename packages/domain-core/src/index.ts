@@ -56,3 +56,9 @@ export * from "./material-query.js";
 // M10-U4 — the scaffold-completeness (gap) projection (spec architecture/m10-u4-spec.md).
 // Pure: score a target's material set against a CompletenessTemplate → covered/gaps.
 export * from "./scaffold-completeness.js";
+
+// M10-U5 — Goal Detail support surfacing (spec architecture/m10-u5-spec.md §3).
+// Pure, surface-only: lists the materials attached to a goal with each link's
+// operative accom_mod. Structurally incapable of a data edge — the monitoring core
+// (buildGoalDetail) neither imports nor receives supports.
+export * from "./goal-supports.js";
