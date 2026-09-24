@@ -96,6 +96,8 @@ export function makeUnverified(entry, product) {
     media_note: null,
     raw_video_url: null,
     trace_url: null,
+    steps_engine: null,
+    unshown_still_engines: [],
     steps: [],
   };
 }
@@ -104,6 +106,8 @@ export function makeUnverified(entry, product) {
  * A step's still is a served path or an explicit null (absent) — nothing in between.
  * `screenshot_truncated` says whether that still is cut off at the height cap: a
  * boolean, or null when unknown (a pre-v3 run) — and always null when there is no still.
+ * `screenshot_width`/`screenshot_height` follow the same rule: positive integers, or
+ * null when unknown or when there is no still.
  */
 function assertStepStills(id, steps) {
   for (const step of steps) {
@@ -119,6 +123,20 @@ function assertStepStills(id, steps) {
     if (!truncatedOk) {
       throw new Error(
         `journey ${id} step ${step?.index} screenshot_truncated must be ${still === null ? "null with no still" : "a boolean or null"}, got ${JSON.stringify(truncated)}`,
+      );
+    }
+    assertStillSize(id, step, still);
+  }
+}
+
+/** A still's pixel size: positive integers, or null (unknown, or no still at all). */
+function assertStillSize(id, step, still) {
+  for (const key of ["screenshot_width", "screenshot_height"]) {
+    const n = step?.[key];
+    const sizeOk = n === null || (still !== null && Number.isInteger(n) && n > 0);
+    if (!sizeOk) {
+      throw new Error(
+        `journey ${id} step ${step?.index} ${key} must be ${still === null ? "null with no still" : "a positive integer or null"}, got ${JSON.stringify(n)}`,
       );
     }
   }

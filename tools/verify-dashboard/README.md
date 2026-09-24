@@ -102,7 +102,9 @@ a `{path, contentType, width, height, truncated}` record, or `null` when there i
 Ingest maps it onto the Journey model as `steps[].screenshot` — a served
 `stills/<journey>-<engine>-<NN>.jpg` path, or `null` — and `steps[].screenshot_truncated`:
 `true`/`false` as recorded, or `null` when there is no still or the run predates the
-flag (v2):
+flag (v2); `steps[].screenshot_width`/`screenshot_height` follow the same rule. The
+journey also carries `steps_engine` (the browser its steps and stills come from) and
+`unshown_still_engines` (browsers that took stills the card cannot show):
 
 - **Absent is explicit.** A step with no still (a firefox-canonical card, a capture
   that failed, a file missing from the artifact) is `null` — never a placeholder, never
@@ -117,7 +119,30 @@ flag (v2):
 - **Flaky stays flaky.** Stills come from the final attempt, but journey status still
   comes from Playwright's `outcome`, so a retry that passed renders FLAKY.
 
-The card does not render the stills yet (TEACH-15); the Journey model carries them.
+### Step screens on the card (Phase 3c, TEACH-15)
+
+The stills are hidden until a reader asks for one; the page fetches none on load.
+
+- **Video | Screens.** With JS, a card with stills gets two views over its media
+  column, and the step list drives both. Clicking a step seeks the video in the Video
+  view and shows that step's still in the Screens view. The Screens view shows one still
+  at a time, with Prev/Next and the arrow keys, which work only while focus is in the
+  viewer. It shows the step's label and assertions, the still's size, an "open full size"
+  link, and a "truncated at capture limit" note when the still was cut off. A tall still
+  is shown at the column's width and scrolls inside a fixed-height stage. It is never
+  squashed, and stepping does not shift the layout. The stills' browser is labelled.
+- **Which view opens.** The Video view exists only when the card has a same-commit
+  walkthrough. A passed card with one opens on Video. A card without one opens on
+  Screens at step 1. A failed card opens on its failing step's still, which is the
+  screen it failed on; the failing step also gets a "View failure screen" button.
+- **No JS.** The tab row and the viewer stay hidden. Each step with a still has a
+  "Screen ↗" link ("View failure screen ↗" on the failing step) that opens the image.
+  This is a link rather than an inline image because browsers ignore `loading="lazy"`
+  when scripting is off, so an inline image would fetch every still on load.
+- **States.** A step without a still shows "no screen captured". A run with no stills
+  shows one line instead of a viewer, and names the browser that has stills when the
+  card's steps come from another browser. A flaky card names the retry its stills come
+  from. An UNVERIFIED card never renders stills.
 
 ## Layout
 
