@@ -348,6 +348,7 @@
           li: li,
           hd: hd,
           src: li.getAttribute("data-shot-src"),
+          alt: li.getAttribute("data-shot-alt"),
           w: li.getAttribute("data-shot-w"),
           h: li.getAttribute("data-shot-h"),
           trunc: li.hasAttribute("data-shot-trunc"),
@@ -372,7 +373,7 @@
         new Image().src = d.src;
       }
 
-      function caption(d, i) {
+      function caption(d) {
         cap.textContent = "";
         var hd = document.createElement("div");
         hd.className = "jcap-hd" + (d.failed ? " fail" : "");
@@ -415,7 +416,7 @@
         if (d.src) {
           if (d.w && d.h) { img.width = Number(d.w); img.height = Number(d.h); }
           else { img.removeAttribute("width"); img.removeAttribute("height"); }
-          img.alt = "Screen for step " + (i + 1) + " of " + total + ": " + d.label + (d.failed ? " (failed)" : "");
+          img.alt = d.alt;
           img.src = d.src;
           stage.appendChild(img);
           if (byUser) { warm(i - 1); warm(i + 1); }
@@ -439,7 +440,7 @@
           if (j === i) s.li.setAttribute("aria-current", "step"); else s.li.removeAttribute("aria-current");
         });
         pips.forEach(function (p, j) { p.classList.toggle("cur", j === i); });
-        caption(d, i);
+        caption(d);
       }
 
       // The step a switch to Screens opens on: the one playback highlights, else the

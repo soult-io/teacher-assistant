@@ -297,7 +297,7 @@ describe("renderJourneyCard — step screens, passed card with a walkthrough", (
   const html = renderJourneyCard(withStills, 0);
   it("puts each still's served path + size on its step, and a no-JS link that opens it", () => {
     expect(html).toContain(
-      'data-shot-src="stills/J1-chromium-00.jpg" data-shot-w="390" data-shot-h="1430"',
+      'data-shot-src="stills/J1-chromium-00.jpg" data-shot-alt="Screen for step 1 of 3: Open the dashboard" data-shot-w="390" data-shot-h="1430"',
     );
     expect(html).toContain(
       '<p class="jshot mono"><a href="stills/J1-chromium-00.jpg" target="_blank" rel="noopener" aria-label="Screen for step 1 of 3: Open the dashboard (opens the image)">Screen ↗</a> · chromium · 390×1430</p>',

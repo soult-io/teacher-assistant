@@ -12,11 +12,11 @@
 // failure) is driven by the generic client script in template.html via the data-*
 // attributes emitted here; with no JS the card is a static, readable list.
 //
-// Step screens (Phase 3c): the run's per-step stills are hidden until asked for. With
-// JS the media column gets a Video | Screens pair of views that share the step list
-// (Screens is a one-still-at-a-time viewer the client script fills on demand); with no
-// JS each step carries a link that opens its still. No still is fetched until asked for. The Video view exists only
-// when the card has a walkthrough; a failed card opens on its failing step's still.
+// Step screens (Phase 3c): no still is fetched until a reader asks for it. With JS the
+// media column gets a Video | Screens pair of views that share the step list (Screens
+// is a one-still-at-a-time viewer the client script fills on demand); with no JS each
+// step carries a link that opens its still. The Video view exists only when the card
+// has a walkthrough; a failed card opens on its failing step's still.
 
 import { JOURNEY_STATUS, MEDIA_NOTE } from "../model.mjs";
 import { escapeHtml, formatDuration } from "./lib.mjs";
@@ -147,6 +147,11 @@ function videoPane(journey, pane = "") {
         </div>`;
 }
 
+// Why the card has no walkthrough, escaped for HTML.
+function mediaNote(journey) {
+  return escapeHtml(journey.media_note ?? MEDIA_NOTE.NONE);
+}
+
 // Why a card with steps has no stills to show: none were taken, or they were taken by
 // a browser whose run is not the one the steps come from (stills are never grafted
 // onto another browser's steps).
@@ -172,7 +177,7 @@ function mediaColumn(journey, screens) {
   if (!screens) {
     const media = hasVideo
       ? videoPane(journey)
-      : `<div class="jvideo"><div class="jnovideo">${escapeHtml(journey.media_note ?? MEDIA_NOTE.NONE)}</div></div>`;
+      : `<div class="jvideo"><div class="jnovideo">${mediaNote(journey)}</div></div>`;
     const note = noStillsNote(journey);
     return note ? `<div class="jmedia">${media}${note}</div>` : media;
   }
@@ -223,7 +228,7 @@ function stepStill(step, screens) {
   if (!still) {
     return { attrs: "", body: `<p class="jnoshot-inline mono">no screen captured</p>` };
   }
-  let attrs = ` data-shot-src="${escapeHtml(still.src)}"`;
+  let attrs = ` data-shot-src="${escapeHtml(still.src)}" data-shot-alt="${escapeHtml(still.alt)}"`;
   if (still.width && still.height) {
     attrs += ` data-shot-w="${still.width}" data-shot-h="${still.height}"`;
   }
@@ -328,7 +333,7 @@ function screensMedia(journey, screens, hasVideo) {
     : `<div class="jmodes solo" hidden><span class="jsolo mono">Screens ${count}</span>${source}</div>`;
   const video = hasVideo
     ? videoPane(journey, ` id="${id}-pane-v" role="tabpanel" aria-labelledby="${id}-tab-v"`)
-    : `<p class="jmnote mono">${escapeHtml(journey.media_note ?? MEDIA_NOTE.NONE)}</p>`;
+    : `<p class="jmnote mono">${mediaNote(journey)}</p>`;
   const panel = hasVideo
     ? ` role="tabpanel" aria-labelledby="${id}-tab-s"`
     : ` role="region" aria-label="Step screens"`;
