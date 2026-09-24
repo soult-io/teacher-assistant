@@ -8,7 +8,10 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR runs supersede each other. Main runs are NOT cancelled mid-flight: each one is
+  # a commit's evidence (the gating result + its walkthrough recording), and a run
+  # cancelled after its gate passed would never become dashboard evidence.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   e2e:

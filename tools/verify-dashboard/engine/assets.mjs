@@ -125,12 +125,14 @@ function assertVideoServable(src, journeyId, engine) {
 /**
  * Map an evidence path to a file under the artifact root, or null if it escapes it.
  * The evidence path is the CI-container absolute path; locally it exists as-is, in CI
- * it must be remapped under the downloaded artifact root.
+ * it must be remapped under the downloaded artifact root. `outputDir` is the name of
+ * the run's Playwright output directory — the part of the CI path the artifact root
+ * stands in for (the gating run's `test-results`, the walkthrough's own directory).
  */
-function locateSource(rawPath, artifactRoot) {
+function locateSource(rawPath, artifactRoot, outputDir) {
   let src = rawPath;
   if (!existsSync(src)) {
-    const marker = "test-results/";
+    const marker = `${outputDir}/`;
     const idx = rawPath.indexOf(marker);
     src = idx >= 0 ? join(artifactRoot, rawPath.slice(idx + marker.length)) : rawPath;
   }
@@ -145,19 +147,25 @@ function locateSource(rawPath, artifactRoot) {
 /**
  * @param {string} evidenceFile the journey-evidence.json path; its directory is the artifact root
  * @param {string} outDir the dashboard output directory
- * @param {{budget?: ReturnType<typeof createByteBudget>}} [opts] the published-bytes
- *   budget; pass ONE budget to every resolver of a dashboard so all assets count together
+ * @param {{budget?: ReturnType<typeof createByteBudget>, outputDir?: string}} [opts]
+ *   `budget`: the published-bytes budget — pass ONE to every resolver of a dashboard so
+ *   all assets count together. `outputDir`: the run's Playwright output directory name
+ *   (default `test-results`), used to remap CI paths under the artifact root.
  * @returns {(rawPath: string, kind: "video"|"trace"|"still", journeyId: string,
  *   engine: string, index?: number) => (string|null)} null = the asset could not be
  *   located or served (the caller renders it absent)
  */
-export function makeAssetResolver(evidenceFile, outDir, { budget = createByteBudget() } = {}) {
+export function makeAssetResolver(
+  evidenceFile,
+  outDir,
+  { budget = createByteBudget(), outputDir = "test-results" } = {},
+) {
   const artifactRoot = resolve(dirname(evidenceFile));
   return (rawPath, kind, journeyId, engine, index) => {
     const spec = KINDS[kind];
     if (!spec) throw new Error(`unknown asset kind ${JSON.stringify(kind)}`);
     const name = servedName(kind, journeyId, engine, index);
-    const resolvedSrc = locateSource(rawPath, artifactRoot);
+    const resolvedSrc = locateSource(rawPath, artifactRoot, outputDir);
     if (!resolvedSrc) {
       console.warn(
         `  asset: ${kind} for ${journeyId}/${engine} resolves outside the artifact tree — skipped`,

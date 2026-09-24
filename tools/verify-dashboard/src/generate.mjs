@@ -76,12 +76,12 @@ function buildMetrics(pkgs, e2eCount) {
 // the designed degraded state (no run → every journey UNVERIFIED) and must not crash
 // — e.g. the first dashboard build before an e2e run with the reporter reaches main.
 // A CORRUPT file still fails loud downstream (parseEvidence), never a silent zero.
-function readEvidenceBytes(evidenceFile) {
+function readEvidenceBytes(evidenceFile, absentMeans = "every journey renders UNVERIFIED") {
   try {
     return readFileSync(evidenceFile);
   } catch (err) {
     if (err.code === "ENOENT") {
-      console.warn(`  no evidence at ${evidenceFile} — every journey renders UNVERIFIED`);
+      console.warn(`  no evidence at ${evidenceFile} — ${absentMeans}`);
       return null;
     }
     throw err;
@@ -98,7 +98,7 @@ function loadWalkthrough(outDir, budget) {
     return null;
   }
   const path = resolve(file);
-  const bytes = readEvidenceBytes(path);
+  const bytes = readEvidenceBytes(path, "no walkthrough: cards show no video");
   if (!bytes) return null;
   const evidence = parseWalkthroughEvidence(bytes.toString("utf8"));
   console.log(`  walkthrough evidence for commit ${evidence.commitSha ?? "(none)"}`);
@@ -108,7 +108,11 @@ function loadWalkthrough(outDir, budget) {
       ci_run_id: process.env.WALKTHROUGH_RUN_ID || null,
       ci_run_url: process.env.WALKTHROUGH_RUN_URL || null,
     },
-    resolveAsset: makeAssetResolver(path, outDir, { budget }),
+    // Matches the walkthrough project's outputDir in e2e/playwright.config.ts.
+    resolveAsset: makeAssetResolver(path, outDir, {
+      budget,
+      outputDir: "test-results-walkthrough",
+    }),
   };
 }
 

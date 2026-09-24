@@ -73,6 +73,21 @@ describe("makeAssetResolver", () => {
     );
   });
 
+  it("remaps a walkthrough run's CI path under its own artifact root", () => {
+    // The walkthrough writes under e2e/test-results-walkthrough/, which does NOT contain
+    // "test-results/" — the gating marker alone would reject every walkthrough video.
+    const wtRoot = join(root, "walkthrough-artifacts");
+    mkdirSync(join(wtRoot, "j1-walkthrough"), { recursive: true });
+    const wtEvidence = join(wtRoot, "walkthrough-evidence.json");
+    writeFileSync(wtEvidence, "{}");
+    writeFileSync(join(wtRoot, "j1-walkthrough", "video.webm"), webmOf(64));
+    const raw = "/__w/r/r/e2e/test-results-walkthrough/j1-walkthrough/video.webm";
+    const walk = makeAssetResolver(wtEvidence, out, { outputDir: "test-results-walkthrough" });
+    expect(walk(raw, "video", "J1", "walkthrough")).toBe("videos/J1-walkthrough.webm");
+    // the default (gating) marker cannot remap it — it stays out of tree and is refused
+    expect(makeAssetResolver(wtEvidence, out)(raw, "video", "J1", "walkthrough")).toBeNull();
+  });
+
   it("counts every served asset from every resolver against one published-bytes bound", () => {
     const wtRoot = join(root, "walkthrough-artifacts");
     mkdirSync(join(wtRoot, "j1"), { recursive: true });
