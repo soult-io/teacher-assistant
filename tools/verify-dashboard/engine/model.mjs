@@ -88,6 +88,18 @@ export function makeUnverified(entry, product) {
   };
 }
 
+/** A step's still is a served path or an explicit null (absent) — nothing in between. */
+function assertStepStills(id, steps) {
+  for (const step of steps) {
+    const still = step?.screenshot;
+    if (still !== null && (typeof still !== "string" || still === "")) {
+      throw new Error(
+        `journey ${id} step ${step?.index} screenshot must be a path or null, got ${JSON.stringify(still)}`,
+      );
+    }
+  }
+}
+
 /**
  * Loud validation — a malformed journey is a broken generator, not a blank card.
  * Throws with the offending id so a bug surfaces at generate time.
@@ -104,6 +116,7 @@ export function assertJourney(journey) {
   }
   if (!Array.isArray(journey.browsers)) throw new Error(`journey ${id} browsers is not an array`);
   if (!Array.isArray(journey.steps)) throw new Error(`journey ${id} steps is not an array`);
+  assertStepStills(id, journey.steps);
   // A verified (non-unverified) journey MUST be bound to a real run — a provenance
   // object of nulls is not a binding. "Provenance or nothing": no run id, no PASS.
   if (journey.status !== JOURNEY_STATUS.UNVERIFIED && !journey.run?.ci_run_id) {

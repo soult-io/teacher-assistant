@@ -30,7 +30,8 @@
 // The test.step titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
-import { expect, type Locator, type Page, test } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
+import { expect, test } from "./support/journey";
 import { goalRow, unlockToDashboard } from "./support/track";
 
 /** Open the New-Goal form from the Weekly Dashboard. */
@@ -68,6 +69,7 @@ async function fillGoalCore(
 test.describe("J5 — New goal → mandatory baseline", () => {
   test("ADOPT: baseline is truly mandatory (Save BLOCKED), method is a free choice, accom detail stays out of the IC statement", async ({
     page,
+    step,
   }) => {
     await unlockToDashboard(page);
 
@@ -77,45 +79,57 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     const BEHAVIOR = "add integers on a number line";
     const ACCOM_DETAIL = "read-aloud plus extended time";
 
-    await test.step("Open New Goal and choose the ADOPT path (an already-baselined goal → active)", async () => {
-      await openNewGoal(page);
-      await page.getByTestId("ng-path-adopt").click();
-    });
+    await step(
+      "Open New Goal and choose the ADOPT path (an already-baselined goal → active)",
+      async () => {
+        await openNewGoal(page);
+        await page.getByTestId("ng-path-adopt").click();
+      },
+    );
 
-    await test.step("Fill the 6 KY IEP components, a fixed 5-item probe, and an Accommodation with a teacher-only detail", async () => {
-      await fillGoalCore(page, {
-        initials: "AB",
-        behavior: BEHAVIOR,
-        circumstance: "given a 5-item probe and a number line",
-        accom: "accommodation",
-        accomDetail: ACCOM_DETAIL,
-      });
-    });
+    await step(
+      "Fill the 6 KY IEP components, a fixed 5-item probe, and an Accommodation with a teacher-only detail",
+      async () => {
+        await fillGoalCore(page, {
+          initials: "AB",
+          behavior: BEHAVIOR,
+          circumstance: "given a 5-item probe and a number line",
+          accom: "accommodation",
+          accomDetail: ACCOM_DETAIL,
+        });
+      },
+    );
 
-    await test.step("The monitoring method is a free choice — the goal is authored as Authentic assessment, not coerced to one default", async () => {
-      await page.getByTestId("ng-method-general").selectOption("authentic");
-      await expect(
-        page.getByTestId("ng-method-general"),
-        "the method is honored as chosen (Authentic), never silently forced to a single default",
-      ).toHaveValue("authentic");
-    });
+    await step(
+      "The monitoring method is a free choice — the goal is authored as Authentic assessment, not coerced to one default",
+      async () => {
+        await page.getByTestId("ng-method-general").selectOption("authentic");
+        await expect(
+          page.getByTestId("ng-method-general"),
+          "the method is honored as chosen (Authentic), never silently forced to a single default",
+        ).toHaveValue("authentic");
+      },
+    );
 
-    await test.step("Baseline is MANDATORY — with every other field filled but no baseline, Save is BLOCKED (disabled), not merely nagged", async () => {
-      await expect(
-        gate,
-        "the gate states the baseline-mandatory rule while the baseline is empty",
-      ).toContainText("Baseline-mandatory");
-      await expect(
-        submit,
-        "Save is disabled — the goal cannot be created until a baseline is entered",
-      ).toBeDisabled();
-      await expect(
-        page.getByRole("heading", { name: "New goal" }),
-        "the teacher is held on the New-Goal form; no goal was created",
-      ).toBeVisible();
-    });
+    await step(
+      "Baseline is MANDATORY — with every other field filled but no baseline, Save is BLOCKED (disabled), not merely nagged",
+      async () => {
+        await expect(
+          gate,
+          "the gate states the baseline-mandatory rule while the baseline is empty",
+        ).toContainText("Baseline-mandatory");
+        await expect(
+          submit,
+          "Save is disabled — the goal cannot be created until a baseline is entered",
+        ).toBeDisabled();
+        await expect(
+          page.getByRole("heading", { name: "New goal" }),
+          "the teacher is held on the New-Goal form; no goal was created",
+        ).toBeVisible();
+      },
+    );
 
-    await test.step("Enter the baseline — the gate clears and Save unblocks", async () => {
+    await step("Enter the baseline — the gate clears and Save unblocks", async () => {
       await page.getByTestId("ng-baseline").fill("20");
       await expect(gate, "the gate now confirms the goal can go active and feed IC").toContainText(
         "can go active and feed IC",
@@ -123,7 +137,7 @@ test.describe("J5 — New goal → mandatory baseline", () => {
       await expect(submit, "Save is enabled only now the baseline is present").toBeEnabled();
     });
 
-    await test.step("Save succeeds — the new goal appears active on the Weekly Dashboard", async () => {
+    await step("Save succeeds — the new goal appears active on the Weekly Dashboard", async () => {
       await submit.click();
       await expect(
         page.getByTestId("header-line"),
@@ -135,28 +149,32 @@ test.describe("J5 — New goal → mandatory baseline", () => {
       ).toBeVisible();
     });
 
-    await test.step("The teacher-only accom/mod detail is kept OUT of the draft IC statement", async () => {
-      await goalRow(page, BEHAVIOR)
-        .getByRole("button", { name: /trend and history/ })
-        .click();
-      const statement = page.getByTestId("auto-statement");
-      await expect(
-        statement,
-        "an active, baselined goal has a draft IC statement (it is IC-exportable)",
-      ).toBeVisible();
-      await expect(
-        page.getByTestId("statement-variant"),
-        "on a brand-new goal with no monitoring points the statement is INDETERMINATE — it claims no trend",
-      ).toContainText("Indeterminate");
-      await expect(
-        statement,
-        "the free-form accom/mod detail is absent from the draft IC statement — it is a teacher-only reference the statement engine never reads",
-      ).not.toContainText(ACCOM_DETAIL);
-    });
+    await step(
+      "The teacher-only accom/mod detail is kept OUT of the draft IC statement",
+      async () => {
+        await goalRow(page, BEHAVIOR)
+          .getByRole("button", { name: /trend and history/ })
+          .click();
+        const statement = page.getByTestId("auto-statement");
+        await expect(
+          statement,
+          "an active, baselined goal has a draft IC statement (it is IC-exportable)",
+        ).toBeVisible();
+        await expect(
+          page.getByTestId("statement-variant"),
+          "on a brand-new goal with no monitoring points the statement is INDETERMINATE — it claims no trend",
+        ).toContainText("Indeterminate");
+        await expect(
+          statement,
+          "the free-form accom/mod detail is absent from the draft IC statement — it is a teacher-only reference the statement engine never reads",
+        ).not.toContainText(ACCOM_DETAIL);
+      },
+    );
   });
 
   test("DRAFT: a proposed goal is unreachable by IC export & owes; its baseline is an ESTIMATE at ≥3 points; adoption makes it reachable", async ({
     page,
+    step,
   }) => {
     await unlockToDashboard(page);
 
@@ -164,127 +182,153 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     const BEHAVIOR = "count coins to one dollar";
     let oweBefore = "";
 
-    await test.step("Note the current owe-count, then draft a proposed goal (no baseline entered)", async () => {
-      oweBefore = (await oweCount.textContent())?.trim() ?? "";
-      await openNewGoal(page);
-      await page.getByTestId("ng-path-draft").click();
-      await fillGoalCore(page, {
-        initials: "ZZ",
-        behavior: BEHAVIOR,
-        circumstance: "given a 5-item probe",
-        accom: "none",
-      });
-    });
+    await step(
+      "Note the current owe-count, then draft a proposed goal (no baseline entered)",
+      async () => {
+        oweBefore = (await oweCount.textContent())?.trim() ?? "";
+        await openNewGoal(page);
+        await page.getByTestId("ng-path-draft").click();
+        await fillGoalCore(page, {
+          initials: "ZZ",
+          behavior: BEHAVIOR,
+          circumstance: "given a 5-item probe",
+          accom: "none",
+        });
+      },
+    );
 
-    await test.step("On the DRAFT path a baseline is NOT required to save — it is gathered later in the Baseline track", async () => {
-      await expect(
-        page.getByTestId("ng-submit"),
-        "a draft (proposed) goal saves without a baseline; the mandatory gate is the ADOPT-path rule",
-      ).toBeEnabled();
-      await page.getByTestId("ng-submit").click();
-      await expect(
-        page.getByRole("heading", { name: "Baseline / proposed goals" }),
-        "saving a draft routes to the segregated Baseline / proposed-goal track",
-      ).toBeVisible();
-    });
+    await step(
+      "On the DRAFT path a baseline is NOT required to save — it is gathered later in the Baseline track",
+      async () => {
+        await expect(
+          page.getByTestId("ng-submit"),
+          "a draft (proposed) goal saves without a baseline; the mandatory gate is the ADOPT-path rule",
+        ).toBeEnabled();
+        await page.getByTestId("ng-submit").click();
+        await expect(
+          page.getByRole("heading", { name: "Baseline / proposed goals" }),
+          "saving a draft routes to the segregated Baseline / proposed-goal track",
+        ).toBeVisible();
+      },
+    );
 
     const card = page.getByTestId("proposed-card").filter({ hasText: BEHAVIOR });
 
-    await test.step("The proposed goal is STRUCTURALLY unreachable by IC — no export control and no auto-statement exist for it", async () => {
-      await expect(card, "the drafted goal appears as a proposed/baseline card").toBeVisible();
-      await expect(
-        card.getByTestId("auto-statement"),
-        "a proposed goal produces NO draft IC statement",
-      ).toHaveCount(0);
-      await expect(
-        card.getByTestId("copy-to-ic"),
-        "a proposed goal has NO copy-to-IC control",
-      ).toHaveCount(0);
-      await expect(
-        card.getByTestId("copy-quarterly"),
-        "a proposed goal has NO IC quarterly-copy control",
-      ).toHaveCount(0);
-    });
+    await step(
+      "The proposed goal is STRUCTURALLY unreachable by IC — no export control and no auto-statement exist for it",
+      async () => {
+        await expect(card, "the drafted goal appears as a proposed/baseline card").toBeVisible();
+        await expect(
+          card.getByTestId("auto-statement"),
+          "a proposed goal produces NO draft IC statement",
+        ).toHaveCount(0);
+        await expect(
+          card.getByTestId("copy-to-ic"),
+          "a proposed goal has NO copy-to-IC control",
+        ).toHaveCount(0);
+        await expect(
+          card.getByTestId("copy-quarterly"),
+          "a proposed goal has NO IC quarterly-copy control",
+        ).toHaveCount(0);
+      },
+    );
 
-    await test.step("The proposed goal is ABSENT from the active dashboard — not a row, not counted in owes", async () => {
-      await page.locator("button.back").first().click();
-      await expect(page.getByTestId("header-line"), "back on the Weekly Dashboard").toBeVisible();
-      await expect(
-        oweCount,
-        "drafting a proposed goal did not change the weekly owe-count — proposed goals carry no owes",
-      ).toHaveText(oweBefore);
-      await expect(
-        goalRow(page, BEHAVIOR),
-        "the proposed goal is not present on the active weekly dashboard",
-      ).toHaveCount(0);
-      await page.getByTestId("baseline-track").click();
-      await expect(page.getByRole("heading", { name: "Baseline / proposed goals" })).toBeVisible();
-    });
+    await step(
+      "The proposed goal is ABSENT from the active dashboard — not a row, not counted in owes",
+      async () => {
+        await page.locator("button.back").first().click();
+        await expect(page.getByTestId("header-line"), "back on the Weekly Dashboard").toBeVisible();
+        await expect(
+          oweCount,
+          "drafting a proposed goal did not change the weekly owe-count — proposed goals carry no owes",
+        ).toHaveText(oweBefore);
+        await expect(
+          goalRow(page, BEHAVIOR),
+          "the proposed goal is not present on the active weekly dashboard",
+        ).toHaveCount(0);
+        await page.getByTestId("baseline-track").click();
+        await expect(
+          page.getByRole("heading", { name: "Baseline / proposed goals" }),
+        ).toBeVisible();
+      },
+    );
 
-    await test.step("Baseline is usable only at ≥3 comparable points — below that it is explicitly NOT usable", async () => {
-      await expect(
-        card.getByTestId("baseline-not-usable"),
-        "with no points the card asks for more comparable probes, not a usable baseline",
-      ).toBeVisible();
-      await addBaselinePoint(card, 3);
-      await addBaselinePoint(card, 3);
-      await expect(
-        card.getByTestId("baseline-not-usable"),
-        "at 2 comparable points the baseline is still not usable (needs ≥3)",
-      ).toContainText("more comparable probe");
-      await expect(
-        card.getByTestId("baseline-estimate"),
-        "no usable estimate is shown before the third comparable point",
-      ).toHaveCount(0);
-    });
+    await step(
+      "Baseline is usable only at ≥3 comparable points — below that it is explicitly NOT usable",
+      async () => {
+        await expect(
+          card.getByTestId("baseline-not-usable"),
+          "with no points the card asks for more comparable probes, not a usable baseline",
+        ).toBeVisible();
+        await addBaselinePoint(card, 3);
+        await addBaselinePoint(card, 3);
+        await expect(
+          card.getByTestId("baseline-not-usable"),
+          "at 2 comparable points the baseline is still not usable (needs ≥3)",
+        ).toContainText("more comparable probe");
+        await expect(
+          card.getByTestId("baseline-estimate"),
+          "no usable estimate is shown before the third comparable point",
+        ).toHaveCount(0);
+      },
+    );
 
-    await test.step("At the third comparable point the baseline becomes a usable ESTIMATE (an average, never a trend)", async () => {
-      await addBaselinePoint(card, 3);
-      const estimate = card.getByTestId("baseline-estimate");
-      await expect(
-        estimate,
-        "a usable baseline estimate appears at 3 comparable points",
-      ).toBeVisible();
-      await expect(
-        estimate,
-        "the baseline is labeled an ESTIMATE (average), not a monitoring trend value",
-      ).toContainText("baseline estimate");
-      await expect(
-        card.getByText("An ESTIMATE, not a trend"),
-        "the estimate is explicitly framed as an estimate that only locks in on ARC adoption",
-      ).toBeVisible();
-    });
+    await step(
+      "At the third comparable point the baseline becomes a usable ESTIMATE (an average, never a trend)",
+      async () => {
+        await addBaselinePoint(card, 3);
+        const estimate = card.getByTestId("baseline-estimate");
+        await expect(
+          estimate,
+          "a usable baseline estimate appears at 3 comparable points",
+        ).toBeVisible();
+        await expect(
+          estimate,
+          "the baseline is labeled an ESTIMATE (average), not a monitoring trend value",
+        ).toContainText("baseline estimate");
+        await expect(
+          card.getByText("An ESTIMATE, not a trend"),
+          "the estimate is explicitly framed as an estimate that only locks in on ARC adoption",
+        ).toBeVisible();
+      },
+    );
 
-    await test.step("ARC date is its own field — editing it moves the baseline window, and no IEP-end control is coupled to it", async () => {
-      await card.getByLabel("arc date").fill("2026-06-19");
-      await expect(
-        card,
-        "editing the ARC date sets the baseline window's ARC deadline — arc_date is an independently editable field",
-      ).toContainText("closes ARC 2026-06-19");
-      await expect(
-        card.locator('input[type="date"]'),
-        "the card exposes exactly one date control (ARC) — the IEP-end date is a separate field, not this one",
-      ).toHaveCount(1);
-    });
+    await step(
+      "ARC date is its own field — editing it moves the baseline window, and no IEP-end control is coupled to it",
+      async () => {
+        await card.getByLabel("arc date").fill("2026-06-19");
+        await expect(
+          card,
+          "editing the ARC date sets the baseline window's ARC deadline — arc_date is an independently editable field",
+        ).toContainText("closes ARC 2026-06-19");
+        await expect(
+          card.locator('input[type="date"]'),
+          "the card exposes exactly one date control (ARC) — the IEP-end date is a separate field, not this one",
+        ).toHaveCount(1);
+      },
+    );
 
-    await test.step("Adoption at ARC is what finally makes the goal reachable — it becomes a live, IC-exportable dashboard goal", async () => {
-      await card.getByTestId("adopt-button").click();
-      await expect(
-        page.getByTestId("header-line"),
-        "adoption returns to the Weekly Dashboard",
-      ).toBeVisible();
-      await expect(
-        goalRow(page, BEHAVIOR),
-        "only after ARC adoption does the goal appear as an active dashboard row",
-      ).toBeVisible();
-      await goalRow(page, BEHAVIOR)
-        .getByRole("button", { name: /trend and history/ })
-        .click();
-      await expect(
-        page.getByTestId("copy-to-ic"),
-        "the adopted goal is now IC-exportable — the copy-to-IC path that never existed while proposed is present",
-      ).toBeVisible();
-    });
+    await step(
+      "Adoption at ARC is what finally makes the goal reachable — it becomes a live, IC-exportable dashboard goal",
+      async () => {
+        await card.getByTestId("adopt-button").click();
+        await expect(
+          page.getByTestId("header-line"),
+          "adoption returns to the Weekly Dashboard",
+        ).toBeVisible();
+        await expect(
+          goalRow(page, BEHAVIOR),
+          "only after ARC adoption does the goal appear as an active dashboard row",
+        ).toBeVisible();
+        await goalRow(page, BEHAVIOR)
+          .getByRole("button", { name: /trend and history/ })
+          .click();
+        await expect(
+          page.getByTestId("copy-to-ic"),
+          "the adopted goal is now IC-exportable — the copy-to-IC path that never existed while proposed is present",
+        ).toBeVisible();
+      },
+    );
   });
 });
 

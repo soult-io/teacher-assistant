@@ -9,10 +9,11 @@
  * Phase-0 spec; for now this proves the shell renders end to end.
  */
 import { defineConfig, devices } from "@playwright/test";
+import type { StepStillsOptions } from "./tests/support/journey";
 
 const liveBaseUrl = process.env.E2E_BASE_URL;
 
-export default defineConfig({
+export default defineConfig<StepStillsOptions>({
   testDir: "./tests",
   timeout: 60_000,
   fullyParallel: false,
@@ -36,15 +37,17 @@ export default defineConfig({
     baseURL: liveBaseUrl ?? "http://127.0.0.1:4173",
     // Full trace + video on every test: these ARE the journey evidence the
     // dashboard renders, not just failure diagnostics. Screenshots stay
-    // failure-only — video + trace already cover the passing path.
+    // failure-only here — the per-step stills come from the journey `step` fixture.
     trace: "on",
     video: "on",
     screenshot: "only-on-failure",
   },
   // Cross-browser proof: every journey runs on Chromium and Firefox. Kept serial
   // (workers 1 / fullyParallel false) so evidence capture stays deterministic.
+  // Per-step stills are taken on the canonical browser (chromium) only — the
+  // dashboard shows one browser's walkthrough, so the second capture is pure cost.
   projects: [
-    { name: "chromium", use: { ...devices["Desktop Chrome"] } },
+    { name: "chromium", use: { ...devices["Desktop Chrome"], stepStills: true } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
   ],
   ...(liveBaseUrl

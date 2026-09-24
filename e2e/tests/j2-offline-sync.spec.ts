@@ -16,12 +16,13 @@
 // The test.step titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/journey";
 import { goalRow, unlockToDashboard } from "./support/track";
 
 test.describe("J2 — Offline capture → reconnect → sync", () => {
   test("score two probes with the network OFF: rows flip locally, no block/error, reconnect keeps the values", async ({
     page,
+    step,
   }) => {
     // Any uncaught exception / unhandled rejection while offline is a loud failure of the
     // "the UI never throws offline" guarantee — collect them and assert none at the end.
@@ -58,13 +59,13 @@ test.describe("J2 — Offline capture → reconnect → sync", () => {
       ).toBeHidden();
     }
 
-    await test.step("Unlock to the Weekly Dashboard — online, 2 goals owe a point", async () => {
+    await step("Unlock to the Weekly Dashboard — online, 2 goals owe a point", async () => {
       await unlockToDashboard(page);
       await expect(badge, "the status badge reads online at the start").toHaveText("⇅ online");
       await expect(oweCount, "owe-count header reads 2 before scoring").toHaveText("2");
     });
 
-    await test.step("Go offline — the badge flips to offline", async () => {
+    await step("Go offline — the badge flips to offline", async () => {
       await page.context().setOffline(true);
       await expect(
         badge,
@@ -72,75 +73,87 @@ test.describe("J2 — Offline capture → reconnect → sync", () => {
       ).toHaveText("⚡ offline · syncs later");
     });
 
-    await test.step("Score 2 probes with the network OFF — rows flip to scored immediately", async () => {
-      await scoreOffline(PROBE_1, 4, "80%");
-      await expect(
-        goalRow(page, PROBE_1).getByRole("img", { name: "scored" }),
-        "row shows 80% and flips to scored, no error, offline",
-      ).toBeVisible();
-      await expect(goalRow(page, PROBE_1), `${PROBE_1} row shows the computed 80%`).toContainText(
-        "80%",
-      );
-      await expect(oweCount, "owe-count decrements live 2 → 1 while offline").toHaveText("1");
+    await step(
+      "Score 2 probes with the network OFF — rows flip to scored immediately",
+      async () => {
+        await scoreOffline(PROBE_1, 4, "80%");
+        await expect(
+          goalRow(page, PROBE_1).getByRole("img", { name: "scored" }),
+          "row shows 80% and flips to scored, no error, offline",
+        ).toBeVisible();
+        await expect(goalRow(page, PROBE_1), `${PROBE_1} row shows the computed 80%`).toContainText(
+          "80%",
+        );
+        await expect(oweCount, "owe-count decrements live 2 → 1 while offline").toHaveText("1");
 
-      await scoreOffline(PROBE_2, 3, "60%");
-      await expect(
-        goalRow(page, PROBE_2).getByRole("img", { name: "scored" }),
-        "row shows 60% and flips to scored, no error, offline",
-      ).toBeVisible();
-      await expect(goalRow(page, PROBE_2), `${PROBE_2} row shows the computed 60%`).toContainText(
-        "60%",
-      );
-      await expect(oweCount, "owe-count decrements live 1 → 0 while offline").toHaveText("0");
-    });
+        await scoreOffline(PROBE_2, 3, "60%");
+        await expect(
+          goalRow(page, PROBE_2).getByRole("img", { name: "scored" }),
+          "row shows 60% and flips to scored, no error, offline",
+        ).toBeVisible();
+        await expect(goalRow(page, PROBE_2), `${PROBE_2} row shows the computed 60%`).toContainText(
+          "60%",
+        );
+        await expect(oweCount, "owe-count decrements live 1 → 0 while offline").toHaveText("0");
+      },
+    );
 
-    await test.step("The badge stayed offline through both entries — nothing came back online to save them", async () => {
-      await expect(
-        badge,
-        "still offline after scoring — the entries were captured with zero network",
-      ).toHaveText("⚡ offline · syncs later");
-    });
+    await step(
+      "The badge stayed offline through both entries — nothing came back online to save them",
+      async () => {
+        await expect(
+          badge,
+          "still offline after scoring — the entries were captured with zero network",
+        ).toHaveText("⚡ offline · syncs later");
+      },
+    );
 
-    await test.step("Open Goal Detail offline — the just-entered point is plotted from the local store", async () => {
-      await goalRow(page, PROBE_2)
-        .getByRole("button", { name: `trend and history ${PROBE_2}` })
-        .click();
-      const chart = page.locator("svg.trendsvg");
-      await expect(
-        chart,
-        "the trend chart renders offline — reads work with no network",
-      ).toBeVisible();
-      await expect(
-        chart.locator("circle"),
-        "6 points plot: 5 from history + the point just entered offline — read straight from local",
-      ).toHaveCount(6);
-      await page.getByRole("button", { name: "Dashboard" }).click();
-      await expect(oweCount, "back on the Weekly Dashboard").toBeVisible();
-    });
+    await step(
+      "Open Goal Detail offline — the just-entered point is plotted from the local store",
+      async () => {
+        await goalRow(page, PROBE_2)
+          .getByRole("button", { name: `trend and history ${PROBE_2}` })
+          .click();
+        const chart = page.locator("svg.trendsvg");
+        await expect(
+          chart,
+          "the trend chart renders offline — reads work with no network",
+        ).toBeVisible();
+        await expect(
+          chart.locator("circle"),
+          "6 points plot: 5 from history + the point just entered offline — read straight from local",
+        ).toHaveCount(6);
+        await page.getByRole("button", { name: "Dashboard" }).click();
+        await expect(oweCount, "back on the Weekly Dashboard").toBeVisible();
+      },
+    );
 
-    await test.step("Reconnect — the badge flips back to online", async () => {
+    await step("Reconnect — the badge flips back to online", async () => {
       await page.context().setOffline(false);
       await expect(badge, "the badge reads online again once the network returns").toHaveText(
         "⇅ online",
       );
     });
 
-    await test.step("After reconnect the entered values are unchanged — both points persisted", async () => {
-      await expect(
-        goalRow(page, PROBE_1),
-        `${PROBE_1} still reads 80% after reconnect — the value was not altered`,
-      ).toContainText("80%");
-      await expect(
-        goalRow(page, PROBE_2),
-        `${PROBE_2} still reads 60% after reconnect — the value was not altered`,
-      ).toContainText("60%");
-      await expect(
-        oweCount,
-        "both owes stayed cleared across the reconnect — nothing reverted",
-      ).toHaveText("0");
-    });
+    await step(
+      "After reconnect the entered values are unchanged — both points persisted",
+      async () => {
+        await expect(
+          goalRow(page, PROBE_1),
+          `${PROBE_1} still reads 80% after reconnect — the value was not altered`,
+        ).toContainText("80%");
+        await expect(
+          goalRow(page, PROBE_2),
+          `${PROBE_2} still reads 60% after reconnect — the value was not altered`,
+        ).toContainText("60%");
+        await expect(
+          oweCount,
+          "both owes stayed cleared across the reconnect — nothing reverted",
+        ).toHaveText("0");
+      },
+    );
 
-    await test.step("The UI never threw while offline", async () => {
+    await step("The UI never threw while offline", async () => {
       expect(pageErrors, "no uncaught errors during the offline capture + reconnect").toEqual([]);
     });
   });

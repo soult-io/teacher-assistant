@@ -6,12 +6,13 @@
 // The test.step titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "./support/journey";
 import { goalRow, unlockToDashboard } from "./support/track";
 
 test.describe("J1 — Score a probe (3-tap loop)", () => {
   test("owed goal → + → Save: computes the %, flips to scored, decrements the owe-count", async ({
     page,
+    step,
   }) => {
     await unlockToDashboard(page);
 
@@ -20,7 +21,7 @@ test.describe("J1 — Score a probe (3-tap loop)", () => {
     const sheet = page.getByTestId("quick-score-sheet");
     const computed = page.getByTestId("computed-value");
 
-    await test.step("Weekly Dashboard opens owes-first — 2 goals owe a point", async () => {
+    await step("Weekly Dashboard opens owes-first — 2 goals owe a point", async () => {
       await expect(oweCount, "owe-count header reads 2 before scoring").toHaveText("2");
       await expect(
         goalRow(page, GOAL).getByRole("img", { name: "owes" }),
@@ -28,7 +29,7 @@ test.describe("J1 — Score a probe (3-tap loop)", () => {
       ).toBeVisible();
     });
 
-    await test.step("Tap 1 of 3 — tap the owed goal row to open Quick-Score", async () => {
+    await step("Tap 1 of 3 — tap the owed goal row to open Quick-Score", async () => {
       await goalRow(page, GOAL)
         .getByRole("button", { name: `score ${GOAL}` })
         .click();
@@ -40,40 +41,48 @@ test.describe("J1 — Score a probe (3-tap loop)", () => {
       await expect(computed, "0 of 5 correct computes to 0% on open").toHaveText("0%");
     });
 
-    await test.step("Tap 2 of 3 — tap + to set 4 of 5 correct; the sheet computes 80% live", async () => {
-      const plus = page.getByTestId("stepper-plus");
-      for (let i = 0; i < 4; i++) {
-        await plus.click();
-      }
-      await expect(
-        page.getByRole("textbox", { name: "number correct" }),
-        "# correct set to 4 with the + stepper",
-      ).toHaveValue("4");
-      await expect(computed, "computed value = 80% from 4/5, never typed").toHaveText("80%");
-    });
+    await step(
+      "Tap 2 of 3 — tap + to set 4 of 5 correct; the sheet computes 80% live",
+      async () => {
+        const plus = page.getByTestId("stepper-plus");
+        for (let i = 0; i < 4; i++) {
+          await plus.click();
+        }
+        await expect(
+          page.getByRole("textbox", { name: "number correct" }),
+          "# correct set to 4 with the + stepper",
+        ).toHaveValue("4");
+        await expect(computed, "computed value = 80% from 4/5, never typed").toHaveText("80%");
+      },
+    );
 
-    await test.step("The percent is a computed display, not a typeable field", async () => {
+    await step("The percent is a computed display, not a typeable field", async () => {
       await expect(
         sheet.locator("input"),
         "the sheet has exactly two inputs — # correct and total — and no percent field to type into",
       ).toHaveCount(2);
     });
 
-    await test.step("Tap 3 of 3 — Save: the row flips ○→● scored and leaves the owes group", async () => {
-      await page.getByTestId("save-score").click();
-      await expect(sheet, "the sheet closes on Save").toBeHidden();
-      await expect(
-        goalRow(page, GOAL).getByRole("img", { name: "scored" }),
-        `${GOAL} row flipped to ● scored`,
-      ).toBeVisible();
-      await expect(
-        goalRow(page, GOAL).getByRole("img", { name: "owes" }),
-        `${GOAL} is no longer an owes row`,
-      ).toHaveCount(0);
-      await expect(goalRow(page, GOAL), `${GOAL} row shows the computed 80%`).toContainText("80%");
-    });
+    await step(
+      "Tap 3 of 3 — Save: the row flips ○→● scored and leaves the owes group",
+      async () => {
+        await page.getByTestId("save-score").click();
+        await expect(sheet, "the sheet closes on Save").toBeHidden();
+        await expect(
+          goalRow(page, GOAL).getByRole("img", { name: "scored" }),
+          `${GOAL} row flipped to ● scored`,
+        ).toBeVisible();
+        await expect(
+          goalRow(page, GOAL).getByRole("img", { name: "owes" }),
+          `${GOAL} is no longer an owes row`,
+        ).toHaveCount(0);
+        await expect(goalRow(page, GOAL), `${GOAL} row shows the computed 80%`).toContainText(
+          "80%",
+        );
+      },
+    );
 
-    await test.step("The owe-count decrements live (2 → 1)", async () => {
+    await step("The owe-count decrements live (2 → 1)", async () => {
       await expect(oweCount, "owe-count header decremented from 2 to 1 after scoring").toHaveText(
         "1",
       );

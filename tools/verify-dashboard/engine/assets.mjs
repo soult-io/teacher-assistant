@@ -1,0 +1,102 @@
+// Asset serving: copy a run artifact (video, trace, per-step still) out of the ingested
+// artifact tree to a file next to the dashboard, and return its dashboard-relative path.
+// Assets are served as files, never inlined as data: URIs. Product-agnostic: it knows
+// kinds of evidence, not what a journey is about.
+
+import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { dirname, extname, join, resolve, sep } from "node:path";
+
+/**
+ * Size cap for one still. The e2e capture already bounds resolution + JPEG quality
+ * (a still is tens of KB); a file over this cap means that contract broke, so the
+ * generator fails loud rather than serving it or quietly dropping it.
+ */
+export const MAX_STILL_BYTES = 2 * 1024 * 1024;
+
+const STILL_EXTS = new Set([".jpg", ".jpeg", ".png"]);
+
+const KINDS = {
+  video: { dir: "videos", ext: () => "webm" },
+  trace: { dir: "traces", ext: () => "zip" },
+  still: { dir: "stills", ext: (src) => (extname(src).toLowerCase() === ".png" ? "png" : "jpg") },
+};
+
+/** The served name: `<id>-<engine>` (+ `-<NN>` step index for a still), sanitised. */
+function servedName(kind, journeyId, engine, index) {
+  const safeId = journeyId.replace(/\W/g, "-");
+  const safeEngine = engine.replace(/\W/g, "-");
+  if (kind !== "still") return `${safeId}-${safeEngine}`;
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error(`still for ${journeyId}/${engine} needs a step index, got ${index}`);
+  }
+  return `${safeId}-${safeEngine}-${String(index).padStart(2, "0")}`;
+}
+
+/** A still must be a jpeg/png within the byte cap — otherwise the run broke its contract. */
+function assertStillServable(src, journeyId, engine, index) {
+  const where = `still for ${journeyId}/${engine} step ${index}`;
+  if (!STILL_EXTS.has(extname(src).toLowerCase())) {
+    throw new Error(`${where} is not a jpeg/png image: ${src}`);
+  }
+  const bytes = statSync(src).size;
+  if (bytes > MAX_STILL_BYTES) {
+    throw new Error(`${where} is ${bytes} bytes — exceeds the ${MAX_STILL_BYTES} byte cap`);
+  }
+}
+
+/**
+ * Map an evidence path to a file under the artifact root, or null if it escapes it.
+ * The evidence path is the CI-container absolute path; locally it exists as-is, in CI
+ * it must be remapped under the downloaded artifact root.
+ */
+function locateSource(rawPath, artifactRoot) {
+  let src = rawPath;
+  if (!existsSync(src)) {
+    const marker = "test-results/";
+    const idx = rawPath.indexOf(marker);
+    src = idx >= 0 ? join(artifactRoot, rawPath.slice(idx + marker.length)) : rawPath;
+  }
+  // Evidence is untrusted data: confine the copy SOURCE to the artifact tree so a path
+  // in the evidence file can never make us serve an out-of-tree file (a `../` escape
+  // or an absolute path that happens to exist). The dest name is sanitised separately.
+  const resolvedSrc = resolve(src);
+  const inside = resolvedSrc === artifactRoot || resolvedSrc.startsWith(artifactRoot + sep);
+  return inside ? resolvedSrc : null;
+}
+
+/**
+ * @param {string} evidenceFile the journey-evidence.json path; its directory is the artifact root
+ * @param {string} outDir the dashboard output directory
+ * @returns {(rawPath: string, kind: "video"|"trace"|"still", journeyId: string,
+ *   engine: string, index?: number) => (string|null)} null = the asset could not be
+ *   located or served (the caller renders it absent)
+ */
+export function makeAssetResolver(evidenceFile, outDir) {
+  const artifactRoot = resolve(dirname(evidenceFile));
+  return (rawPath, kind, journeyId, engine, index) => {
+    const spec = KINDS[kind];
+    if (!spec) throw new Error(`unknown asset kind ${JSON.stringify(kind)}`);
+    const name = servedName(kind, journeyId, engine, index);
+    const resolvedSrc = locateSource(rawPath, artifactRoot);
+    if (!resolvedSrc) {
+      console.warn(
+        `  asset: ${kind} for ${journeyId}/${engine} resolves outside the artifact tree — skipped`,
+      );
+      return null;
+    }
+    if (!existsSync(resolvedSrc)) {
+      console.warn(`  asset: ${kind} for ${journeyId}/${engine} is missing from the artifact`);
+      return null;
+    }
+    if (kind === "still") assertStillServable(resolvedSrc, journeyId, engine, index);
+    const rel = `${spec.dir}/${name}.${spec.ext(resolvedSrc)}`;
+    try {
+      mkdirSync(join(outDir, spec.dir), { recursive: true });
+      copyFileSync(resolvedSrc, join(outDir, rel));
+      return rel;
+    } catch (err) {
+      console.warn(`  asset: could not serve ${kind} for ${journeyId}/${engine}: ${err.message}`);
+      return null;
+    }
+  };
+}

@@ -25,7 +25,11 @@ import type {
   TestStep,
 } from "@playwright/test/reporter";
 
-export const EVIDENCE_SCHEMA = "journey-evidence/1";
+// v2 adds steps[].screenshot (always present: a still record, or null = no still).
+export const EVIDENCE_SCHEMA = "journey-evidence/2";
+
+/** Attachment name the journey `step` fixture (tests/support/journey.ts) gives a step's still. */
+export const STEP_STILL_ATTACHMENT = "step-still";
 
 type AssertionStatus = "passed" | "failed";
 
@@ -33,6 +37,11 @@ interface AssertionRecord {
   text: string;
   status: AssertionStatus;
   detail?: string;
+}
+
+interface StillRecord {
+  path: string;
+  contentType: string;
 }
 
 interface StepRecord {
@@ -45,6 +54,10 @@ interface StepRecord {
   startOffsetMs: number;
   status: AssertionStatus;
   assertions: AssertionRecord[];
+  // The full-page still attached at the end of this step, or null when the step has
+  // none (a non-canonical browser, or a capture that failed). Never omitted, never a
+  // placeholder: null is the explicit "no still".
+  screenshot: StillRecord | null;
 }
 
 interface AttachmentRecord {
@@ -110,6 +123,24 @@ function collectAssertions(steps: TestStep[]): AssertionRecord[] {
   return out;
 }
 
+/** The step's own still: attached by a direct child (`test.attach`), not by a nested
+ * `test.step` (that one belongs to the nested step). The last one wins — the wrapper
+ * attaches exactly one per step, at the step's end. */
+function findStill(steps: TestStep[]): StillRecord | null {
+  let still: StillRecord | null = null;
+  for (const step of steps) {
+    if (step.category === "test.step") continue;
+    for (const a of step.attachments) {
+      if (a.name === STEP_STILL_ATTACHMENT && a.path) {
+        still = { path: a.path, contentType: a.contentType };
+      }
+    }
+    const nested = findStill(step.steps);
+    if (nested) still = nested;
+  }
+  return still;
+}
+
 function collectSteps(steps: TestStep[], testStartMs: number): StepRecord[] {
   const out: StepRecord[] = [];
   for (const step of steps) {
@@ -120,6 +151,7 @@ function collectSteps(steps: TestStep[], testStartMs: number): StepRecord[] {
       startOffsetMs: Math.max(0, Math.round(step.startTime.getTime() - testStartMs)),
       status: step.error ? "failed" : "passed",
       assertions: collectAssertions(step.steps),
+      screenshot: findStill(step.steps),
     });
   }
   return out;

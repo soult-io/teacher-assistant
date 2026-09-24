@@ -13,6 +13,14 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      e2e_run_id:
+        description: >-
+          Build from this e2e run's evidence instead of the latest successful main run
+          (e.g. to render a PR's stills before merge). It must be a successful e2e.yml
+          run. Never published: the image is only pushed on a push to main.
+        required: false
+        default: ""
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -54,13 +62,40 @@ jobs:
       - name: Build all workspaces
         run: pnpm -r run build
 
-      # Resolve the newest SUCCESSFUL e2e run on main; its artifacts are the journey
-      # evidence. Bounding to one run keeps artifact handling to a single set.
-      - name: Resolve latest main e2e run
+      # Resolve the newest SUCCESSFUL e2e run on main (or the dispatch-supplied run);
+      # its artifacts are the journey evidence. Bounding to one run keeps artifact
+      # handling to a single set.
+      - name: Resolve e2e run
         id: e2e
         uses: actions/github-script@v7
+        env:
+          E2E_RUN_ID: ${{ inputs.e2e_run_id }}
         with:
           script: |
+            const pinned = (process.env.E2E_RUN_ID || "").trim();
+            if (pinned) {
+              if (!/^\d+$/.test(pinned)) {
+                core.setFailed(`e2e_run_id must be a numeric run id, got ${JSON.stringify(pinned)}`);
+                return;
+              }
+              const { data: run } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: Number(pinned),
+              });
+              // Loud, never a silent fallback to main: the operator asked for THIS run.
+              if (!run.path.endsWith(".github/workflows/e2e.yml") || run.conclusion !== "success") {
+                core.setFailed(
+                  `run ${pinned} is ${run.path} (${run.conclusion}) — need a successful e2e.yml run`,
+                );
+                return;
+              }
+              core.setOutput("run_id", String(run.id));
+              core.setOutput("head_sha", run.head_sha);
+              core.setOutput("run_url", run.html_url);
+              core.setOutput("created_at", run.created_at);
+              return;
+            }
             const runs = await github.rest.actions.listWorkflowRuns({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -79,7 +114,8 @@ jobs:
             core.setOutput("run_url", run.html_url);
             core.setOutput("created_at", run.created_at);
 
-      # Download that run's results.json + per-test videos/traces + journey-evidence.json.
+      # Download that run's results.json + per-test videos/traces/step stills +
+      # journey-evidence.json.
       # continue-on-error: a pre-reporter run has no evidence file; the generator then
       # renders every journey UNVERIFIED rather than failing (loud, never a silent pass).
       - name: Download e2e artifacts
@@ -105,7 +141,7 @@ jobs:
           SOURCE_RUN_STARTED: ${{ steps.e2e.outputs.created_at }}
         run: pnpm --filter @teacher-assistant/verify-dashboard run generate
 
-      # Hand the static output (index.html + images/) to the publish job, which
+      # Hand the static output (index.html + videos/ + traces/ + stills/) to the publish job, which
       # builds it into the nginx image outside this container (no docker-in-docker).
       - name: Upload dashboard artifact
         uses: actions/upload-artifact@v7
