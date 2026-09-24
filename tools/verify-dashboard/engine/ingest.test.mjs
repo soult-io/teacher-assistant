@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildJourneys, MEDIA_NOTE, parseEvidence, parseWalkthroughEvidence } from "./ingest.mjs";
+import { buildJourneys, parseEvidence, parseWalkthroughEvidence } from "./ingest.mjs";
+import { MEDIA_NOTE } from "./model.mjs";
 
 const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", job: "e2e" };
 // A resolver that just echoes a deterministic served path, so ingest is tested

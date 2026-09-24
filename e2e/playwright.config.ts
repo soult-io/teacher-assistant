@@ -35,13 +35,16 @@ const WALKTHROUGH_SLOWMO_MS = 300;
 // the same commit as the gating run it sits beside. Null off CI.
 const commitSha = process.env.GITHUB_SHA ?? null;
 
+/** The local vite-preview build both modes run against when no live URL is given. */
+const LOCAL_URL = "http://127.0.0.1:4173";
+
 const localServer: NonNullable<PlaywrightTestConfig["webServer"]> = {
   // Bind 127.0.0.1 explicitly: vite preview otherwise listens on
   // localhost/::1 in CI containers while Playwright polls the IPv4 URL
   // below, so the readiness check never resolves and the run times out.
   command:
     "pnpm --filter @teacher-assistant/pwa exec vite preview --host 127.0.0.1 --port 4173 --strictPort",
-  url: "http://127.0.0.1:4173",
+  url: LOCAL_URL,
   reuseExistingServer: !process.env.CI,
   timeout: 120_000,
 };
@@ -69,7 +72,7 @@ const walkthroughConfig = defineConfig<StepStillsOptions>({
     ],
   ],
   use: {
-    baseURL: "http://127.0.0.1:4173",
+    baseURL: LOCAL_URL,
     trace: "off",
     screenshot: "off",
     // Recorded at the phone viewport the journeys run in, 1:1, so the text in the
@@ -115,7 +118,7 @@ const gatingConfig = defineConfig<StepStillsOptions>({
       ]
     : [["list"]],
   use: {
-    baseURL: liveBaseUrl ?? "http://127.0.0.1:4173",
+    baseURL: liveBaseUrl ?? LOCAL_URL,
     // Full trace + video on every test: these ARE the journey evidence the
     // dashboard renders, not just failure diagnostics. Screenshots stay
     // failure-only here — the per-step stills come from the journey `step` fixture.

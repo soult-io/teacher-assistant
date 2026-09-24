@@ -8,8 +8,10 @@ import {
   assertJourney,
   deriveJourneyStatus,
   JOURNEY_STATUS,
+  MEDIA_NOTE,
   makeUnverified,
   mapTestStatus,
+  RECORDING,
 } from "./model.mjs";
 
 // Which browser's step tree + video stand in for the journey. Both browsers run the
@@ -141,13 +143,6 @@ function findAttachment(record, name) {
   return record.attachments.find((a) => a.name === name && a.path) ?? null;
 }
 
-// Why a verified card shows no video. The fast gating recording is never the fallback.
-export const MEDIA_NOTE = Object.freeze({
-  NONE: "no walkthrough recorded for this commit",
-  FAILED: "the walkthrough recording failed for this commit — not shown",
-  DIFFERS: "the walkthrough does not match this run's result or steps — not shown",
-});
-
 // Flaky is a pass that needed a retry; the walkthrough never retries, so it compares as a pass.
 const foldFlaky = (status) => (status === JOURNEY_STATUS.FLAKY ? JOURNEY_STATUS.PASSED : status);
 
@@ -189,7 +184,7 @@ function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
       src,
       poster: null,
       duration_ms: record.durationMs,
-      recording: "walkthrough",
+      recording: RECORDING.WALKTHROUGH,
       run_id: walkthrough.run.ci_run_id,
       run_url: walkthrough.run.ci_run_url,
     },

@@ -12,7 +12,7 @@
 // failure) is driven by the generic client script in template.html via the data-*
 // attributes emitted here; with no JS the card is a static, readable list.
 
-import { JOURNEY_STATUS } from "../model.mjs";
+import { JOURNEY_STATUS, MEDIA_NOTE } from "../model.mjs";
 import { escapeHtml, formatDuration } from "./lib.mjs";
 
 const BADGE = {
@@ -139,7 +139,7 @@ function videoColumn(journey) {
     return `<div class="jvideo"><div class="jnovideo unver">UNVERIFIED — no run</div></div>`;
   }
   if (!journey.video?.src) {
-    const note = journey.media_note ?? "no walkthrough recorded for this commit";
+    const note = journey.media_note ?? MEDIA_NOTE.NONE;
     return `<div class="jvideo"><div class="jnovideo">${escapeHtml(note)}</div></div>`;
   }
   const src = escapeHtml(journey.video.src);

@@ -252,9 +252,10 @@
   })();
 
   // Journey video <-> step sync (the video is the human-pace walkthrough recording;
-  // the step offsets are into that recording). Generic: reads only the data-* attributes the engine
-  // emits (data-video, data-seek, data-step, data-fail-seek). With no JS the card is a
-  // static, readable list; nothing below is required to understand a journey.
+  // the step offsets are into that recording). Generic: reads only the data-*
+  // attributes the engine emits (data-video, data-seek, data-step, data-fail-seek).
+  // With no JS the card is a static, readable list; nothing below is required to
+  // understand a journey.
   (function () {
     function num(v) { var n = Number(v); return isNaN(n) ? null : n; }
     document.querySelectorAll(".jcard").forEach(function (card) {

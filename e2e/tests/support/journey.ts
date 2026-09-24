@@ -30,9 +30,9 @@ const STILL_MAX_HEIGHT_PX = 4000;
 const STILL_JPEG_QUALITY = 70;
 
 /** Walkthrough: how long the screen stays still at the end of each step (ms). */
-export const WALKTHROUGH_STEP_HOLD_MS = 1500;
+const WALKTHROUGH_STEP_HOLD_MS = 1500;
 /** Walkthrough: delay between typed characters (ms) — a person typing, not a paste. */
-export const WALKTHROUGH_TYPE_DELAY_MS = 80;
+const WALKTHROUGH_TYPE_DELAY_MS = 80;
 
 export interface StepStillsOptions {
   /** Take a full-page still at the end of every journey step (canonical browser only). */
@@ -117,23 +117,19 @@ export const test = base.extend<StepStillsOptions & { step: JourneyStep }>({
     const step: JourneyStep = <T>(title: string, body: () => Promise<T>) =>
       base.step(title, async (): Promise<T> => {
         const stepIndex = index++;
-        if (walkthrough) {
-          try {
-            return await body();
-          } finally {
-            await holdForViewer(page);
-          }
-        }
-        if (!stepStills) return body();
+        if (!stepStills && !walkthrough) return body();
         try {
           return await body();
         } finally {
           // A failing step still gets its still: the screen it failed on is the most
           // useful evidence on a red card. The capture's own error is caught and noted,
           // so it never replaces the step's result or its real error.
-          await captureStill(page, testInfo, stepIndex).catch((captureErr: unknown) =>
-            noteMissingStill(testInfo, title, captureErr),
-          );
+          if (stepStills) {
+            await captureStill(page, testInfo, stepIndex).catch((captureErr: unknown) =>
+              noteMissingStill(testInfo, title, captureErr),
+            );
+          }
+          if (walkthrough) await holdForViewer(page);
         }
       });
     await use(step);
