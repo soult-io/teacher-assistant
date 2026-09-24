@@ -20,7 +20,16 @@ const passed = {
     generated_at: "2026-09-18T18:19:55Z",
     artifact_digest: "abcdef0123456789",
   },
-  video: { src: "videos/J1-chromium.webm", poster: null, duration_ms: 4000 },
+  video: {
+    src: "videos/J1-walkthrough.webm",
+    poster: null,
+    duration_ms: 4000,
+    recording: "walkthrough",
+    run_id: "999",
+    run_url: "https://github.com/o/r/actions/runs/999",
+  },
+  media_note: null,
+  raw_video_url: "videos/J1-chromium.webm",
   trace_url: "traces/J1-chromium.zip",
   steps: [
     {
@@ -64,9 +73,19 @@ describe("renderJourneyCard — verified pass", () => {
     expect(html).toContain("2026-09-18T18:19:55Z");
     expect(html).toContain("sha256:abcdef012345…");
   });
-  it("embeds the run video and a trace link", () => {
+  it("embeds the walkthrough video, labelled as its own recording with its run", () => {
     expect(html).toContain("data-video controls");
-    expect(html).toContain('src="videos/J1-chromium.webm"');
+    expect(html).toContain('src="videos/J1-walkthrough.webm"');
+    expect(html).toContain(
+      'class="jreclabel mono">walkthrough · <a href="https://github.com/o/r/actions/runs/999"',
+    );
+  });
+  it("keeps the fast gating video out of the media slot — a raw link beside trace.zip only", () => {
+    expect(html).not.toContain('src="videos/J1-chromium.webm"');
+    const prov = html.slice(html.indexOf("jprov"), html.indexOf("jbody"));
+    expect(prov).toContain('href="traces/J1-chromium.zip" download>trace.zip</a>');
+    expect(prov).toContain('href="videos/J1-chromium.webm"');
+    expect(prov).toContain("gating video");
   });
   it("renders a chip per browser", () => {
     expect(html).toContain('class="chip pass"');
@@ -181,6 +200,27 @@ describe("renderJourneyCard — pre-3b evidence (no step offsets)", () => {
     });
     expect(html).toContain("Open");
     expect(html).not.toContain("jrail");
+    expect(html).not.toContain("data-seek");
+  });
+});
+
+describe("renderJourneyCard — no walkthrough for this commit", () => {
+  const html = renderJourneyCard({
+    ...passed,
+    video: null,
+    media_note: "no walkthrough recorded for this commit",
+    steps: passed.steps.map((st) => ({ ...st, t_start_ms: null })),
+  });
+  it("shows a plain panel in the media slot — never the fast video", () => {
+    expect(html).toContain('<div class="jnovideo">no walkthrough recorded for this commit</div>');
+    expect(html).not.toContain("<video");
+    expect(html).not.toContain("jreclabel");
+  });
+  it("still offers the fast video as raw evidence", () => {
+    expect(html).toContain('href="videos/J1-chromium.webm"');
+  });
+  it("renders the steps without seek handles", () => {
+    expect(html).toContain("Tap Save");
     expect(html).not.toContain("data-seek");
   });
 });

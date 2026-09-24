@@ -26,7 +26,18 @@ import type {
 } from "@playwright/test/reporter";
 
 // v2 adds steps[].screenshot (always present: a still record, or null = no still).
+// Additive, still v2: optional top-level `mode` + `commitSha` (see EvidenceFile).
 export const EVIDENCE_SCHEMA = "journey-evidence/2";
+
+/** Which run produced the file: the fast gating run, or the human-pace walkthrough. */
+export type EvidenceMode = "gating" | "walkthrough";
+
+/**
+ * Annotation the journey `step` fixture adds in walkthrough mode: the ISO instant of
+ * the recording's first frame. Step offsets are measured from it, because a page's
+ * video starts at its first paint, not at test start.
+ */
+export const RECORDING_START_ANNOTATION = "recording-start";
 
 /** Attachment name the journey `step` fixture (tests/support/journey.ts) gives a step's still. */
 export const STEP_STILL_ATTACHMENT = "step-still";
@@ -47,10 +58,10 @@ interface StillRecord {
 interface StepRecord {
   label: string;
   durationMs: number;
-  // Offset of this step's start from the test's start, in ms. The video recording
-  // begins at context creation (~test start), so this doubles as the step's offset
-  // into the recording — what the dashboard uses to place scrubber markers, seek to
-  // a step, and auto-highlight the current step as the video plays.
+  // Offset of this step's start into the recording, in ms: from the recording-start
+  // annotation when the run stamped one (walkthrough), else from the test's start.
+  // The dashboard uses it to place scrubber markers, seek to a step, and
+  // auto-highlight the current step as the video plays.
   startOffsetMs: number;
   status: AssertionStatus;
   assertions: AssertionRecord[];
@@ -84,6 +95,11 @@ interface TestRecord {
 
 interface EvidenceFile {
   schema: typeof EVIDENCE_SCHEMA;
+  // The dashboard only plays a walkthrough video from a file that says it is one, and
+  // only when its commit equals the gating run's — so a stale or swapped recording
+  // can never be shown as this commit's.
+  mode: EvidenceMode;
+  commitSha: string | null;
   generatedAt: string;
   stats: {
     expected: number;
@@ -141,20 +157,27 @@ function findStill(steps: TestStep[]): StillRecord | null {
   return still;
 }
 
-function collectSteps(steps: TestStep[], testStartMs: number): StepRecord[] {
+function collectSteps(steps: TestStep[], originMs: number): StepRecord[] {
   const out: StepRecord[] = [];
   for (const step of steps) {
     if (step.category !== "test.step") continue;
     out.push({
       label: step.title,
       durationMs: Math.round(step.duration),
-      startOffsetMs: Math.max(0, Math.round(step.startTime.getTime() - testStartMs)),
+      startOffsetMs: Math.max(0, Math.round(step.startTime.getTime() - originMs)),
       status: step.error ? "failed" : "passed",
       assertions: collectAssertions(step.steps),
       screenshot: findStill(step.steps),
     });
   }
   return out;
+}
+
+/** Where step offsets are measured from: the stamped recording start, else test start. */
+function offsetOrigin(result: TestResult): number {
+  const stamp = result.annotations.find((a) => a.type === RECORDING_START_ANNOTATION);
+  const ms = stamp?.description ? Date.parse(stamp.description) : Number.NaN;
+  return Number.isNaN(ms) ? result.startTime.getTime() : ms;
 }
 
 function toRecord(test: TestCase, result: TestResult): TestRecord {
@@ -176,7 +199,7 @@ function toRecord(test: TestCase, result: TestResult): TestRecord {
     startTime: result.startTime.toISOString(),
     errors: result.errors.map((e) => cleanError(e.message)).filter(Boolean),
     attachments,
-    steps: collectSteps(result.steps, result.startTime.getTime()),
+    steps: collectSteps(result.steps, offsetOrigin(result)),
   };
 }
 
@@ -187,11 +210,17 @@ function toRecord(test: TestCase, result: TestResult): TestRecord {
  */
 export default class EvidenceReporter implements Reporter {
   private readonly outputFile: string;
+  private readonly mode: EvidenceMode;
+  private readonly commitSha: string | null;
   // Keyed by test.id → the highest-retry (final) result seen for that test.
   private readonly finals = new Map<string, { test: TestCase; result: TestResult }>();
 
-  constructor(options: { outputFile?: string } = {}) {
+  constructor(
+    options: { outputFile?: string; mode?: EvidenceMode; commitSha?: string | null } = {},
+  ) {
     this.outputFile = resolve(options.outputFile ?? "test-results/journey-evidence.json");
+    this.mode = options.mode ?? "gating";
+    this.commitSha = options.commitSha ?? null;
   }
 
   onBegin(_config: FullConfig, _suite: Suite): void {
@@ -216,6 +245,8 @@ export default class EvidenceReporter implements Reporter {
     }
     const evidence: EvidenceFile = {
       schema: EVIDENCE_SCHEMA,
+      mode: this.mode,
+      commitSha: this.commitSha,
       generatedAt: new Date().toISOString(),
       stats: {
         ...stats,

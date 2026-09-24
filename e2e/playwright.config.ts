@@ -7,13 +7,94 @@
  *
  * The convergence/offline/para suites that need the real services land with the
  * Phase-0 spec; for now this proves the shell renders end to end.
+ *
+ * WALKTHROUGH MODE (E2E_WALKTHROUGH=1): a separate, NON-gating capture that re-runs the
+ * J1–J6 journeys on chromium at human pace (slowMo per action, per-character typing, a
+ * hold at the end of every step) purely to record a video a person can watch. It
+ * writes its own evidence (walkthrough-evidence.json, for the step offsets into THIS
+ * recording) under test-results-walkthrough/, so it can never mix with the gating
+ * run's evidence. The default (gating) run below is unchanged and stays fast.
  */
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig, devices, type PlaywrightTestConfig } from "@playwright/test";
 import type { StepStillsOptions } from "./tests/support/journey";
+import { PHONE } from "./tests/support/track";
 
 const liveBaseUrl = process.env.E2E_BASE_URL;
+const walkthrough = process.env.E2E_WALKTHROUGH === "1";
 
-export default defineConfig<StepStillsOptions>({
+// The walkthrough records only the local synthetic-seed build. A live URL could serve
+// real student data into a published video, so the combination is refused outright.
+if (walkthrough && liveBaseUrl) {
+  throw new Error("E2E_WALKTHROUGH records the local synthetic build only — unset E2E_BASE_URL");
+}
+
+/** Walkthrough: pause Playwright adds before every browser action (ms). */
+const WALKTHROUGH_SLOWMO_MS = 300;
+
+// Stamped into the evidence so the dashboard can prove a walkthrough recording is of
+// the same commit as the gating run it sits beside. Null off CI.
+const commitSha = process.env.GITHUB_SHA ?? null;
+
+/** The local vite-preview build both modes run against when no live URL is given. */
+const LOCAL_URL = "http://127.0.0.1:4173";
+
+const localServer: NonNullable<PlaywrightTestConfig["webServer"]> = {
+  // Bind 127.0.0.1 explicitly: vite preview otherwise listens on
+  // localhost/::1 in CI containers while Playwright polls the IPv4 URL
+  // below, so the readiness check never resolves and the run times out.
+  command:
+    "pnpm --filter @teacher-assistant/pwa exec vite preview --host 127.0.0.1 --port 4173 --strictPort",
+  url: LOCAL_URL,
+  reuseExistingServer: !process.env.CI,
+  timeout: 120_000,
+};
+
+const walkthroughConfig = defineConfig<StepStillsOptions>({
+  testDir: "./tests",
+  // The journeys only — the smoke/layout specs have nothing to walk through.
+  testMatch: /j\d-.*\.spec\.ts$/,
+  outputDir: "./test-results-walkthrough",
+  // Human pace multiplies each journey's wall time; the gating run keeps its 60s bound.
+  timeout: 300_000,
+  fullyParallel: false,
+  workers: 1,
+  // A recording, not a gate: a retry would only record the same journey twice.
+  retries: 0,
+  reporter: [
+    [process.env.CI ? "github" : "list"],
+    [
+      "./reporters/evidence-reporter.ts",
+      {
+        outputFile: "test-results-walkthrough/walkthrough-evidence.json",
+        mode: "walkthrough",
+        commitSha,
+      },
+    ],
+  ],
+  use: {
+    baseURL: LOCAL_URL,
+    trace: "off",
+    screenshot: "off",
+    // Recorded at the phone viewport the journeys run in, 1:1, so the text in the
+    // video is the size a teacher sees it — not a phone screen shrunk into a
+    // desktop-shaped frame.
+    video: { mode: "on", size: PHONE },
+  },
+  projects: [
+    {
+      name: "walkthrough",
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: PHONE,
+        walkthrough: true,
+        launchOptions: { slowMo: WALKTHROUGH_SLOWMO_MS },
+      },
+    },
+  ],
+  webServer: localServer,
+});
+
+const gatingConfig = defineConfig<StepStillsOptions>({
   testDir: "./tests",
   timeout: 60_000,
   fullyParallel: false,
@@ -28,13 +109,16 @@ export default defineConfig<StepStillsOptions>({
   reporter: process.env.CI
     ? [
         ["github"],
-        ["./reporters/evidence-reporter.ts", { outputFile: "test-results/journey-evidence.json" }],
+        [
+          "./reporters/evidence-reporter.ts",
+          { outputFile: "test-results/journey-evidence.json", mode: "gating", commitSha },
+        ],
         ["json", { outputFile: "test-results/results.json" }],
         ["html", { open: "never" }],
       ]
     : [["list"]],
   use: {
-    baseURL: liveBaseUrl ?? "http://127.0.0.1:4173",
+    baseURL: liveBaseUrl ?? LOCAL_URL,
     // Full trace + video on every test: these ARE the journey evidence the
     // dashboard renders, not just failure diagnostics. Screenshots stay
     // failure-only here — the per-step stills come from the journey `step` fixture.
@@ -50,18 +134,7 @@ export default defineConfig<StepStillsOptions>({
     { name: "chromium", use: { ...devices["Desktop Chrome"], stepStills: true } },
     { name: "firefox", use: { ...devices["Desktop Firefox"] } },
   ],
-  ...(liveBaseUrl
-    ? {}
-    : {
-        webServer: {
-          // Bind 127.0.0.1 explicitly: vite preview otherwise listens on
-          // localhost/::1 in CI containers while Playwright polls the IPv4 URL
-          // below, so the readiness check never resolves and the run times out.
-          command:
-            "pnpm --filter @teacher-assistant/pwa exec vite preview --host 127.0.0.1 --port 4173 --strictPort",
-          url: "http://127.0.0.1:4173",
-          reuseExistingServer: !process.env.CI,
-          timeout: 120_000,
-        },
-      }),
+  ...(liveBaseUrl ? {} : { webServer: localServer }),
 });
+
+export default walkthrough ? walkthroughConfig : gatingConfig;

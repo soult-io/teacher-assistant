@@ -92,6 +92,17 @@ describe("assertJourney (loud validation)", () => {
       );
     }
   });
+  it("accepts a walkthrough recording as the card's video", () => {
+    const video = { src: "videos/J1-walkthrough.webm", recording: "walkthrough" };
+    expect(assertJourney({ ...good, video }).video).toBe(video);
+  });
+  it("rejects any other recording as the card's video (the fast one is raw evidence only)", () => {
+    for (const recording of [undefined, "gating"]) {
+      expect(() =>
+        assertJourney({ ...good, video: { src: "videos/J1-chromium.webm", recording } }),
+      ).toThrow(/must be a walkthrough recording/);
+    }
+  });
   it("rejects a missing id or name", () => {
     expect(() => assertJourney({ ...good, id: "" })).toThrow(/string id/);
     expect(() => assertJourney({ ...good, name: undefined })).toThrow(/missing a name/);

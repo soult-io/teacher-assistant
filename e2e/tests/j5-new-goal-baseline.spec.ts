@@ -31,7 +31,7 @@
 // assertions — written as human-readable evidence, verbatim.
 
 import type { Locator, Page } from "@playwright/test";
-import { expect, test } from "./support/journey";
+import { enterText, expect, test } from "./support/journey";
 import { goalRow, unlockToDashboard } from "./support/track";
 
 /** Open the New-Goal form from the Weekly Dashboard. */
@@ -52,17 +52,17 @@ async function fillGoalCore(
     readonly accomDetail?: string;
   },
 ): Promise<void> {
-  await page.getByTestId("ng-initials").fill(opts.initials);
-  await page.getByTestId("ng-behavior").fill(opts.behavior);
-  await page.getByTestId("ng-circumstance").fill(opts.circumstance);
-  await page.getByTestId("ng-level").fill("80");
-  await page.getByTestId("ng-consistency").fill("4");
-  await page.getByTestId("ng-method-tool").fill("work sample");
+  await enterText(page.getByTestId("ng-initials"), opts.initials);
+  await enterText(page.getByTestId("ng-behavior"), opts.behavior);
+  await enterText(page.getByTestId("ng-circumstance"), opts.circumstance);
+  await enterText(page.getByTestId("ng-level"), "80");
+  await enterText(page.getByTestId("ng-consistency"), "4");
+  await enterText(page.getByTestId("ng-method-tool"), "work sample");
   await page.getByTestId("ng-basis-fixed").click();
-  await page.getByTestId("ng-total").fill("5");
+  await enterText(page.getByTestId("ng-total"), "5");
   await page.getByTestId("ng-accom").selectOption(opts.accom);
   if (opts.accomDetail !== undefined) {
-    await page.getByTestId("ng-accom-detail").fill(opts.accomDetail);
+    await enterText(page.getByTestId("ng-accom-detail"), opts.accomDetail);
   }
 }
 
@@ -130,7 +130,7 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     );
 
     await step("Enter the baseline — the gate clears and Save unblocks", async () => {
-      await page.getByTestId("ng-baseline").fill("20");
+      await enterText(page.getByTestId("ng-baseline"), "20");
       await expect(gate, "the gate now confirms the goal can go active and feed IC").toContainText(
         "can go active and feed IC",
       );
@@ -296,6 +296,7 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     await step(
       "ARC date is its own field — editing it moves the baseline window, and no IEP-end control is coupled to it",
       async () => {
+        // A date input takes no typed ISO string, so it is filled in every mode.
         await card.getByLabel("arc date").fill("2026-06-19");
         await expect(
           card,
@@ -336,6 +337,6 @@ test.describe("J5 — New goal → mandatory baseline", () => {
  *  the proposed card's inline add-point row. Each point shares the goal's probe condition,
  *  so all three are comparable. */
 async function addBaselinePoint(card: Locator, correct: number): Promise<void> {
-  await card.getByLabel("baseline correct").fill(String(correct));
+  await enterText(card.getByLabel("baseline correct"), String(correct));
   await card.getByRole("button", { name: "+ Add baseline point" }).click();
 }

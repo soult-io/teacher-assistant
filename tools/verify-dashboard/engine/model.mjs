@@ -13,7 +13,17 @@ export const JOURNEY_STATUS = Object.freeze({
   UNVERIFIED: "unverified",
 });
 
+/** The only recording a card may play: the human-pace walkthrough (never the gating run's). */
+export const RECORDING = Object.freeze({ WALKTHROUGH: "walkthrough" });
+
 const KNOWN_STATUS = new Set(Object.values(JOURNEY_STATUS));
+
+// Why a verified card shows no video. The fast gating recording is never the fallback.
+export const MEDIA_NOTE = Object.freeze({
+  NONE: "no walkthrough recorded for this commit",
+  FAILED: "the walkthrough recording failed for this commit — not shown",
+  DIFFERS: "the walkthrough does not match this run's result or steps — not shown",
+});
 
 // A journey can only render a green PASS badge from a REAL, verified run. UNVERIFIED
 // is structurally excluded so decoration can never impersonate a passing test.
@@ -83,6 +93,8 @@ export function makeUnverified(entry, product) {
     duration_ms: null,
     run: null,
     video: null,
+    media_note: null,
+    raw_video_url: null,
     trace_url: null,
     steps: [],
   };
@@ -117,6 +129,11 @@ export function assertJourney(journey) {
   if (!Array.isArray(journey.browsers)) throw new Error(`journey ${id} browsers is not an array`);
   if (!Array.isArray(journey.steps)) throw new Error(`journey ${id} steps is not an array`);
   assertStepStills(id, journey.steps);
+  // The card's video is only ever the human-pace walkthrough recording — the fast
+  // gating recording is raw evidence (raw_video_url), never the card's media.
+  if (journey.video && journey.video.recording !== RECORDING.WALKTHROUGH) {
+    throw new Error(`journey ${id} video must be a walkthrough recording`);
+  }
   // A verified (non-unverified) journey MUST be bound to a real run — a provenance
   // object of nulls is not a binding. "Provenance or nothing": no run id, no PASS.
   if (journey.status !== JOURNEY_STATUS.UNVERIFIED && !journey.run?.ci_run_id) {

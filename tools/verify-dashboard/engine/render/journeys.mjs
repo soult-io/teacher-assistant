@@ -1,5 +1,6 @@
 // The full JourneyCard renderer (Phase 3b). Each journey renders as two coordinated
-// columns in one card: the embedded run video (left, sticky) with a step-marker rail,
+// columns in one card: the human-pace walkthrough video (left, sticky; Phase 3c —
+// the fast gating video is only a raw-evidence link) with a step-marker rail,
 // and the ordered step list with assertion sub-items (right). Header carries the name,
 // per-browser chips, the aggregate pass/fail badge and total duration; a mono
 // provenance bar binds the card to the exact CI run. Failure, flaky and UNVERIFIED are
@@ -11,7 +12,7 @@
 // failure) is driven by the generic client script in template.html via the data-*
 // attributes emitted here; with no JS the card is a static, readable list.
 
-import { JOURNEY_STATUS } from "../model.mjs";
+import { JOURNEY_STATUS, MEDIA_NOTE } from "../model.mjs";
 import { escapeHtml, formatDuration } from "./lib.mjs";
 
 const BADGE = {
@@ -49,7 +50,23 @@ function browserChips(browsers) {
   return `<div class="jchips">${chips}</div>`;
 }
 
-function provenanceBar(run) {
+// Raw evidence links on the provenance bar: the gating run's trace and its fast video.
+// The fast video lives here only — it is never the card's media.
+function rawEvidenceLinks(journey) {
+  const links = [];
+  if (journey.trace_url) {
+    links.push(`<a href="${escapeHtml(journey.trace_url)}" download>trace.zip</a>`);
+  }
+  if (journey.raw_video_url) {
+    links.push(
+      `<a href="${escapeHtml(journey.raw_video_url)}" target="_blank" rel="noopener" title="the gating run's own recording, at machine speed">gating video</a>`,
+    );
+  }
+  return links;
+}
+
+function provenanceBar(journey) {
+  const run = journey.run;
   if (!run) return "";
   const parts = [];
   const sha = run.commit_sha ? escapeHtml(run.commit_sha.slice(0, 7)) : "unknown";
@@ -70,6 +87,7 @@ function provenanceBar(run) {
       `<span title="sha256:${escapeHtml(run.artifact_digest)}">sha256:${escapeHtml(run.artifact_digest.slice(0, 12))}…</span>`,
     );
   }
+  parts.push(...rawEvidenceLinks(journey));
   return `<div class="jprov mono">${parts.join('<span class="sep">·</span>')}</div>`;
 }
 
@@ -100,18 +118,33 @@ function markerRail(journey) {
   return `<div class="jrail" role="presentation">${buttons}</div>`;
 }
 
-// The left column: the run video + marker rail, or a degraded placeholder. UNVERIFIED
-// and any journey without a served video show a greyed, label-only area — never a
-// video frame that could read as a passing run.
+// Names the video as its own recording — a separate human-pace run of the same commit,
+// not the gating run's capture — and links that run.
+function recordingLabel(video) {
+  const id = video.run_id ? escapeHtml(String(video.run_id)) : null;
+  const run = id
+    ? video.run_url
+      ? `<a href="${escapeHtml(video.run_url)}" target="_blank" rel="noopener">run #${id}</a>`
+      : `run #${id}`
+    : "run unknown";
+  return `<div class="jreclabel mono">walkthrough · ${run}</div>`;
+}
+
+// The left column: the walkthrough video + marker rail, or a plain panel saying why
+// there is none. UNVERIFIED and any journey without a bound walkthrough show a greyed,
+// label-only area — never the fast gating video, never a frame that could read as a
+// passing run.
 function videoColumn(journey) {
   if (journey.status === JOURNEY_STATUS.UNVERIFIED) {
     return `<div class="jvideo"><div class="jnovideo unver">UNVERIFIED — no run</div></div>`;
   }
   if (!journey.video?.src) {
-    return `<div class="jvideo"><div class="jnovideo">no video for this run</div></div>`;
+    const note = journey.media_note ?? MEDIA_NOTE.NONE;
+    return `<div class="jvideo"><div class="jnovideo">${escapeHtml(note)}</div></div>`;
   }
   const src = escapeHtml(journey.video.src);
   return `<div class="jvideo">
+          ${recordingLabel(journey.video)}
           <video class="jvid" data-video controls playsinline preload="metadata" src="${src}"></video>
           ${markerRail(journey)}
         </div>`;
@@ -183,7 +216,7 @@ export function renderJourneyCard(journey) {
             ${duration}
           </div>
         </header>
-        ${provenanceBar(journey.run)}
+        ${provenanceBar(journey)}
         <div class="jbody">
           ${videoColumn(journey)}
           ${stepColumn(journey)}

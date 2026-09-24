@@ -4,7 +4,15 @@
 
 import { basename } from "node:path";
 import { EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V1 } from "./evidence-schema.mjs";
-import { assertJourney, deriveJourneyStatus, makeUnverified, mapTestStatus } from "./model.mjs";
+import {
+  assertJourney,
+  deriveJourneyStatus,
+  JOURNEY_STATUS,
+  MEDIA_NOTE,
+  makeUnverified,
+  mapTestStatus,
+  RECORDING,
+} from "./model.mjs";
 
 // Which browser's step tree + video stand in for the journey. Both browsers run the
 // same steps, so a stable preference keeps the canonical view deterministic.
@@ -36,6 +44,22 @@ export function parseEvidence(text) {
       if (schema === EVIDENCE_SCHEMA_V1) step.screenshot = null;
       else assertStillField(step, test);
     }
+  }
+  return data;
+}
+
+/**
+ * Parse the human-pace walkthrough's evidence. Same schema as the gating file, but it
+ * must say it is a walkthrough — a gating file passed here by mistake would put the
+ * fast recording back on the card, which the walkthrough exists to replace.
+ * @param {string} text
+ */
+export function parseWalkthroughEvidence(text) {
+  const data = parseEvidence(text);
+  if (data.mode !== "walkthrough") {
+    throw new Error(
+      `walkthrough evidence has mode ${JSON.stringify(data.mode)} — expected "walkthrough"`,
+    );
   }
   return data;
 }
@@ -119,19 +143,75 @@ function findAttachment(record, name) {
   return record.attachments.find((a) => a.name === name && a.path) ?? null;
 }
 
+// Flaky is a pass that needed a retry; the walkthrough never retries, so it compares as a pass.
+const foldFlaky = (status) => (status === JOURNEY_STATUS.FLAKY ? JOURNEY_STATUS.PASSED : status);
+
+const sameLabels = (a, b) => a.length === b.length && a.every((s, i) => s.label === b[i].label);
+
+/**
+ * Bind the journey to its human-pace walkthrough recording, or say why not. The
+ * walkthrough is only shown when it is provably of the same commit as the gating run,
+ * agrees with the card's verdict, and walked the same steps — so its step offsets
+ * line up with the list beside it. Anything else → no video and a note; the fast
+ * gating recording is never substituted.
+ * @param {object} entry manifest entry
+ * @param {object} canonical the gating record the card's steps come from
+ * @param {string} status the journey's derived status
+ * @param {object} provenance the gating run's provenance
+ * @param {{evidence: object, run: {ci_run_id: string|null, ci_run_url: string|null},
+ *   resolveAsset: Function}|null} walkthrough
+ * @returns {{video: object|null, offsets: (number|null)[]|null, note: string|null}}
+ */
+function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
+  const none = (note) => ({ video: null, offsets: null, note });
+  if (!walkthrough) return none(MEDIA_NOTE.NONE);
+  const sha = walkthrough.evidence.commitSha;
+  if (!sha || sha !== provenance.commit_sha) return none(MEDIA_NOTE.NONE);
+  const matched = matchRecords(walkthrough.evidence.tests, entry);
+  if (matched.length === 0) return none(MEDIA_NOTE.NONE);
+  assertSingleTest(entry, matched);
+  const record = matched[0];
+  const walkStatus = mapTestStatus(record);
+  if (walkStatus !== foldFlaky(status)) {
+    return none(walkStatus === JOURNEY_STATUS.FAILED ? MEDIA_NOTE.FAILED : MEDIA_NOTE.DIFFERS);
+  }
+  if (!sameLabels(record.steps, canonical.steps)) return none(MEDIA_NOTE.DIFFERS);
+  const att = findAttachment(record, "video");
+  const src = att ? walkthrough.resolveAsset(att.path, "video", entry.id, record.project) : null;
+  if (!src) return none(MEDIA_NOTE.NONE);
+  return {
+    video: {
+      src,
+      poster: null,
+      duration_ms: record.durationMs,
+      recording: RECORDING.WALKTHROUGH,
+      run_id: walkthrough.run.ci_run_id,
+      run_url: walkthrough.run.ci_run_url,
+    },
+    // Offsets into THIS recording, where the reporter emitted them (pre-3b: null).
+    offsets: record.steps.map((s) =>
+      typeof s.startOffsetMs === "number" ? s.startOffsetMs : null,
+    ),
+    note: null,
+  };
+}
+
 /**
  * @param {object} record the canonical browser's test record
  * @param {(stillPath: string, index: number) => (string|null)} resolveStill
+ * @param {(number|null)[]|null} offsets each step's offset into the card's video (the
+ *   walkthrough), or null when the card has no video
  */
-function toSteps(record, resolveStill) {
+function toSteps(record, resolveStill, offsets) {
   return record.steps.map((step, index) => ({
     index,
     label: step.label,
     status: step.status ?? "passed",
     screen: null,
-    // Offset into the recording, when the reporter emitted it. Pre-3b evidence has no
-    // offset → null, and the renderer degrades to a non-seekable list (never a guess).
-    t_start_ms: typeof step.startOffsetMs === "number" ? step.startOffsetMs : null,
+    // Offset into the card's video (the walkthrough recording). No video → null, and
+    // the renderer degrades to a non-seekable list (never a guess, never an offset
+    // into a recording that is not on the card).
+    t_start_ms: offsets?.[index] ?? null,
     thumbnail: null,
     // The still the run took at the end of this step, as a served path — or null when
     // that browser took none (stills come from the canonical browser's own record, so
@@ -153,8 +233,9 @@ function toSteps(record, resolveStill) {
  * @param {string} product
  * @param {object} provenance shared run provenance
  * @param {(rawPath:string, kind:string, journeyId:string, engine:string, index?:number)=>(string|null)} resolveAsset
+ * @param {object|null} walkthrough see bindWalkthrough
  */
-function buildJourney(entry, records, product, provenance, resolveAsset) {
+function buildJourney(entry, records, product, provenance, resolveAsset, walkthrough) {
   assertSingleTest(entry, records);
   const perEngine = oneRecordPerEngine(records);
   const browsers = perEngine.map((r) => ({
@@ -167,12 +248,15 @@ function buildJourney(entry, records, product, provenance, resolveAsset) {
   const canonical = pickCanonical(perEngine, status);
   const videoAtt = findAttachment(canonical, "video");
   const traceAtt = findAttachment(canonical, "trace");
-  const videoSrc = videoAtt
+  // The fast gating recording is raw evidence only (a link beside trace.zip), never
+  // the card's video — at machine pace it cannot be watched.
+  const rawVideoUrl = videoAtt
     ? resolveAsset(videoAtt.path, "video", entry.id, canonical.project)
     : null;
   const traceUrl = traceAtt
     ? resolveAsset(traceAtt.path, "trace", entry.id, canonical.project)
     : null;
+  const media = bindWalkthrough(entry, canonical, status, provenance, walkthrough);
 
   return {
     id: entry.id,
@@ -182,10 +266,14 @@ function buildJourney(entry, records, product, provenance, resolveAsset) {
     browsers,
     duration_ms: Math.max(...browsers.map((b) => b.duration_ms ?? 0)),
     run: provenance,
-    video: videoSrc ? { src: videoSrc, poster: null, duration_ms: canonical.durationMs } : null,
+    video: media.video,
+    media_note: media.note,
+    raw_video_url: rawVideoUrl,
     trace_url: traceUrl,
-    steps: toSteps(canonical, (stillPath, index) =>
-      resolveAsset(stillPath, "still", entry.id, canonical.project, index),
+    steps: toSteps(
+      canonical,
+      (stillPath, index) => resolveAsset(stillPath, "still", entry.id, canonical.project, index),
+      media.offsets,
     ),
   };
 }
@@ -194,10 +282,20 @@ function buildJourney(entry, records, product, provenance, resolveAsset) {
  * Map the manifest (in order) onto the evidence records → Journey[]. A manifest
  * entry with no matching record renders UNVERIFIED. `resolveAsset` maps a raw CI
  * attachment path to a served path (injected so ingest stays I/O-free + testable).
+ * `walkthrough` (optional) is the human-pace recording run — {evidence, run,
+ * resolveAsset} — whose videos become the cards' videos where they bind (see
+ * bindWalkthrough).
  * @param {{evidence: object, manifest: object[], product: string, provenance: object,
- *   resolveAsset?: Function}} args
+ *   resolveAsset?: Function, walkthrough?: object|null}} args
  */
-export function buildJourneys({ evidence, manifest, product, provenance, resolveAsset }) {
+export function buildJourneys({
+  evidence,
+  manifest,
+  product,
+  provenance,
+  resolveAsset,
+  walkthrough = null,
+}) {
   const resolve = resolveAsset ?? (() => null);
   // With no real run id there is nothing to bind a PASS to, so no journey can be
   // verified regardless of the evidence present ("provenance or nothing").
@@ -208,7 +306,7 @@ export function buildJourneys({ evidence, manifest, product, provenance, resolve
     const journey =
       matched.length === 0
         ? makeUnverified(entry, product)
-        : buildJourney(entry, matched, product, provenance, resolve);
+        : buildJourney(entry, matched, product, provenance, resolve, walkthrough);
     return assertJourney(journey);
   });
 }

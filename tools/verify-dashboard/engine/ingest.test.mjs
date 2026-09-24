@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildJourneys, parseEvidence } from "./ingest.mjs";
+import { buildJourneys, parseEvidence, parseWalkthroughEvidence } from "./ingest.mjs";
+import { MEDIA_NOTE } from "./model.mjs";
 
 const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", job: "e2e" };
 // A resolver that just echoes a deterministic served path, so ingest is tested
@@ -110,8 +111,11 @@ describe("buildJourneys", () => {
     ]);
     expect(j1.duration_ms).toBe(720); // max across browsers
     expect(j1.run).toBe(PROVENANCE);
-    // canonical = chromium; video/trace resolved to served paths
-    expect(j1.video).toEqual({ src: "video/J1-chromium.bin", poster: null, duration_ms: 600 });
+    // canonical = chromium; its fast video + trace are served as raw evidence only —
+    // with no walkthrough the card has NO video (never the fast one).
+    expect(j1.raw_video_url).toBe("video/J1-chromium.bin");
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe("no walkthrough recorded for this commit");
     expect(j1.trace_url).toBe("trace/J1-chromium.bin");
     expect(j1.steps).toHaveLength(1);
     expect(j1.steps[0]).toMatchObject({
@@ -122,7 +126,7 @@ describe("buildJourneys", () => {
     });
   });
 
-  it("carries step status + time offset + assertion actual through ingest", () => {
+  it("carries step status + assertion actual through ingest; no walkthrough → no offset", () => {
     const evidence = {
       schema: "journey-evidence/1",
       tests: [
@@ -147,10 +151,12 @@ describe("buildJourneys", () => {
       provenance: PROVENANCE,
       resolveAsset: echoResolver,
     });
+    // 1400 is an offset into the FAST recording, which is not on the card — so the step
+    // carries no seek offset.
     expect(j1.steps[0]).toMatchObject({
       label: "Submit the score",
       status: "failed",
-      t_start_ms: 1400,
+      t_start_ms: null,
       screen: null,
       assertions: [{ text: "saved toast shows", status: "failed", actual: "expected visible" }],
     });
@@ -242,7 +248,7 @@ describe("buildJourneys", () => {
       resolveAsset: echoResolver,
     });
     expect(j1.status).toBe("failed");
-    expect(j1.video.src).toBe("video/J1-firefox.bin");
+    expect(j1.raw_video_url).toBe("video/J1-firefox.bin");
     expect(j1.trace_url).toBe("trace/J1-firefox.bin");
     expect(j1.steps[0].label).toBe("firefox broke here");
     expect(j1.steps[0].status).toBe("failed");
@@ -261,7 +267,7 @@ describe("buildJourneys", () => {
       resolveAsset: echoResolver,
     });
     expect(j1.status).toBe("passed");
-    expect(j1.video.src).toBe("video/J1-chromium.bin");
+    expect(j1.raw_video_url).toBe("video/J1-chromium.bin");
   });
 
   it("disambiguates two tests in one file by title", () => {
@@ -453,5 +459,148 @@ describe("buildJourneys", () => {
     });
     expect(j1.video).toBeNull();
     expect(j1.trace_url).toBeNull();
+  });
+});
+
+describe("parseWalkthroughEvidence", () => {
+  it("accepts a file that says it is a walkthrough", () => {
+    const text = JSON.stringify({ schema: "journey-evidence/2", mode: "walkthrough", tests: [] });
+    expect(parseWalkthroughEvidence(text).mode).toBe("walkthrough");
+  });
+  it("fails loud on a gating (or unlabelled) file — the fast video must never come back", () => {
+    for (const mode of ["gating", undefined]) {
+      const text = JSON.stringify({ schema: "journey-evidence/2", mode, tests: [] });
+      expect(() => parseWalkthroughEvidence(text)).toThrow(/expected "walkthrough"/);
+    }
+  });
+});
+
+describe("buildJourneys — walkthrough recording", () => {
+  const manifest = [{ id: "J1", name: "Score a probe", match: { file: "j1-score-probe.spec.ts" } }];
+  const steps = [
+    { label: "Open the dashboard", status: "passed", startOffsetMs: 100, assertions: [] },
+    { label: "Tap Save", status: "passed", startOffsetMs: 300, assertions: [] },
+  ];
+  const gating = { schema: "journey-evidence/2", tests: [record({ steps })] };
+  const walkRecord = (over = {}) =>
+    record({
+      project: "walkthrough",
+      durationMs: 9000,
+      attachments: [
+        {
+          name: "video",
+          contentType: "video/webm",
+          path: "/ci/test-results-walkthrough/j1-walkthrough/video.webm",
+        },
+      ],
+      steps: [
+        { label: "Open the dashboard", status: "passed", startOffsetMs: 1200, assertions: [] },
+        { label: "Tap Save", status: "passed", startOffsetMs: 4700, assertions: [] },
+      ],
+      ...over,
+    });
+  const walkthrough = (over = {}, tests = [walkRecord()]) => ({
+    evidence: { mode: "walkthrough", commitSha: "deadbeef", tests, ...over },
+    run: { ci_run_id: "999", ci_run_url: "https://github.com/o/r/actions/runs/999" },
+    resolveAsset: (_raw, kind, id, engine) => `${kind}s/${id}-${engine}.webm`,
+  });
+  const build = (wt, evidence = gating) =>
+    buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+      walkthrough: wt,
+    })[0];
+
+  it("binds the same-commit walkthrough as the card's video, with ITS step offsets", () => {
+    const j1 = build(walkthrough());
+    expect(j1.video).toEqual({
+      src: "videos/J1-walkthrough.webm",
+      poster: null,
+      duration_ms: 9000,
+      recording: "walkthrough",
+      run_id: "999",
+      run_url: "https://github.com/o/r/actions/runs/999",
+    });
+    expect(j1.media_note).toBeNull();
+    expect(j1.steps.map((s) => s.t_start_ms)).toEqual([1200, 4700]);
+    // the fast gating video stays reachable only as raw evidence
+    expect(j1.raw_video_url).toBe("video/J1-chromium.bin");
+  });
+
+  it("shows no video when the walkthrough is of a different commit (never the fast one)", () => {
+    const j1 = build(walkthrough({ commitSha: "0ther" }));
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.NONE);
+    expect(j1.steps.map((s) => s.t_start_ms)).toEqual([null, null]);
+  });
+
+  it("shows no video when the walkthrough carries no commit", () => {
+    expect(build(walkthrough({ commitSha: null })).video).toBeNull();
+  });
+
+  it("shows no video when the walkthrough has no record for this journey", () => {
+    const j1 = build(walkthrough({}, []));
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.NONE);
+  });
+
+  it("shows no video when the walkthrough's video is missing or unservable", () => {
+    const wt = { ...walkthrough(), resolveAsset: () => null };
+    expect(build(wt).video).toBeNull();
+    expect(build(walkthrough({}, [walkRecord({ attachments: [] })])).video).toBeNull();
+  });
+
+  it("does not show a failed walkthrough under a passing card — says so", () => {
+    const failed = walkRecord({ status: "failed", outcome: "unexpected" });
+    const j1 = build(walkthrough({}, [failed]));
+    expect(j1.status).toBe("passed");
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.FAILED);
+  });
+
+  it("does not show a passing walkthrough under a failed card", () => {
+    const failedGating = {
+      schema: "journey-evidence/2",
+      tests: [record({ status: "failed", outcome: "unexpected", steps })],
+    };
+    const j1 = build(walkthrough(), failedGating);
+    expect(j1.status).toBe("failed");
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.DIFFERS);
+  });
+
+  it("flaky stays FLAKY and still plays a passing walkthrough", () => {
+    const flaky = {
+      schema: "journey-evidence/2",
+      tests: [record({ outcome: "flaky", retries: 1, steps })],
+    };
+    const j1 = build(walkthrough(), flaky);
+    expect(j1.status).toBe("flaky");
+    expect(j1.video?.recording).toBe("walkthrough");
+  });
+
+  it("shows no video when the walkthrough walked different steps (offsets would not line up)", () => {
+    const other = walkRecord({
+      steps: [{ label: "Something else", status: "passed", startOffsetMs: 0, assertions: [] }],
+    });
+    const j1 = build(walkthrough({}, [other]));
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.DIFFERS);
+  });
+
+  it("an UNVERIFIED journey stays unverified whatever the walkthrough holds", () => {
+    const [j1] = buildJourneys({
+      evidence: { schema: "journey-evidence/2", tests: [] },
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+      walkthrough: walkthrough(),
+    });
+    expect(j1.status).toBe("unverified");
+    expect(j1.video).toBeNull();
   });
 });
