@@ -3,7 +3,7 @@
 // (the teacher never types a percent); the denominator is pre-filled from the assigned
 // probe; and the row leaves the owes group as the owe-count decrements live.
 //
-// The test.step titles and expect() messages are the journey card's step labels and
+// The step(...) titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
 import { expect, test } from "./support/journey";

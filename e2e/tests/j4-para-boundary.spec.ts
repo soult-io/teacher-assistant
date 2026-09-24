@@ -16,7 +16,7 @@
 // filter over the teacher's decrypted master records. That is the data-layer separation
 // this journey can witness — the para-visible doc simply does not carry the master
 // fields. The cryptographic key boundary itself (a ParaKeyring cannot decrypt master)
-// is out of scope here and proven at the unit level (ferpa-m13). The test.step titles
+// is out of scope here and proven at the unit level (ferpa-m13). The step(...) titles
 // and expect() messages are the journey card's step labels and assertions, written
 // verbatim as human-readable evidence.
 //

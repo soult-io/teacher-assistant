@@ -22,10 +22,11 @@ import { dirname, extname, join, resolve, sep } from "node:path";
 export const MAX_STILL_BYTES = 2 * 1024 * 1024;
 
 // A still's extension must match its leading bytes (the artifact is untrusted data).
-const STILL_MAGIC = {
-  ".jpg": [0xff, 0xd8, 0xff],
-  ".jpeg": [0xff, 0xd8, 0xff],
-  ".png": [0x89, 0x50, 0x4e, 0x47],
+// `ext` is the served extension.
+const STILL_FORMATS = {
+  ".jpg": { magic: [0xff, 0xd8, 0xff], ext: "jpg" },
+  ".jpeg": { magic: [0xff, 0xd8, 0xff], ext: "jpg" },
+  ".png": { magic: [0x89, 0x50, 0x4e, 0x47], ext: "png" },
 };
 
 function hasMagic(src, magic) {
@@ -42,7 +43,7 @@ function hasMagic(src, magic) {
 const KINDS = {
   video: { dir: "videos", ext: () => "webm" },
   trace: { dir: "traces", ext: () => "zip" },
-  still: { dir: "stills", ext: (src) => (extname(src).toLowerCase() === ".png" ? "png" : "jpg") },
+  still: { dir: "stills", ext: (src) => STILL_FORMATS[extname(src).toLowerCase()].ext },
 };
 
 /** The served name: `<id>-<engine>` (+ `-<NN>` step index for a still), sanitised. */
@@ -59,8 +60,8 @@ function servedName(kind, journeyId, engine, index) {
 /** A still must be a jpeg/png within the byte cap — otherwise the run broke its contract. */
 function assertStillServable(src, journeyId, engine, index) {
   const where = `still for ${journeyId}/${engine} step ${index}`;
-  const magic = STILL_MAGIC[extname(src).toLowerCase()];
-  if (!magic || !hasMagic(src, magic)) {
+  const format = STILL_FORMATS[extname(src).toLowerCase()];
+  if (!format || !hasMagic(src, format.magic)) {
     throw new Error(`${where} is not a jpeg/png image: ${src}`);
   }
   const bytes = statSync(src).size;

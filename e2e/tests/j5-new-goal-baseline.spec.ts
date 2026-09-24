@@ -27,7 +27,7 @@
 //     with real data in domain-core (arc-window.ts leaves iep_end_date untouched); the
 //     e2e does not overclaim a data invariant the DOM cannot witness.
 //
-// The test.step titles and expect() messages are the journey card's step labels and
+// The step(...) titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
 import type { Locator, Page } from "@playwright/test";

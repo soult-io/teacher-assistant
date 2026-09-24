@@ -6,7 +6,7 @@
 // defend — and a goal that reaches criterion is flagged for the teacher, never
 // auto-closed.
 //
-// The test.step titles and expect() messages are the journey card's step labels and
+// The step(...) titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
 import type { Page } from "@playwright/test";

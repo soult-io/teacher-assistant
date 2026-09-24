@@ -13,7 +13,7 @@
 // it does not auto-push on reconnect. This test asserts what the UI actually does — it
 // does not assert a per-row pending-sync mark or an auto-sync-clears-on-reconnect.
 //
-// The test.step titles and expect() messages are the journey card's step labels and
+// The step(...) titles and expect() messages are the journey card's step labels and
 // assertions — written as human-readable evidence, verbatim.
 
 import { expect, test } from "./support/journey";

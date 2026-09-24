@@ -16,7 +16,7 @@ import { STEP_STILL_ATTACHMENT } from "../../reporters/evidence-reporter";
 export { expect } from "@playwright/test";
 
 /** Resolution cap: a still never exceeds this height (px), however long the page. */
-export const STILL_MAX_HEIGHT_PX = 4000;
+const STILL_MAX_HEIGHT_PX = 4000;
 /** JPEG quality for stills — keeps each file small enough to serve per step. */
 const STILL_JPEG_QUALITY = 70;
 
@@ -62,21 +62,16 @@ export const test = base.extend<StepStillsOptions & { step: JourneyStep }>({
       base.step(title, async (): Promise<T> => {
         const stepIndex = index++;
         if (!stepStills) return body();
-        let result: T;
         try {
-          result = await body();
-        } catch (err) {
+          return await body();
+        } finally {
           // A failing step still gets its still: the screen it failed on is the most
-          // useful evidence on a red card. A capture error must not mask the real one.
+          // useful evidence on a red card. The capture's own error is caught and noted,
+          // so it never replaces the step's result or its real error.
           await captureStill(page, testInfo, stepIndex).catch((captureErr: unknown) =>
             noteMissingStill(testInfo, title, captureErr),
           );
-          throw err;
         }
-        await captureStill(page, testInfo, stepIndex).catch((captureErr: unknown) =>
-          noteMissingStill(testInfo, title, captureErr),
-        );
-        return result;
       });
     await use(step);
   },
