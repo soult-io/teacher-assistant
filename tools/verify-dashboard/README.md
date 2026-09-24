@@ -39,13 +39,49 @@ check):
    ones), so it can never contradict the cards below it — no Playwright CLI is invoked
    at generate time. With no verified journey the tile degrades to a dash, like the
    UNVERIFIED cards, rather than a misleading `0`.
-4. Reads **CI status** for `main` from the GitHub Actions REST API (best-effort;
-   degrades to neutral pills without a token).
+4. Reads **CI status for the page's own commit** from the GitHub Actions REST API
+   (best-effort; degrades to neutral pills without a token) — see
+   [CI pills](#ci-pills-bound-to-the-commit).
 5. Fills `engine/template.html` → `dist-dashboard/index.html` + `videos/` + `traces/`
    + `stills/`. Each journey renders its human-pace walkthrough video (below) and a
    step-synced list; the gating run's fast video is only a raw-evidence link. The stills
    are taken by the e2e run itself, so the generator needs no browser and no preview
    server.
+
+### CI pills: bound to the commit
+
+The pill group is headed **`CI for <short sha>`** and every pill describes a run of
+that one commit — the commit the journeys, counts and provenance come from. The
+generator passes the FULL 40-char sha to `collectCiPills(repo, token, specs, sha)`
+(from `COMMIT_SHA`, else `GITHUB_SHA`, else `git rev-parse HEAD`); the engine never
+works from a short sha.
+
+- **Query:** `…/workflows/<file>/runs?head_sha=<sha>&event=push&branch=main`.
+- **Client-side re-check** of every candidate: `head_sha === sha`, `event === "push"`,
+  `head_repository.full_name === repo` (case-insensitive). This rejects another
+  commit's run, PR / `workflow_dispatch` runs, and a fork PR from a branch named
+  `main`, even if the API ignored a filter.
+- **Several matches:** newest `created_at` wins (ties: higher run id). Each list entry
+  is a distinct run already at its latest attempt — a re-run bumps `run_attempt` on
+  the same entry — so `run_attempt` does not order different runs. Job-split pills
+  (e.g. `verify` + the `build-images` matrix) read `jobs?filter=latest` of that
+  matched run only.
+
+Pill states:
+
+| state | class | shown as | meaning |
+|---|---|---|---|
+| `success` / `failure` | `pass` / `fail` | label | the run's verdict (`timed_out` → failure) |
+| `in_progress` | `note` | `· in progress at build time <ISO>` | not finished when the page was generated |
+| `no_run` | `none` (neutral, solid) | `· no run for this commit` | the API answered; no matching run exists. **Never** filled from another commit's run |
+| `unknown` | `unk` (neutral, dashed) | `· status unknown` | the API could not be read (error, no repo/token, no valid sha); also a matched run with no job matching the spec, or a completed item with no conclusion |
+| other (`cancelled`, `skipped`, …) | `note` | label | neutral |
+
+The page is **static**, generated when the e2e run completes. Sibling workflows for
+the same commit (CI, CodeQL) may still be running then, so their pills honestly read
+"in progress at build time" — the page does not poll or update. On a PR build the
+dashboard is built from the PR merge ref, which has no push run, so its pills read
+"no run for this commit".
 
 ### Evidence: why a custom Playwright reporter
 
@@ -151,7 +187,7 @@ The stills are hidden until a reader asks for one; the page fetches none on load
 - `engine/assets.mjs` — serves run assets (videos, traces, stills) as files next to the page; still + video size caps, one published-bytes budget.
 - `engine/provenance.mjs` — run provenance from CI env + artifact sha256.
 - `engine/counts.mjs` — vitest count mechanics + the journeys→e2e-tile count (`deriveE2eCount`).
-- `engine/ci-status.mjs` — GitHub Actions API → status pills.
+- `engine/ci-status.mjs` — GitHub Actions API → status pills bound to one commit sha.
 - `engine/render/lib.mjs` — pure builders (tiles, bars, pills, callouts, template fill).
 - `engine/render/journeys.mjs` — the full JourneyCard (video + synced step list +
   assertions + failure/flaky/UNVERIFIED states) + list.
@@ -177,7 +213,8 @@ reporter array, so a local run needs `CI=1` to produce it.
 
 `EVIDENCE_FILE` overrides the evidence path; `SOURCE_*` supply the run provenance (the
 CI wiring sets them from the resolved e2e run). `GITHUB_REPOSITORY` + `GITHUB_TOKEN`
-enable the live CI pills. With no evidence file, every journey renders UNVERIFIED.
+enable the CI pills (bound to `COMMIT_SHA`, else `GITHUB_SHA`, else the checkout's
+HEAD). With no evidence file, every journey renders UNVERIFIED.
 
 ## Phase status
 

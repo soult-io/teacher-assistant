@@ -72,6 +72,8 @@ describe("renderBars", () => {
   });
 });
 
+const BUILT_AT = "2026-09-24T10:00:00Z";
+
 describe("pillClass / renderCiPills", () => {
   it("maps conclusions to pass/fail/note", () => {
     expect(pillClass("success")).toBe("pass");
@@ -79,13 +81,46 @@ describe("pillClass / renderCiPills", () => {
     expect(pillClass("in_progress")).toBe("note");
     expect(pillClass(undefined)).toBe("note");
   });
+  it("maps the two non-verdicts to distinct neutral classes", () => {
+    expect(pillClass("no_run")).toBe("none");
+    expect(pillClass("unknown")).toBe("unk");
+  });
   it("renders a pill per status with escaped labels", () => {
-    const html = renderCiPills([
-      { label: "verify", conclusion: "success" },
-      { label: "e2e", conclusion: "failure" },
-    ]);
+    const html = renderCiPills(
+      [
+        { label: "verify", conclusion: "success" },
+        { label: "e2e", conclusion: "failure" },
+        { label: "a<b", conclusion: "success" },
+      ],
+      { builtAt: BUILT_AT },
+    );
     expect(html).toContain('<span class="pill pass"><span class="dot"></span>verify</span>');
     expect(html).toContain('<span class="pill fail"><span class="dot"></span>e2e</span>');
+    expect(html).toContain("a&lt;b</span>");
+  });
+  it("labels an in-progress pill as in progress AT BUILD TIME, with the ISO time", () => {
+    const html = renderCiPills([{ label: "CodeQL", conclusion: "in_progress" }], {
+      builtAt: BUILT_AT,
+    });
+    expect(html).toContain('class="pill note"');
+    expect(html).toContain(`CodeQL <span class="q">· in progress at build time ${BUILT_AT}</span>`);
+    expect(html).toContain(
+      `title="This run had not finished when the page was generated (${BUILT_AT})`,
+    );
+  });
+  it("labels no_run and unknown distinguishably, neither green", () => {
+    const html = renderCiPills(
+      [
+        { label: "ci", conclusion: "no_run" },
+        { label: "e2e", conclusion: "unknown" },
+      ],
+      { builtAt: BUILT_AT },
+    );
+    expect(html).toContain('<span class="pill none" title="No push run of this workflow exists');
+    expect(html).toContain('ci <span class="q">· no run for this commit</span>');
+    expect(html).toContain('<span class="pill unk" title="CI status could not be determined');
+    expect(html).toContain('e2e <span class="q">· status unknown</span>');
+    expect(html).not.toContain("pill pass");
   });
 });
 
