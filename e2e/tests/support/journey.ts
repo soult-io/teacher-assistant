@@ -1,7 +1,12 @@
 // The journey test API: Playwright's `test` extended with a `step` fixture that wraps
-// `test.step` and attaches a full-page still of the page at the end of every step.
+// `test.step` and attaches a full-height still of the page at the end of every step.
 // The verification dashboard renders those stills beside each step, so a reader can
 // follow the flow screen by screen instead of scrubbing a ~2s video.
+//
+// Full height: the app scrolls inside an inner container, not the document, so a
+// `fullPage` screenshot is only ever one viewport. `captureStill` instead grows the
+// viewport by the main scroll container's hidden height, takes the still, and puts the
+// viewport and every scroll position back — see `captureStill`.
 //
 // Stills are opt-in per Playwright project (`stepStills` in playwright.config.ts) —
 // only the canonical browser (chromium) takes them; the other engines run the same
@@ -26,6 +31,8 @@ import { test as base, type Locator, type Page, type TestInfo } from "@playwrigh
 import {
   RECORDING_START_ANNOTATION,
   STEP_STILL_ATTACHMENT,
+  STEP_STILL_META_ATTACHMENT,
+  type StillMeta,
 } from "../../reporters/evidence-reporter";
 
 export { expect } from "@playwright/test";
@@ -34,6 +41,12 @@ export { expect } from "@playwright/test";
 const STILL_MAX_HEIGHT_PX = 4000;
 /** JPEG quality for stills — keeps each file small enough to serve per step. */
 const STILL_JPEG_QUALITY = 70;
+/**
+ * Growing the viewport can itself re-flow the page (a sheet sized as a share of the
+ * screen grows with it), so the hidden height is re-measured and the viewport grown
+ * again, up to this many times.
+ */
+const STILL_GROW_PASSES = 4;
 
 /** Walkthrough: how long the screen stays still at the end of each step (ms). */
 const WALKTHROUGH_STEP_HOLD_MS = 1500;
@@ -93,7 +106,7 @@ const PAGE_ACTIONS: readonly (keyof Page & string)[] = [
 ];
 
 export interface StepStillsOptions {
-  /** Take a full-page still at the end of every journey step (canonical browser only). */
+  /** Take a full-height still at the end of every journey step (canonical browser only). */
   stepStills: boolean;
   /** Human-pace recording mode: hold at the end of each step, type per character. */
   walkthrough: boolean;
@@ -101,19 +114,105 @@ export interface StepStillsOptions {
 
 type JourneyStep = <T>(title: string, body: () => Promise<T>) => Promise<T>;
 
+/** What the in-page measure reports: the viewport height that shows the main scroller whole. */
+interface ScrollMeasure {
+  /** Pixels of the main scroll container (or document) still hidden below its fold. */
+  hiddenPx: number;
+}
+
+/**
+ * In the page: find the main scroll container — the largest visible element that
+ * scrolls vertically (the app's `#screen`; on another app, whatever plays that role)
+ * — and report how much of it, and of the document, is hidden below the fold. Generic
+ * on purpose: no selector, no per-journey tuning.
+ */
+function measureHidden(): ScrollMeasure {
+  let main: Element | null = null;
+  let mainArea = 0;
+  for (const el of Array.from(document.body.getElementsByTagName("*"))) {
+    const { overflowY } = getComputedStyle(el);
+    if (overflowY !== "auto" && overflowY !== "scroll") continue;
+    if (!el.checkVisibility()) continue;
+    const area = el.clientWidth * el.clientHeight;
+    if (area > mainArea) {
+      main = el;
+      mainArea = area;
+    }
+  }
+  const root = document.scrollingElement ?? document.documentElement;
+  const docHidden = Math.max(0, root.scrollHeight - window.innerHeight);
+  const mainHidden = main ? Math.max(0, main.scrollHeight - main.clientHeight) : 0;
+  return { hiddenPx: docHidden + mainHidden };
+}
+
+/**
+ * In the page: record every vertical scroll offset (the document's and each scrolled
+ * element's) and scroll all of them to the top, so a grown viewport shows the screen
+ * from its first line. The offsets are kept on the window for `restoreScroll`.
+ */
+function saveAndResetScroll(): void {
+  const w = window as unknown as { __stillScroll?: [Element, number][] };
+  const saved: [Element, number][] = [];
+  for (const el of [
+    document.scrollingElement ?? document.documentElement,
+    ...Array.from(document.body.getElementsByTagName("*")),
+  ]) {
+    if (el.scrollTop > 0) {
+      saved.push([el, el.scrollTop]);
+      el.scrollTop = 0;
+    }
+  }
+  w.__stillScroll = saved;
+}
+
+/** In the page: put back the scroll offsets `saveAndResetScroll` recorded. */
+function restoreScroll(): void {
+  const w = window as unknown as { __stillScroll?: [Element, number][] };
+  for (const [el, top] of w.__stillScroll ?? []) el.scrollTop = top;
+  delete w.__stillScroll;
+}
+
+/**
+ * Take the step's full-height still. The viewport is grown (width unchanged) until the
+ * main scroll container shows everything or the height cap is reached, the still is
+ * taken as a plain viewport screenshot, and then the viewport and every scroll offset
+ * are put back exactly — the next step, and the run's video, see the page as it was.
+ *
+ * A still that could not show the whole screen (over the cap, or content that does not
+ * grow with the viewport) is attached with `truncated: true` — cut off, never silently.
+ */
 async function captureStill(page: Page, testInfo: TestInfo, index: number): Promise<void> {
-  const width = page.viewportSize()?.width ?? 1280;
-  const pageHeight = await page.evaluate(() => document.documentElement.scrollHeight);
+  const viewport = page.viewportSize();
+  if (!viewport) throw new Error("page has no fixed viewport to grow");
   const path = testInfo.outputPath(`step-still-${String(index).padStart(2, "0")}.jpg`);
-  await page.screenshot({
-    path,
-    type: "jpeg",
-    quality: STILL_JPEG_QUALITY,
-    fullPage: true,
-    clip: { x: 0, y: 0, width, height: Math.min(pageHeight, STILL_MAX_HEIGHT_PX) },
-  });
-  // Attached INSIDE the step body so the reporter attributes it to this step.
+  await page.evaluate(saveAndResetScroll);
+  let meta: StillMeta;
+  try {
+    let height = viewport.height;
+    let { hiddenPx } = await page.evaluate(measureHidden);
+    for (let pass = 0; pass < STILL_GROW_PASSES && hiddenPx > 0; pass++) {
+      const next = Math.min(height + hiddenPx, STILL_MAX_HEIGHT_PX);
+      if (next <= height) break;
+      height = next;
+      await page.setViewportSize({ width: viewport.width, height });
+      const before = hiddenPx;
+      ({ hiddenPx } = await page.evaluate(measureHidden));
+      // Content that does not grow with the viewport: growing further shows nothing new.
+      if (hiddenPx >= before) break;
+    }
+    await page.screenshot({ path, type: "jpeg", quality: STILL_JPEG_QUALITY });
+    meta = { width: viewport.width, height, truncated: hiddenPx > 0 };
+  } finally {
+    // Always put the page back, even when the capture failed part-way.
+    if (page.viewportSize()?.height !== viewport.height) await page.setViewportSize(viewport);
+    await page.evaluate(restoreScroll);
+  }
+  // Attached INSIDE the step body so the reporter attributes both to this step.
   await testInfo.attach(STEP_STILL_ATTACHMENT, { path, contentType: "image/jpeg" });
+  await testInfo.attach(STEP_STILL_META_ATTACHMENT, {
+    body: JSON.stringify(meta),
+    contentType: "application/json",
+  });
 }
 
 /**

@@ -8,7 +8,17 @@ const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", 
 const echoResolver = (_raw, kind, id, engine, index) =>
   index === undefined ? `${kind}/${id}-${engine}.bin` : `${kind}/${id}-${engine}-${index}.bin`;
 
-const still = (n) => ({
+// A v3 still record: full height, with its pixel size and truncation flag.
+const still = (n, over = {}) => ({
+  path: `/ci/test-results/j1-chromium/step-still-${n}.jpg`,
+  contentType: "image/jpeg",
+  width: 390,
+  height: 1452,
+  truncated: false,
+  ...over,
+});
+// A v2 still record: a path only — no size, no truncation flag.
+const stillV2 = (n) => ({
   path: `/ci/test-results/j1-chromium/step-still-${n}.jpg`,
   contentType: "image/jpeg",
 });
@@ -56,31 +66,74 @@ describe("parseEvidence (loud-fail discipline)", () => {
     const ev = parseEvidence(JSON.stringify({ schema: "journey-evidence/1", tests: [] }));
     expect(ev.tests).toEqual([]);
   });
-  it("accepts the current v2 schema with per-step stills", () => {
+  it("accepts the current v3 schema with sized, flagged stills", () => {
+    const text = JSON.stringify({
+      schema: "journey-evidence/3",
+      tests: [
+        record({
+          steps: [
+            { label: "Open", assertions: [], screenshot: still(0) },
+            {
+              label: "Long",
+              assertions: [],
+              screenshot: still(1, { height: 4000, truncated: true }),
+            },
+          ],
+        }),
+      ],
+    });
+    const steps = parseEvidence(text).tests[0].steps;
+    expect(steps[0].screenshot).toEqual(still(0));
+    expect(steps[1].screenshot.truncated).toBe(true);
+  });
+  it("still reads v2: its stills ingest with truncation unknown (null), never 'complete'", () => {
     const text = JSON.stringify({
       schema: "journey-evidence/2",
-      tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] })],
+      tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: stillV2(0) }] })],
     });
-    expect(parseEvidence(text).tests[0].steps[0].screenshot).toEqual(still(0));
+    expect(parseEvidence(text).tests[0].steps[0].screenshot).toEqual({
+      ...stillV2(0),
+      truncated: null,
+    });
+  });
+  it("fails loud when a v3 still has no truncation flag or pixel size (no silent crop)", () => {
+    const bads = [
+      stillV2(0),
+      still(0, { truncated: undefined }),
+      still(0, { truncated: "no" }),
+      still(0, { height: 0 }),
+      still(0, { width: 390.5 }),
+    ];
+    for (const bad of bads) {
+      const text = JSON.stringify({
+        schema: "journey-evidence/3",
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+      });
+      expect(() => parseEvidence(text)).toThrow(/width\/height\/truncated/);
+    }
   });
   it("normalises a v1 file: every step ingests with an explicit null still", () => {
     const text = JSON.stringify({ schema: "journey-evidence/1", tests: [record()] });
     expect(parseEvidence(text).tests[0].steps[0].screenshot).toBeNull();
   });
-  it("fails loud when a v2 step omits the screenshot field (no silent drop)", () => {
-    const text = JSON.stringify({
-      schema: "journey-evidence/2",
-      tests: [record({ steps: [{ label: "Open", assertions: [] }] })],
-    });
-    expect(() => parseEvidence(text)).toThrow(/screenshot/);
-  });
-  it("fails loud on a malformed v2 still record", () => {
-    for (const bad of [{}, { path: "" }, { path: 7 }, "x.jpg"]) {
+  it("fails loud when a v2/v3 step omits the screenshot field (no silent drop)", () => {
+    for (const schema of ["journey-evidence/2", "journey-evidence/3"]) {
       const text = JSON.stringify({
-        schema: "journey-evidence/2",
-        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+        schema,
+        tests: [record({ steps: [{ label: "Open", assertions: [] }] })],
       });
       expect(() => parseEvidence(text)).toThrow(/screenshot/);
+    }
+  });
+  it("fails loud on a malformed v2/v3 still record", () => {
+    for (const schema of ["journey-evidence/2", "journey-evidence/3"]) {
+      for (const bad of [{}, { path: "" }, { path: 7 }, "x.jpg"]) {
+        const text = JSON.stringify({
+          schema,
+          tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+        });
+        expect(() => parseEvidence(text)).toThrow(/screenshot/);
+      }
     }
   });
 });
@@ -358,6 +411,49 @@ describe("buildJourneys", () => {
     ]);
   });
 
+  it("carries each still's truncation flag onto the step; null with no still or unknown", () => {
+    const evidence = parseEvidence(
+      JSON.stringify({
+        schema: "journey-evidence/3",
+        tests: [
+          record({
+            steps: [
+              { label: "Short", assertions: [], screenshot: still(0) },
+              { label: "Cut off", assertions: [], screenshot: still(1, { truncated: true }) },
+              { label: "None", assertions: [], screenshot: null },
+            ],
+          }),
+        ],
+      }),
+    );
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps.map((s) => s.screenshot_truncated)).toEqual([false, true, null]);
+
+    const v2 = parseEvidence(
+      JSON.stringify({
+        schema: "journey-evidence/2",
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: stillV2(0) }] })],
+      }),
+    );
+    const [old] = buildJourneys({
+      evidence: v2,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(old.steps[0]).toMatchObject({
+      screenshot: "still/J1-chromium-0.bin",
+      screenshot_truncated: null,
+    });
+  });
+
   it("a step with no still stays an explicit null — never borrowed from a neighbour", () => {
     const evidence = {
       schema: "journey-evidence/2",
@@ -393,6 +489,7 @@ describe("buildJourneys", () => {
       resolveAsset: (_raw, kind) => (kind === "still" ? null : "x"),
     });
     expect(j1.steps[0].screenshot).toBeNull();
+    expect(j1.steps[0].screenshot_truncated).toBeNull();
   });
 
   it("stills follow the canonical browser: a firefox-canonical card shows no chromium stills", () => {

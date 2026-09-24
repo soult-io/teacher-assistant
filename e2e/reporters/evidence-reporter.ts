@@ -27,7 +27,8 @@ import type {
 
 // v2 adds steps[].screenshot (always present: a still record, or null = no still).
 // Additive, still v2: optional top-level `mode` + `commitSha` (see EvidenceFile).
-export const EVIDENCE_SCHEMA = "journey-evidence/2";
+// v3: a still is full-height and its record carries `width`, `height` and `truncated`.
+export const EVIDENCE_SCHEMA = "journey-evidence/3";
 
 /** Which run produced the file: the fast gating run, or the human-pace walkthrough. */
 export type EvidenceMode = "gating" | "walkthrough";
@@ -42,6 +43,17 @@ export const RECORDING_START_ANNOTATION = "recording-start";
 /** Attachment name the journey `step` fixture (tests/support/journey.ts) gives a step's still. */
 export const STEP_STILL_ATTACHMENT = "step-still";
 
+/** Attachment (JSON body, a StillMeta) the fixture adds right after each still. */
+export const STEP_STILL_META_ATTACHMENT = "step-still-meta";
+
+/** The still's pixel size, and whether the screen was cut off at the height cap. */
+export interface StillMeta {
+  width: number;
+  height: number;
+  /** True when part of the screen is not in the still (over the cap) — never silent. */
+  truncated: boolean;
+}
+
 type AssertionStatus = "passed" | "failed";
 
 interface AssertionRecord {
@@ -50,7 +62,9 @@ interface AssertionRecord {
   detail?: string;
 }
 
-interface StillRecord {
+// A still with no readable meta is written without width/height/truncated: the
+// dashboard's v3 ingest then fails loud instead of guessing "not cut off".
+interface StillRecord extends Partial<StillMeta> {
   path: string;
   contentType: string;
 }
@@ -65,7 +79,7 @@ interface StepRecord {
   startOffsetMs: number;
   status: AssertionStatus;
   assertions: AssertionRecord[];
-  // The full-page still attached at the end of this step, or null when the step has
+  // The full-height still attached at the end of this step, or null when the step has
   // none (a non-canonical browser, or a capture that failed). Never omitted, never a
   // placeholder: null is the explicit "no still".
   screenshot: StillRecord | null;
@@ -139,18 +153,47 @@ function collectAssertions(steps: TestStep[]): AssertionRecord[] {
   return out;
 }
 
+/** The fixture's StillMeta attachment body, or null when it is missing or malformed. */
+function readStillMeta(body: Buffer | undefined): StillMeta | null {
+  if (!body) return null;
+  try {
+    const m = JSON.parse(body.toString("utf8")) as Partial<StillMeta>;
+    if (
+      Number.isInteger(m.width) &&
+      Number.isInteger(m.height) &&
+      typeof m.truncated === "boolean"
+    ) {
+      return { width: m.width as number, height: m.height as number, truncated: m.truncated };
+    }
+  } catch {
+    // Unreadable: treated as absent (see StillRecord).
+  }
+  return null;
+}
+
+/** Fold one attachment into the still seen so far: a new still, or the meta for it. */
+function withAttachment(
+  still: StillRecord | null,
+  a: TestStep["attachments"][number],
+): StillRecord | null {
+  if (a.name === STEP_STILL_ATTACHMENT && a.path) {
+    return { path: a.path, contentType: a.contentType };
+  }
+  if (a.name === STEP_STILL_META_ATTACHMENT && still) {
+    const meta = readStillMeta(a.body);
+    if (meta) return { ...still, ...meta };
+  }
+  return still;
+}
+
 /** The step's own still: attached by a direct child (`test.attach`), not by a nested
  * `test.step` (that one belongs to the nested step). The last one wins — the wrapper
- * attaches exactly one per step, at the step's end. */
+ * attaches exactly one per step, at the step's end, followed by its meta. */
 function findStill(steps: TestStep[]): StillRecord | null {
   let still: StillRecord | null = null;
   for (const step of steps) {
     if (step.category === "test.step") continue;
-    for (const a of step.attachments) {
-      if (a.name === STEP_STILL_ATTACHMENT && a.path) {
-        still = { path: a.path, contentType: a.contentType };
-      }
-    }
+    for (const a of step.attachments) still = withAttachment(still, a);
     const nested = findStill(step.steps);
     if (nested) still = nested;
   }

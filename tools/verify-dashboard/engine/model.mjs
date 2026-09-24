@@ -100,13 +100,25 @@ export function makeUnverified(entry, product) {
   };
 }
 
-/** A step's still is a served path or an explicit null (absent) — nothing in between. */
+/**
+ * A step's still is a served path or an explicit null (absent) — nothing in between.
+ * `screenshot_truncated` says whether that still is cut off at the height cap: a
+ * boolean, or null when unknown (a pre-v3 run) — and always null when there is no still.
+ */
 function assertStepStills(id, steps) {
   for (const step of steps) {
     const still = step?.screenshot;
     if (still !== null && (typeof still !== "string" || still === "")) {
       throw new Error(
         `journey ${id} step ${step?.index} screenshot must be a path or null, got ${JSON.stringify(still)}`,
+      );
+    }
+    const truncated = step?.screenshot_truncated;
+    const truncatedOk =
+      still === null ? truncated === null : [true, false, null].includes(truncated);
+    if (!truncatedOk) {
+      throw new Error(
+        `journey ${id} step ${step?.index} screenshot_truncated must be ${still === null ? "null with no still" : "a boolean or null"}, got ${JSON.stringify(truncated)}`,
       );
     }
   }
