@@ -97,7 +97,8 @@ function expectPointedAt(s: Snapshot | undefined, kind: string, caption: string)
   expect(ring?.right).toBeGreaterThanOrEqual(target.right);
   expect(ring?.bottom).toBeGreaterThanOrEqual(target.bottom);
   expect(s.ringKind).toBe(kind);
-  expect(s.ringUpMs, "ring held before the action").toBeGreaterThanOrEqual(400);
+  // The fixture's own hold (OVERLAY_HIGHLIGHT_MS); the walkthrough's slowMo adds to it.
+  expect(s.ringUpMs, "ring held before the action").toBeGreaterThanOrEqual(300);
   expect(s.caption).toBe(caption);
   expect(s.underCentre, "the overlay never covers the target for hit-testing").toBe(true);
 }
@@ -199,6 +200,9 @@ test.describe("gating run", () => {
       await p.locator("#save").click();
       await enterText(p.locator("#initials"), "JT");
       expect(await overlayPresent(p)).toBe(false);
+      // Filled in one call, as before — no keystrokes, even with the actions wrapped.
+      expect((await log(p)).some((s) => s.event === "keydown")).toBe(false);
+      await expect(p.locator("#initials")).toHaveValue("JT");
     });
   });
 });

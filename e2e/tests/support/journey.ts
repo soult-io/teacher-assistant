@@ -76,8 +76,14 @@ const WALKTHROUGH_TARGET_WAIT_MS = 10_000;
 const WALKTHROUGH_MAX_HOLDS = 3;
 /** Walkthrough overlay: how long the cursor takes to glide to the next target (ms). */
 const OVERLAY_GLIDE_MS = 450;
-/** Walkthrough overlay: how long the target stays ringed before the action (ms). */
-const OVERLAY_HIGHLIGHT_MS = 500;
+/**
+ * Walkthrough overlay: how long the target stays ringed before the action starts (ms).
+ * slowMo (WALKTHROUGH_SLOWMO_MS) then adds ~300ms before a click lands, so the ring is
+ * up ~600ms at the click.
+ */
+const OVERLAY_HIGHLIGHT_MS = 300;
+/** Walkthrough overlay: bound on drawing it — the target is already attached (ms). */
+const OVERLAY_DRAW_TIMEOUT_MS = 2000;
 
 /** Page actions that load a document: no target to point at, only the screen hold. */
 const NAVIGATIONS: ReadonlySet<string> = new Set(["goBack", "goForward", "goto", "reload"]);
@@ -371,6 +377,8 @@ interface PointRequest {
   /** "click": ring until the click lands. "focus": ring while the field keeps focus. */
   kind: "click" | "focus" | "other";
   verb: string;
+  /** The action scrolls its target into view itself (a pointer action), so scroll first. */
+  scroll: boolean;
   /** The cursor's last position, for a document that has not drawn it yet. */
   from: Point | null;
   glideMs: number;
@@ -427,14 +435,13 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
       [part~="cursor"] { position: absolute; left: 0; top: 0; width: 26px; height: 30px;
         opacity: 0; will-change: transform; filter: drop-shadow(0 1px 2px rgba(0,0,0,.45)); }
       /* Pink: a colour the app never uses, so the ring never reads as app UI. */
-      [part~="ring"] { position: absolute; border-radius: 10px; opacity: 0;
-        transition: opacity 150ms ease-out; }
+      [part~="ring"] { position: absolute; border-radius: 10px; opacity: 0; }
       [part~="ring"] { border: 3px solid #ec4899; box-shadow: 0 0 0 4px rgba(236,72,153,.3); }
       [part~="ring"][data-kind="focus"] { border-style: dashed; }
       [part~="caption"] { position: absolute; left: 0; top: 0; max-width: calc(100vw - 16px);
         padding: 4px 10px; border-radius: 999px; background: rgba(17,24,39,.9); color: #fff;
         font: 600 13px/18px system-ui, sans-serif; white-space: nowrap; overflow: hidden;
-        text-overflow: ellipsis; opacity: 0; transition: opacity 150ms ease-out; }
+        text-overflow: ellipsis; opacity: 0; }
       [part~="ripple"] { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px;
         border-radius: 50%; border: 3px solid #ec4899; background: rgba(236,72,153,.25);
         animation: ripple 550ms ease-out forwards; }
@@ -461,7 +468,7 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
       releaseTimer: undefined,
     };
     w.__walkthroughOverlay = o;
-    // The click itself: a ripple where it lands, then the ring lets go of the target.
+    // The click itself: a ripple where it lands.
     window.addEventListener(
       "pointerdown",
       (e) => {
@@ -471,10 +478,15 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
         ripple.style.top = `${e.clientY}px`;
         o.root.append(ripple);
         setTimeout(() => ripple.remove(), 600);
-        if (o.host.dataset.ringKind !== "focus") {
-          clearTimeout(o.releaseTimer);
-          o.releaseTimer = window.setTimeout(() => hideRing(o), 200);
-        }
+      },
+      { capture: true, passive: true },
+    );
+    // Then the ring lets go — at the click, before the app handles it, so a screen the
+    // click opens is never painted with the old target's ring and caption on it.
+    window.addEventListener(
+      "click",
+      () => {
+        if (o.host.dataset.ringKind !== "focus") hideRing(o);
       },
       { capture: true, passive: true },
     );
@@ -499,12 +511,20 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
   if (!target || !req) return null;
 
   // Point where the action will land: on screen, at the target's centre.
+  // A pointer action scrolls its target into view anyway; that scroll is done now, so
+  // the ring is drawn where the action lands. Other actions never scroll the page.
   let box = target.getBoundingClientRect();
-  if (box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth) {
-    target.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+  const offScreen =
+    box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth;
+  if (offScreen && req.scroll) {
+    target.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
     box = target.getBoundingClientRect();
   }
-  const to = { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+  const clamp = (v: number, max: number): number => Math.min(Math.max(v, 0), max);
+  const to = {
+    x: clamp(box.left + box.width / 2, innerWidth - 1),
+    y: clamp(box.top + box.height / 2, innerHeight - 1),
+  };
 
   // A field already ringed and focused (clear() then typing) is not pointed at twice.
   if (
@@ -583,8 +603,28 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
   return { ...to, waitMs: glideMs + req.highlightMs };
 }
 
-/** The ring style and caption verb for a Locator action (its own arguments, no selector). */
+/** The ring style, caption verb and scroll for a Locator action (its own arguments). */
 function describeAction(
+  action: string,
+  args: readonly unknown[],
+): Pick<PointRequest, "kind" | "verb" | "scroll"> {
+  return { ...actionLabel(action, args), scroll: POINTER_ACTIONS.has(action) };
+}
+
+/** Locator actions that scroll their target into view before acting (pointer input). */
+const POINTER_ACTIONS: ReadonlySet<string> = new Set([
+  "check",
+  "click",
+  "dblclick",
+  "dragTo",
+  "hover",
+  "setChecked",
+  "tap",
+  "uncheck",
+]);
+
+/** How the overlay names an action, and which ring it draws. */
+function actionLabel(
   action: string,
   args: readonly unknown[],
 ): Pick<PointRequest, "kind" | "verb"> {
@@ -638,7 +678,7 @@ async function pointAt(
     highlightMs: OVERLAY_HIGHLIGHT_MS,
   };
   const result = await target
-    .evaluate(overlayRuntime, request, { timeout: WALKTHROUGH_TARGET_WAIT_MS })
+    .evaluate(overlayRuntime, request, { timeout: OVERLAY_DRAW_TIMEOUT_MS })
     .catch(() => null);
   if (!result) return;
   state.cursor = { x: result.x, y: result.y };
@@ -756,7 +796,10 @@ export const test = base.extend<StepStillsOptions & { step: JourneyStep }>({
       // Every later document gets the overlay as it loads. Registered after the sync
       // frame, and drawn only at the first action, so it never shifts the recording's
       // time zero.
-      await page.addInitScript({ content: `(${overlayRuntime.toString()})()` });
+      // Top frame only: an iframe's own overlay is drawn when an action targets it.
+      await page.addInitScript({
+        content: `if (window === window.top) (${overlayRuntime.toString()})()`,
+      });
     }
     let index = 0;
     const step: JourneyStep = <T>(title: string, body: () => Promise<T>) =>
