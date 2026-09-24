@@ -6,7 +6,11 @@
 
 import { readFileSync } from "node:fs";
 import type { Page, TestInfo } from "@playwright/test";
-import { STEP_STILL_META_ATTACHMENT, type StillMeta } from "../reporters/evidence-reporter";
+import {
+  STEP_STILL_ATTACHMENT,
+  STEP_STILL_META_ATTACHMENT,
+  type StillMeta,
+} from "../reporters/evidence-reporter";
 import { expect, test } from "./support/journey";
 
 const PHONE = { width: 390, height: 844 };
@@ -49,7 +53,7 @@ function jpegSize(path: string): { width: number; height: number } {
 }
 
 function lastStillPath(testInfo: TestInfo): string {
-  const path = testInfo.attachments.filter((a) => a.name === "step-still").at(-1)?.path;
+  const path = testInfo.attachments.filter((a) => a.name === STEP_STILL_ATTACHMENT).at(-1)?.path;
   if (!path) throw new Error("no still attached");
   return path;
 }

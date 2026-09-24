@@ -14,6 +14,10 @@ import {
   RECORDING,
 } from "./model.mjs";
 
+// Every schema tag ingest reads: the current one first, then the older ones it still
+// accepts (see evidence-schema.mjs).
+const READABLE_SCHEMAS = [EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V2, EVIDENCE_SCHEMA_V1];
+
 // Which browser's step tree + video stand in for the journey. Both browsers run the
 // same steps, so a stable preference keeps the canonical view deterministic.
 const CANONICAL_ENGINES = ["chromium", "firefox"];
@@ -31,9 +35,9 @@ export function parseEvidence(text) {
     throw new Error(`journey-evidence is not valid JSON: ${err.message}`);
   }
   const schema = data?.schema;
-  if (![EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V2, EVIDENCE_SCHEMA_V1].includes(schema)) {
+  if (!READABLE_SCHEMAS.includes(schema)) {
     throw new Error(
-      `journey-evidence schema mismatch: expected ${EVIDENCE_SCHEMA} (or ${EVIDENCE_SCHEMA_V2}, ${EVIDENCE_SCHEMA_V1}), got ${JSON.stringify(schema)}`,
+      `journey-evidence schema mismatch: expected one of ${READABLE_SCHEMAS.join(", ")}, got ${JSON.stringify(schema)}`,
     );
   }
   if (!Array.isArray(data.tests)) {
@@ -41,8 +45,13 @@ export function parseEvidence(text) {
   }
   for (const test of data.tests) {
     for (const step of test.steps ?? []) {
-      if (schema === EVIDENCE_SCHEMA_V1) step.screenshot = null;
-      else assertStillField(step, test, schema === EVIDENCE_SCHEMA);
+      if (schema === EVIDENCE_SCHEMA_V1) {
+        step.screenshot = null;
+        continue;
+      }
+      assertStillField(step, test, schema === EVIDENCE_SCHEMA);
+      // v2 recorded no truncation flag: unknown, never read as "complete".
+      if (schema === EVIDENCE_SCHEMA_V2 && step.screenshot) step.screenshot.truncated = null;
     }
   }
   return data;
@@ -69,7 +78,7 @@ export function parseWalkthroughEvidence(text) {
  * missing or malformed field is a reporter bug — fail loud rather than read it as
  * "no still" and silently drop evidence the run produced. v3 (`sized`) also requires
  * the still's pixel size and its `truncated` flag: a still with no flag could be a
- * silently cut-off screen, so it fails loud. A v2 still's flag is unknown (null).
+ * silently cut-off screen, so it fails loud.
  */
 function assertStillField(step, test, sized) {
   const where = `${test.project}/${test.title} step ${JSON.stringify(step.label)}`;
@@ -83,10 +92,7 @@ function assertStillField(step, test, sized) {
       `journey-evidence ${where} has a malformed screenshot: ${JSON.stringify(still)}`,
     );
   }
-  if (!sized) {
-    still.truncated = null;
-    return;
-  }
+  if (!sized) return;
   const sizeOk = [still.width, still.height].every((n) => Number.isInteger(n) && n > 0);
   if (!sizeOk || typeof still.truncated !== "boolean") {
     throw new Error(
@@ -208,16 +214,19 @@ function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
   };
 }
 
-/**
- * @param {object} record the canonical browser's test record
- * @param {(stillPath: string, index: number) => (string|null)} resolveStill
- * @param {(number|null)[]|null} offsets each step's offset into the card's video (the
- *   walkthrough), or null when the card has no video
- */
+/** The canonical browser's test record's steps, as Journey steps (see toStep). */
 function toSteps(record, resolveStill, offsets) {
   return record.steps.map((step, index) => toStep(step, index, resolveStill, offsets));
 }
 
+/**
+ * One step of the canonical browser's record, as a Journey step.
+ * @param {object} step the evidence step
+ * @param {number} index its position in the record
+ * @param {(stillPath: string, index: number) => (string|null)} resolveStill
+ * @param {(number|null)[]|null} offsets each step's offset into the card's video (the
+ *   walkthrough), or null when the card has no video
+ */
 function toStep(step, index, resolveStill, offsets) {
   const served = step.screenshot?.path ? resolveStill(step.screenshot.path, index) : null;
   return {

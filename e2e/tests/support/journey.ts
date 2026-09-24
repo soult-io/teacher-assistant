@@ -135,13 +135,16 @@ function measureHidden(): number {
   return most + Math.max(0, root.scrollHeight - window.innerHeight);
 }
 
+/** The window, carrying the scroll offsets `saveAndResetScroll` recorded for `restoreScroll`. */
+type StillScrollWindow = Window & { __stillScroll?: [Element, number][] };
+
 /**
  * In the page: record every vertical scroll offset (the document's and each scrolled
  * element's) and scroll all of them to the top, so a grown viewport shows the screen
  * from its first line. The offsets are kept on the window for `restoreScroll`.
  */
 function saveAndResetScroll(): void {
-  const w = window as unknown as { __stillScroll?: [Element, number][] };
+  const w = window as StillScrollWindow;
   const saved: [Element, number][] = [];
   for (const el of [
     document.scrollingElement ?? document.documentElement,
@@ -157,7 +160,7 @@ function saveAndResetScroll(): void {
 
 /** In the page: put back the scroll offsets `saveAndResetScroll` recorded. */
 function restoreScroll(): void {
-  const w = window as unknown as { __stillScroll?: [Element, number][] };
+  const w = window as StillScrollWindow;
   for (const [el, top] of w.__stillScroll ?? []) el.scrollTop = top;
   delete w.__stillScroll;
 }

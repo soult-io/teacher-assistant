@@ -158,11 +158,8 @@ function readStillMeta(body: Buffer | undefined): StillMeta | null {
   if (!body) return null;
   try {
     const m = JSON.parse(body.toString("utf8")) as Partial<StillMeta>;
-    if (
-      Number.isInteger(m.width) &&
-      Number.isInteger(m.height) &&
-      typeof m.truncated === "boolean"
-    ) {
+    const sizeOk = [m.width, m.height].every((n) => Number.isInteger(n) && (n as number) > 0);
+    if (sizeOk && typeof m.truncated === "boolean") {
       return { width: m.width as number, height: m.height as number, truncated: m.truncated };
     }
   } catch {
