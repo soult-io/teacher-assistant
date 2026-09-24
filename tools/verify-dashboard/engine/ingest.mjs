@@ -248,6 +248,10 @@ function toStep(step, index, resolveStill, offsets) {
     // it, null when there is no still or the run predates the record (v2) — unknown is
     // never shown as complete.
     screenshot_truncated: served ? (step.screenshot.truncated ?? null) : null,
+    // The still's pixel size, so a viewer can reserve its box before it loads: as the
+    // run recorded it (v3), null when there is no still or the run predates it (v2).
+    screenshot_width: served ? (step.screenshot.width ?? null) : null,
+    screenshot_height: served ? (step.screenshot.height ?? null) : null,
     assertions: step.assertions.map((a) => ({
       text: a.text,
       status: a.status,
@@ -287,6 +291,7 @@ function buildJourney(entry, records, product, provenance, resolveAsset, walkthr
     ? resolveAsset(traceAtt.path, "trace", entry.id, canonical.project)
     : null;
   const media = bindWalkthrough(entry, canonical, status, provenance, walkthrough);
+  const tookStills = (r) => r.steps.some((s) => s.screenshot);
 
   return {
     id: entry.id,
@@ -300,6 +305,13 @@ function buildJourney(entry, records, product, provenance, resolveAsset, walkthr
     media_note: media.note,
     raw_video_url: rawVideoUrl,
     trace_url: traceUrl,
+    // The browser the steps (and so the stills) come from.
+    steps_engine: canonical.project,
+    // Browsers that took stills the card does not show: stills follow the canonical
+    // browser only, so when that browser took none, the card can say where they are.
+    unshown_still_engines: tookStills(canonical)
+      ? []
+      : perEngine.filter((r) => r !== canonical && tookStills(r)).map((r) => r.project),
     steps: toSteps(
       canonical,
       (stillPath, index) => resolveAsset(stillPath, "still", entry.id, canonical.project, index),

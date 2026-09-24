@@ -434,6 +434,11 @@ describe("buildJourneys", () => {
       resolveAsset: echoResolver,
     });
     expect(j1.steps.map((s) => s.screenshot_truncated)).toEqual([false, true, null]);
+    expect(j1.steps.map((s) => [s.screenshot_width, s.screenshot_height])).toEqual([
+      [390, 1452],
+      [390, 1452],
+      [null, null],
+    ]);
 
     const v2 = parseEvidence(
       JSON.stringify({
@@ -451,6 +456,8 @@ describe("buildJourneys", () => {
     expect(old.steps[0]).toMatchObject({
       screenshot: "still/J1-chromium-0.bin",
       screenshot_truncated: null,
+      screenshot_width: null,
+      screenshot_height: null,
     });
   });
 
@@ -516,6 +523,28 @@ describe("buildJourneys", () => {
     });
     expect(j1.status).toBe("failed");
     expect(j1.steps[0].screenshot).toBeNull();
+    // …but the card can say where the unshown stills are.
+    expect(j1.steps_engine).toBe("firefox");
+    expect(j1.unshown_still_engines).toEqual(["chromium"]);
+  });
+
+  it("names the steps' browser and lists no unshown stills when the canonical one took them", () => {
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [
+        record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] }),
+        record({ project: "firefox" }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps_engine).toBe("chromium");
+    expect(j1.unshown_still_engines).toEqual([]);
   });
 
   it("a flaky run with stills stays FLAKY — stills never launder a retry into a clean pass", () => {

@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{PAGE_TITLE}}</title>
 <meta name="description" content="{{PAGE_DESCRIPTION}}">
+<script>document.documentElement.classList.add("js");</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
@@ -166,6 +167,63 @@
   .jmark.current { background:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
   .jmark.fail.current { box-shadow:0 0 0 3px var(--fail-soft); }
 
+  /* step screens (Phase 3c): Video | Screens views over one media column, driven by the
+     step list. No JS: the tab row and viewer stay hidden and each step links its still
+     ("Screen ↗"); with JS (html.js) the links give way to the viewer. */
+  .jmedia { position:sticky; top:1rem; align-self:start; display:flex; flex-direction:column; gap:.5rem; min-width:0; }
+  .jmedia .jvideo { position:static; }
+  .jmodes { display:flex; align-items:center; gap:.4rem; flex-wrap:wrap; }
+  .jmodes[hidden] { display:none; }
+  .jmodes [role="tab"] { display:inline-flex; align-items:center; gap:.4rem; min-height:2.25rem; font-family:var(--mono); font-size:.76rem; font-weight:500; color:var(--dim); background:var(--surface); border:1px solid var(--border-2); border-radius:999px; padding:.3rem .8rem; cursor:pointer; }
+  .jmodes [role="tab"]:hover { color:var(--ink); }
+  .jmodes [role="tab"][aria-selected="true"] { color:var(--accent); background:var(--accent-soft); border-color:var(--accent); font-weight:600; }
+  .jcount { font-size:.7rem; }
+  .jfailmark { width:.5rem; height:.5rem; border-radius:50%; background:var(--fail); }
+  .jsolo { font-size:.76rem; font-weight:600; color:var(--ink); }
+  .jsrc { margin-left:auto; font-size:.7rem; color:var(--dim); }
+  .jmnote, .jnoshots { margin:0; font-size:.72rem; color:var(--dim); overflow-wrap:anywhere; }
+  .jscreens { display:flex; flex-direction:column; gap:.45rem; min-width:0; }
+  .jscreens[hidden], .jvideo[hidden] { display:none; }
+  .jsnote { margin:0; font-size:.72rem; overflow-wrap:anywhere; }
+  .jsnote.warn { color:var(--warn); }
+  /* A still is shown at the column's width and never squashed: a tall screen scrolls
+     inside the stage, whose height is fixed so stepping does not move the layout. */
+  .jstage { height:min(calc(100vh - 12rem), 844px); min-height:18rem; overflow-x:hidden; overflow-y:auto; overscroll-behavior:contain; border:1px solid var(--border-2); border-radius:10px; background:var(--surface-2); }
+  .jstage.fail { border:2px solid var(--fail); }
+  .jstage img { display:block; width:100%; height:auto; }
+  .jnoshot { height:100%; display:flex; align-items:center; justify-content:center; text-align:center; padding:1rem; font-family:var(--mono); font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; color:var(--dim); border:1px dashed var(--border-2); border-radius:9px; }
+  .jstage.fail .jnoshot { color:var(--fail); border:0; }
+  .jstepper { display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:.5rem; }
+  .jstepper button { min-height:2.25rem; min-width:4.5rem; font-family:var(--mono); font-size:.76rem; color:var(--ink); background:var(--surface); border:1px solid var(--border-2); border-radius:8px; padding:.3rem .6rem; cursor:pointer; }
+  .jstepper button:hover:not(:disabled) { border-color:var(--accent); color:var(--accent); }
+  .jstepper button:disabled { color:var(--dim); background:var(--surface-2); border-style:dashed; cursor:default; }
+  .jlive { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%); white-space:nowrap; }
+  .jpos { text-align:center; font-size:.74rem; color:var(--dim); overflow-wrap:anywhere; }
+  .jpips { display:flex; flex-wrap:wrap; gap:.3rem; justify-content:center; }
+  .jpips i { width:.5rem; height:.5rem; border-radius:50%; background:var(--pass); }
+  .jpips i.fail { background:var(--fail); }
+  .jpips i.none { background:transparent; box-shadow:inset 0 0 0 1px var(--dim); }
+  .jpips i.fail.none { box-shadow:inset 0 0 0 1px var(--fail); }
+  .jpips i.cur { outline:2px solid var(--accent); outline-offset:1px; }
+  .jcap { display:flex; flex-direction:column; gap:.3rem; font-size:.84rem; min-width:0; }
+  .jcap-hd { font-weight:500; overflow-wrap:anywhere; }
+  .jcap-hd .st { font-family:var(--mono); font-size:.72rem; color:var(--dim); font-weight:400; }
+  .jcap-hd.fail .st { color:var(--fail); }
+  .jcap .jasserts { padding:0; }
+  .jcap .jasserts li { flex-wrap:wrap; overflow-wrap:anywhere; }
+  .jcap .jasserts li.pass { display:none; }       /* beside the list at wide widths */
+  .jcap-meta { font-size:.7rem; color:var(--dim); overflow-wrap:anywhere; }
+  .jcap-meta .trunc { color:var(--warn); }
+
+  .jshot { margin:0 .65rem .55rem 1.9rem; font-size:.72rem; color:var(--dim); overflow-wrap:anywhere; }
+  .jshot a { display:inline-flex; align-items:center; min-height:2rem; font-weight:500; }
+  .jstep.fail .jshot a { color:var(--fail); font-weight:600; }
+  .jnoshot-inline { margin:0 .65rem .55rem 1.9rem; font-size:.72rem; color:var(--dim); }
+  .jstep.fail .jnoshot-inline { color:var(--fail); }
+  .jfailbtn { margin:0 .65rem .6rem 1.9rem; min-height:2.25rem; font-family:var(--mono); font-size:.74rem; font-weight:600; color:var(--fail); background:var(--surface); border:1px solid var(--fail); border-radius:8px; padding:.3rem .7rem; cursor:pointer; }
+  .jfailbtn[hidden] { display:none; }
+  .js .jshot, .js .jnoshot-inline { display:none; }
+
   .jsteps-wrap { min-width:0; }
   .jsteps { list-style:none; margin:0; padding:0; counter-reset:jstep; display:flex; flex-direction:column; gap:.5rem; }
   .jstep { border:1px solid var(--border); border-radius:9px; background:var(--surface); overflow:hidden; }
@@ -201,7 +259,11 @@
     /* journey card stacks: video on top full-width (markers kept), steps below;
        the provenance bar stays visible above both. */
     .jbody { grid-template-columns:1fr; gap:1rem; }
-    .jvideo { position:static; }
+    .jvideo, .jmedia { position:static; }
+    .jstage { height:min(70vh, 844px); }
+    .jcap .jasserts li.pass { display:flex; }       /* the list is below: show them all here */
+    .jmodes [role="tab"], .jstepper button, .jfailbtn { min-height:44px; }
+    .jshot a { min-height:44px; }
     .barrow { grid-template-columns:8.5rem 1fr 2.8rem; }
     .meta { align-items:flex-start; }
     header.top { flex-direction:column; }
@@ -251,22 +313,210 @@
     });
   })();
 
-  // Journey video <-> step sync (the video is the human-pace walkthrough recording;
-  // the step offsets are into that recording). Generic: reads only the data-*
-  // attributes the engine emits (data-video, data-seek, data-step, data-fail-seek).
-  // With no JS the card is a static, readable list; nothing below is required to
-  // understand a journey.
+  // Journey cards: video <-> step sync, and the step-screens viewer. Generic: reads only
+  // the data-* attributes the engine emits (data-video, data-seek, data-step,
+  // data-fail-seek, data-media, data-view, data-fail-step, data-shot-*). With no JS the
+  // card is a static, readable list with a "Screen ↗" link per step; nothing
+  // below is required to understand a journey.
   (function () {
-    function num(v) { var n = Number(v); return isNaN(n) ? null : n; }
+    function num(v) { var n = v === null || v === "" ? NaN : Number(v); return isNaN(n) ? null : n; }
+
+    // The Screens view: one still at a time, driven by the step list, Prev/Next and the
+    // arrow keys. A still's src is only set when that step is shown (then its
+    // neighbours are warmed), so nothing is fetched until a reader asks for a screen.
+    function screensViewer(card, steps, video) {
+      var media = card.querySelector("[data-media]");
+      var pane = media && media.querySelector(".jscreens");
+      if (!pane) return null;
+      var head = media.querySelector(".jmodes");
+      var tabs = [].slice.call(media.querySelectorAll('[role="tab"]'));
+      var videoPane = media.querySelector(".jvideo");
+      var stage = pane.querySelector(".jstage");
+      var pos = pane.querySelector(".jpos");
+      var live = pane.querySelector(".jlive");
+      var prev = pane.querySelector(".jprev");
+      var next = pane.querySelector(".jnext");
+      var cap = pane.querySelector(".jcap");
+      var stepper = pane.querySelector(".jstepper");
+      var pips = [].slice.call(pane.querySelectorAll(".jpips i"));
+      var total = steps.length;
+      var data = steps.map(function (li) {
+        var hd = li.querySelector(".jstep-hd");
+        return {
+          li: li,
+          hd: hd,
+          src: li.getAttribute("data-shot-src"),
+          w: li.getAttribute("data-shot-w"),
+          h: li.getAttribute("data-shot-h"),
+          trunc: li.hasAttribute("data-shot-trunc"),
+          label: (li.querySelector(".slabel") || li).textContent,
+          failed: li.classList.contains("fail"),
+          ms: hd ? num(hd.getAttribute("data-seek")) : null,
+        };
+      });
+      var img = document.createElement("img");
+      img.decoding = "async";
+      var cur = -1;
+      var mode = "video";
+      var warmed = {};
+
+      function warm(i) {
+        var d = data[i];
+        if (!d || !d.src || warmed[d.src]) return;
+        warmed[d.src] = true;
+        new Image().src = d.src;
+      }
+
+      function caption(d, i) {
+        cap.textContent = "";
+        var hd = document.createElement("div");
+        hd.className = "jcap-hd" + (d.failed ? " fail" : "");
+        hd.appendChild(document.createTextNode(d.label));
+        var st = document.createElement("span");
+        st.className = "st";
+        st.textContent = d.failed ? (d.src ? " — failure screen" : " — failed, no screen captured") : "";
+        hd.appendChild(st);
+        cap.appendChild(hd);
+        var asserts = d.li.querySelector(".jasserts");
+        if (asserts) cap.appendChild(asserts.cloneNode(true));
+        if (!d.src) return;
+        var meta = document.createElement("div");
+        meta.className = "jcap-meta mono";
+        var a = document.createElement("a");
+        a.href = d.src;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = "open full size ↗";
+        meta.appendChild(a);
+        if (d.w && d.h) meta.appendChild(document.createTextNode(" · " + d.w + "×" + d.h));
+        if (d.trunc) {
+          var t = document.createElement("span");
+          t.className = "trunc";
+          t.textContent = " · truncated at capture limit — the screen continues below";
+          meta.appendChild(t);
+        }
+        cap.appendChild(meta);
+      }
+
+      function show(i) {
+        if (i < 0 || i >= total) return;
+        cur = i;
+        var d = data[i];
+        stage.textContent = "";
+        stage.scrollTop = 0;
+        stage.classList.toggle("fail", d.failed);
+        if (d.src) {
+          if (d.w && d.h) { img.width = Number(d.w); img.height = Number(d.h); }
+          else { img.removeAttribute("width"); img.removeAttribute("height"); }
+          img.alt = "Screen for step " + (i + 1) + " of " + total + ": " + d.label + (d.failed ? " (failed)" : "");
+          img.src = d.src;
+          stage.appendChild(img);
+          warm(i - 1);
+          warm(i + 1);
+        } else {
+          var none = document.createElement("div");
+          none.className = "jnoshot";
+          none.textContent = "No screen captured for this step";
+          stage.appendChild(none);
+        }
+        pos.textContent = "Step " + (i + 1) + " of " + total + (d.failed ? " · failed" : "");
+        // Screen readers get position, status and label (or the missing screen) in one.
+        live.textContent = "Step " + (i + 1) + " of " + total + (d.failed ? ", failed" : "") +
+          ": " + (d.src ? d.label : "no screen captured");
+        prev.disabled = i === 0;
+        next.disabled = i === total - 1;
+        // A button disabled under the focus drops it; hand it to the other one.
+        if (prev.disabled && document.activeElement === prev) next.focus();
+        if (next.disabled && document.activeElement === next) prev.focus();
+        data.forEach(function (s, j) {
+          s.li.classList.toggle("current", j === i);
+          if (j === i) s.li.setAttribute("aria-current", "step"); else s.li.removeAttribute("aria-current");
+        });
+        pips.forEach(function (p, j) { p.classList.toggle("cur", j === i); });
+        caption(d, i);
+      }
+
+      // The step a switch to Screens opens on: the one playback highlights, else the
+      // failing step, else the first.
+      function startStep() {
+        for (var i = 0; i < total; i++) if (data[i].li.classList.contains("current")) return i;
+        var f = num(card.getAttribute("data-fail-step"));
+        return f !== null && f < total ? f : 0;
+      }
+
+      function setMode(m) {
+        if (m === "video" && !videoPane) m = "screens";
+        mode = m;
+        tabs.forEach(function (t) {
+          var sel = t.getAttribute("data-mode") === m;
+          t.setAttribute("aria-selected", sel ? "true" : "false");
+          t.tabIndex = sel ? 0 : -1;
+        });
+        if (videoPane) videoPane.hidden = m !== "video";
+        pane.hidden = m !== "screens";
+        if (m === "screens") {
+          if (video) video.pause();
+          show(startStep());
+        } else {
+          data.forEach(function (s) { s.li.removeAttribute("aria-current"); });
+          if (video && cur >= 0 && data[cur].ms !== null) {
+            video.currentTime = data[cur].ms / 1000;   // paused on the step; no autoplay
+          }
+        }
+      }
+
+      head.hidden = false;
+      tabs.forEach(function (t, i) {
+        t.addEventListener("click", function () { setMode(t.getAttribute("data-mode")); });
+        t.addEventListener("keydown", function (e) {
+          var n = tabs.length;
+          var j = e.key === "ArrowRight" ? (i + 1) % n : e.key === "ArrowLeft" ? (i - 1 + n) % n
+            : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : -1;
+          if (j < 0) return;
+          e.preventDefault();
+          tabs[j].focus();
+          setMode(tabs[j].getAttribute("data-mode"));
+        });
+      });
+      prev.addEventListener("click", function () { show(cur - 1); });
+      next.addEventListener("click", function () { show(cur + 1); });
+      // Arrow keys step only while focus is in the viewer — never page-wide.
+      function onKey(e) {
+        var j = e.key === "ArrowLeft" ? cur - 1 : e.key === "ArrowRight" ? cur + 1
+          : e.key === "Home" ? 0 : e.key === "End" ? total - 1 : null;
+        if (j === null) return;
+        e.preventDefault();
+        show(Math.max(0, Math.min(total - 1, j)));
+      }
+      stage.addEventListener("keydown", onKey);
+      stepper.addEventListener("keydown", onKey);
+      data.forEach(function (d, i) {
+        if (d.hd && d.hd.tagName === "BUTTON") {
+          d.hd.addEventListener("click", function () { if (mode === "screens") show(i); });
+        }
+        var fb = d.li.querySelector(".jfailbtn");
+        if (fb) {
+          fb.hidden = false;
+          fb.addEventListener("click", function () { setMode("screens"); show(i); stage.focus(); });
+        }
+      });
+      setMode(media.getAttribute("data-view") === "screens" ? "screens" : "video");
+      return { active: function () { return mode === "screens"; } };
+    }
+
     document.querySelectorAll(".jcard").forEach(function (card) {
       var video = card.querySelector("[data-video]");
-      if (!video) return;
       var steps = [].slice.call(card.querySelectorAll(".jstep[data-step]"));
+      var viewer = screensViewer(card, steps, video);
+      if (!video) return;
+      var screensOn = function () { return !!viewer && viewer.active(); };
       var marks = [].slice.call(card.querySelectorAll(".jmark"));
 
       // Click any element carrying data-seek (step header or marker) -> seek + play.
+      // In the Screens view a step click selects its still instead (see the viewer).
       [].slice.call(card.querySelectorAll("[data-seek]")).forEach(function (el) {
         el.addEventListener("click", function () {
+          if (screensOn()) return;
           var ms = num(el.getAttribute("data-seek"));
           if (ms === null) return;
           video.currentTime = ms / 1000;
@@ -300,6 +550,7 @@
         .sort(function (a, b) { return a.ms - b.ms; });
 
       video.addEventListener("timeupdate", function () {
+        if (screensOn()) return;   // the viewer owns the highlight while it is shown
         var t = video.currentTime * 1000;
         var cur = null;
         for (var i = 0; i < timed.length; i++) {

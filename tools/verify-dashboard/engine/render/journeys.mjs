@@ -11,6 +11,12 @@
 // The video↔step sync (seek on click, auto-highlight while playing, auto-seek to a
 // failure) is driven by the generic client script in template.html via the data-*
 // attributes emitted here; with no JS the card is a static, readable list.
+//
+// Step screens (Phase 3c): the run's per-step stills are hidden until asked for. With
+// JS the media column gets a Video | Screens pair of views that share the step list
+// (Screens is a one-still-at-a-time viewer the client script fills on demand); with no
+// JS each step carries a link that opens its still. No still is fetched until asked for. The Video view exists only
+// when the card has a walkthrough; a failed card opens on its failing step's still.
 
 import { JOURNEY_STATUS, MEDIA_NOTE } from "../model.mjs";
 import { escapeHtml, formatDuration } from "./lib.mjs";
@@ -130,24 +136,47 @@ function recordingLabel(video) {
   return `<div class="jreclabel mono">walkthrough · ${run}</div>`;
 }
 
-// The left column: the walkthrough video + marker rail, or a plain panel saying why
-// there is none. UNVERIFIED and any journey without a bound walkthrough show a greyed,
-// label-only area — never the fast gating video, never a frame that could read as a
-// passing run.
-function videoColumn(journey) {
-  if (journey.status === JOURNEY_STATUS.UNVERIFIED) {
-    return `<div class="jvideo"><div class="jnovideo unver">UNVERIFIED — no run</div></div>`;
-  }
-  if (!journey.video?.src) {
-    const note = journey.media_note ?? MEDIA_NOTE.NONE;
-    return `<div class="jvideo"><div class="jnovideo">${escapeHtml(note)}</div></div>`;
-  }
+// The walkthrough video + marker rail. `pane` adds the tab-panel wiring when the card
+// also has a Screens view.
+function videoPane(journey, pane = "") {
   const src = escapeHtml(journey.video.src);
-  return `<div class="jvideo">
+  return `<div class="jvideo"${pane}>
           ${recordingLabel(journey.video)}
           <video class="jvid" data-video controls playsinline preload="metadata" src="${src}"></video>
           ${markerRail(journey)}
         </div>`;
+}
+
+// Why a card with steps has no stills to show: none were taken, or they were taken by
+// a browser whose run is not the one the steps come from (stills are never grafted
+// onto another browser's steps).
+function noStillsNote(journey) {
+  if (journey.steps.length === 0) return "";
+  const elsewhere = journey.unshown_still_engines ?? [];
+  const text =
+    elsewhere.length > 0 && journey.steps_engine
+      ? `no step screens from ${journey.steps_engine}, whose run these steps are from — screens exist for ${elsewhere.join(", ")}`
+      : "no step screens in this run's evidence";
+  return `<p class="jnoshots mono">${escapeHtml(text)}</p>`;
+}
+
+// The left column: the walkthrough video + marker rail, or a plain panel saying why
+// there is none — plus, when the run has step stills, the Video | Screens views.
+// UNVERIFIED and any journey without a bound walkthrough show a greyed, label-only
+// area — never the fast gating video, never a frame that could read as a passing run.
+function mediaColumn(journey, screens) {
+  if (journey.status === JOURNEY_STATUS.UNVERIFIED) {
+    return `<div class="jvideo"><div class="jnovideo unver">UNVERIFIED — no run</div></div>`;
+  }
+  const hasVideo = Boolean(journey.video?.src);
+  if (!screens) {
+    const media = hasVideo
+      ? videoPane(journey)
+      : `<div class="jvideo"><div class="jnovideo">${escapeHtml(journey.media_note ?? MEDIA_NOTE.NONE)}</div></div>`;
+    const note = noStillsNote(journey);
+    return note ? `<div class="jmedia">${media}${note}</div>` : media;
+  }
+  return screensMedia(journey, screens, hasVideo);
 }
 
 function assertionItem(a) {
@@ -158,33 +187,175 @@ function assertionItem(a) {
   return `<li class="pass"><span class="mk">✓</span>${escapeHtml(a.text)}</li>`;
 }
 
-function stepItem(step) {
+// A step's still as it will be shown, from the Journey step — or null.
+function stillOf(step, src, total) {
+  if (!src) return null;
+  const failed = step.status === "failed";
+  return {
+    src,
+    width: step.screenshot_width ?? null,
+    height: step.screenshot_height ?? null,
+    truncated: step.screenshot_truncated === true,
+    alt: `Screen for step ${step.index + 1} of ${total}: ${step.label}${failed ? " (failed)" : ""}`,
+  };
+}
+
+// The no-JS form of a step's still: a link that opens it. Not an inline <img>: with
+// scripting off, browsers ignore loading="lazy" (and a closed <details> does not stop
+// the fetch), so an inline image would pull every still on page load.
+function stillLink(step, still, screens) {
+  const src = escapeHtml(still.src);
+  const text = step.status === "failed" ? "View failure screen" : "Screen";
+  const meta = [screens.engine];
+  if (still.width && still.height) meta.push(`${still.width}×${still.height}`);
+  if (still.truncated) meta.push("truncated at capture limit");
+  const tail = meta
+    .filter(Boolean)
+    .map((m) => ` · ${escapeHtml(m)}`)
+    .join("");
+  return `<p class="jshot mono"><a href="${src}" target="_blank" rel="noopener" aria-label="${escapeHtml(still.alt)} (opens the image)">${text} ↗</a>${tail}</p>`;
+}
+
+// The still-related data + markup for one step (empty when the card has no stills).
+function stepStill(step, screens) {
+  if (!screens) return { attrs: "", body: "" };
+  const still = screens.stills[step.index];
+  if (!still) {
+    return { attrs: "", body: `<p class="jnoshot-inline mono">no screen captured</p>` };
+  }
+  let attrs = ` data-shot-src="${escapeHtml(still.src)}"`;
+  if (still.width && still.height) {
+    attrs += ` data-shot-w="${still.width}" data-shot-h="${still.height}"`;
+  }
+  if (still.truncated) attrs += " data-shot-trunc";
+  // The JS form of "show me the failure": the disclosure is hidden once JS runs.
+  const failBtn =
+    step.status === "failed"
+      ? `<button type="button" class="jfailbtn" hidden>View failure screen</button>`
+      : "";
+  return { attrs, body: `${failBtn}${stillLink(step, still, screens)}` };
+}
+
+function stepItem(step, screens) {
   const failed = step.status === "failed";
   const seekable = typeof step.t_start_ms === "number";
   const cls = `jstep${failed ? " fail" : ""}`;
   const dataStep = ` data-step="${step.index}"`;
   const screen = step.screen ? `<span class="sscreen">${escapeHtml(step.screen)}</span>` : "";
   const label = `<span class="slabel">${escapeHtml(step.label)}${screen}</span>`;
-  // A seekable step's header is a real button (native keyboard + focus); otherwise a
-  // plain row. The status dot + label are the click target that seeks the video.
-  const head = seekable
-    ? `<button type="button" class="jstep-hd" data-seek="${step.t_start_ms}"><span class="sdot"></span>${label}</button>`
-    : `<div class="jstep-hd"><span class="sdot"></span>${label}</div>`;
+  // A seekable step's header is a real button (native keyboard + focus); so is every
+  // step's on a card with stills (it selects the step in the Screens view). Otherwise
+  // a plain row. The status dot + label are the click target.
+  const seek = seekable ? ` data-seek="${step.t_start_ms}"` : "";
+  const head =
+    seekable || screens
+      ? `<button type="button" class="jstep-hd"${seek}><span class="sdot"></span>${label}</button>`
+      : `<div class="jstep-hd"><span class="sdot"></span>${label}</div>`;
   const asserts =
     step.assertions.length > 0
       ? `<ul class="jasserts">${step.assertions.map(assertionItem).join("")}</ul>`
       : "";
-  return `<li class="${cls}"${dataStep}>${head}${asserts}</li>`;
+  const still = stepStill(step, screens);
+  return `<li class="${cls}"${dataStep}${still.attrs}>${head}${asserts}${still.body}</li>`;
 }
 
-function stepColumn(journey) {
+function stepColumn(journey, screens) {
   if (journey.status === JOURNEY_STATUS.UNVERIFIED) {
     return `<div class="jsteps-wrap"><p class="jsteps-empty unver">No steps — this journey has no run to bind to.</p></div>`;
   }
   if (journey.steps.length === 0) {
     return `<div class="jsteps-wrap"><p class="jsteps-empty">No steps recorded for this run.</p></div>`;
   }
-  return `<div class="jsteps-wrap"><ol class="jsteps">${journey.steps.map(stepItem).join("")}</ol></div>`;
+  const items = journey.steps.map((step) => stepItem(step, screens)).join("");
+  return `<div class="jsteps-wrap"><ol class="jsteps">${items}</ol></div>`;
+}
+
+// A still path is served next to the page: relative, no scheme, no parent segment. A
+// path that is not (the evidence is untrusted data) is treated as no still at all.
+function servedStillPath(src) {
+  if (typeof src !== "string" || src === "") return null;
+  if (src.startsWith("/") || src.includes("\\") || /^[a-z][a-z0-9+.-]*:/i.test(src)) return null;
+  if (src.split("/").includes("..")) return null;
+  return src;
+}
+
+// An HTML-id-safe prefix, unique per card on the page (the list index keeps two
+// journey ids that sanitise alike apart).
+function cardDomId(journey, index) {
+  return `jc${index}-${String(journey.id).replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+/**
+ * Everything the step-screens UI needs for one card, or null when it has none: an
+ * UNVERIFIED card never shows stills (whatever its input carries), and a card whose
+ * run took no stills gets a one-line note instead of a viewer.
+ */
+function screensContext(journey, index) {
+  if (journey.status === JOURNEY_STATUS.UNVERIFIED) return null;
+  const total = journey.steps.length;
+  const stills = journey.steps.map((step) =>
+    stillOf(step, servedStillPath(step.screenshot), total),
+  );
+  const count = stills.filter(Boolean).length;
+  if (count === 0) return null;
+  const failStep = journey.steps.find((s) => s.status === "failed")?.index ?? null;
+  const engine = journey.steps_engine ?? null;
+  const retries = journey.browsers.find((b) => b.engine === engine)?.retries ?? 0;
+  return { id: cardDomId(journey, index), total, stills, count, failStep, engine, retries };
+}
+
+// The media column of a card with stills: the Video | Screens views (Screens only when
+// there is no walkthrough). The server renders the no-JS state — video visible, the
+// tab row and viewer hidden; the client script reveals them and applies `data-view`.
+function screensMedia(journey, screens, hasVideo) {
+  const { id } = screens;
+  // Failed cards open on the failure screen; passed cards with a walkthrough on Video.
+  const view = screens.failStep !== null || !hasVideo ? "screens" : "video";
+  const failMark =
+    screens.failStep !== null ? `<span class="jfailmark" aria-hidden="true"></span>` : "";
+  const source = screens.engine
+    ? `<span class="jsrc mono">stills · ${escapeHtml(screens.engine)}</span>`
+    : "";
+  const count = `<span class="jcount mono">${screens.count}/${screens.total}</span>`;
+  const head = hasVideo
+    ? `<div class="jmodes" role="tablist" aria-label="Evidence view" hidden>
+            <button type="button" role="tab" id="${id}-tab-v" aria-controls="${id}-pane-v" data-mode="video" aria-selected="true">Video</button>
+            <button type="button" role="tab" id="${id}-tab-s" aria-controls="${id}-pane-s" data-mode="screens" aria-selected="false" tabindex="-1">Screens ${count}${failMark}</button>
+            ${source}
+          </div>`
+    : `<div class="jmodes solo" hidden><span class="jsolo mono">Screens ${count}</span>${source}</div>`;
+  const video = hasVideo
+    ? videoPane(journey, ` id="${id}-pane-v" role="tabpanel" aria-labelledby="${id}-tab-v"`)
+    : `<p class="jmnote mono">${escapeHtml(journey.media_note ?? MEDIA_NOTE.NONE)}</p>`;
+  const panel = hasVideo
+    ? ` role="tabpanel" aria-labelledby="${id}-tab-s"`
+    : ` role="region" aria-label="Step screens"`;
+  const flaky =
+    journey.status === JOURNEY_STATUS.FLAKY && screens.retries > 0
+      ? `<p class="jsnote warn mono">screens from the passing attempt (retry ${screens.retries})</p>`
+      : "";
+  const pips = journey.steps
+    .map(
+      (s) =>
+        `<i class="${s.status === "failed" ? "fail" : ""}${screens.stills[s.index] ? "" : " none"}"></i>`,
+    )
+    .join("");
+  return `<div class="jmedia" data-media data-view="${view}">
+          ${head}
+          ${video}
+          <div class="jscreens" id="${id}-pane-s"${panel} hidden>
+            ${flaky}
+            <div class="jstage" tabindex="0" aria-roledescription="screen viewer" aria-label="Step screens. Left and right arrow keys move between steps; up and down scroll the screen."></div>
+            <div class="jstepper">
+              <button type="button" class="jprev" aria-label="Previous step">‹ Prev</button>
+              <span class="jpos mono"></span>
+              <button type="button" class="jnext" aria-label="Next step">Next ›</button>
+            </div>
+            <div class="jpips" aria-hidden="true">${pips}</div>
+            <span class="jlive" aria-live="polite" aria-atomic="true"></span>
+            <div class="jcap"></div>
+          </div>
+        </div>`;
 }
 
 // The offset of the first failing step, so a failed card can auto-seek its video to
@@ -196,11 +367,17 @@ function failSeek(journey) {
   return failing ? failing.t_start_ms : null;
 }
 
-/** Render one full journey card. */
-export function renderJourneyCard(journey) {
+/**
+ * Render one full journey card.
+ * @param {object} journey
+ * @param {number} [index] the card's position on the page (keeps its element ids unique)
+ */
+export function renderJourneyCard(journey, index = 0) {
   const unver = journey.status === JOURNEY_STATUS.UNVERIFIED ? " unverified" : "";
   const fseek = failSeek(journey);
-  const failAttr = fseek !== null ? ` data-fail-seek="${fseek}"` : "";
+  const screens = screensContext(journey, index);
+  let failAttr = fseek !== null ? ` data-fail-seek="${fseek}"` : "";
+  if (screens?.failStep != null) failAttr += ` data-fail-step="${screens.failStep}"`;
   const duration =
     journey.status === JOURNEY_STATUS.UNVERIFIED
       ? ""
@@ -218,8 +395,8 @@ export function renderJourneyCard(journey) {
         </header>
         ${provenanceBar(journey)}
         <div class="jbody">
-          ${videoColumn(journey)}
-          ${stepColumn(journey)}
+          ${mediaColumn(journey, screens)}
+          ${stepColumn(journey, screens)}
         </div>
       </article>`;
 }
@@ -228,6 +405,6 @@ export function renderJourneyCard(journey) {
 export function renderJourneyList(journeys) {
   if (journeys.length === 0) return `<p class="jempty">No journeys configured.</p>`;
   return `<div class="jlist">
-      ${journeys.map(renderJourneyCard).join("\n      ")}
+      ${journeys.map((journey, index) => renderJourneyCard(journey, index)).join("\n      ")}
     </div>`;
 }
