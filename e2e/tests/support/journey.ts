@@ -78,10 +78,9 @@ const WALKTHROUGH_MAX_HOLDS = 3;
 const OVERLAY_GLIDE_MS = 450;
 /**
  * Walkthrough overlay: how long the target stays ringed before the action starts (ms).
- * slowMo (WALKTHROUGH_SLOWMO_MS) then adds ~300ms before a click lands, so the ring is
- * up ~600ms at the click.
+ * Measured in CI recordings, the ring is then up ~this long when the click lands.
  */
-export const OVERLAY_HIGHLIGHT_MS = 300;
+export const OVERLAY_HIGHLIGHT_MS = 500;
 /** Walkthrough overlay: bound on drawing it — the target is already attached (ms). */
 const OVERLAY_DRAW_TIMEOUT_MS = 2000;
 

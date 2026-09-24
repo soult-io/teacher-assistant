@@ -97,8 +97,10 @@ function expectPointedAt(s: Snapshot | undefined, kind: string, caption: string)
   expect(ring?.right).toBeGreaterThanOrEqual(target.right);
   expect(ring?.bottom).toBeGreaterThanOrEqual(target.bottom);
   expect(s.ringKind).toBe(kind);
-  // The fixture's own hold; the walkthrough's slowMo adds to it.
-  expect(s.ringUpMs, "ring held before the action").toBeGreaterThanOrEqual(OVERLAY_HIGHLIGHT_MS);
+  // The fixture's own hold, minus a frame of timer slack in the page.
+  expect(s.ringUpMs, "ring held before the action").toBeGreaterThanOrEqual(
+    OVERLAY_HIGHLIGHT_MS - 50,
+  );
   expect(s.caption).toBe(caption);
   expect(s.underCentre, "the overlay never covers the target for hit-testing").toBe(true);
 }
