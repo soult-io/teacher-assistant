@@ -6,6 +6,11 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Least privilege: the jobs only check out the repo and upload artifacts (artifact
+# upload authenticates with the runner's own token, not GITHUB_TOKEN).
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   # PR runs supersede each other. Main runs are NOT cancelled mid-flight: each one is
