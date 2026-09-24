@@ -148,6 +148,23 @@ test.describe("walkthrough overlay", () => {
     });
   });
 
+  test("a target below the fold is scrolled into view before it is pointed at", async ({
+    page: p,
+    step,
+  }) => {
+    const far = '<div style="height: 2000px"></div><input id="far" aria-label="Far field">';
+    await serve(p, { "/a": html("A", far) });
+    await step("type below the fold", async () => {
+      await p.goto(`${ORIGIN}/a`);
+      await enterText(p.locator("#far"), "JT");
+      expectPointedAt(
+        (await log(p)).find((s) => s.event === "keydown" && s.id === "far"),
+        "focus",
+        "Type · Far field",
+      );
+    });
+  });
+
   test("the overlay is out of the page's way", async ({ page: p, step }) => {
     await serve(p, { "/a": html("A") });
     await step("click", async () => {

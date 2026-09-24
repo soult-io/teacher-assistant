@@ -93,8 +93,6 @@ interface ActionOverlay {
   kind: "click" | "focus" | "other";
   /** The caption's verb, from the action's own arguments where they name it. */
   verb: string | ((args: readonly unknown[]) => string);
-  /** A pointer action: Playwright scrolls its target into view, so the overlay does first. */
-  scroll: boolean;
 }
 
 /**
@@ -102,35 +100,33 @@ interface ActionOverlay {
  * at by the overlay as its row says. One table, so a wrapped action always has a row.
  */
 const LOCATOR_ACTION_OVERLAY = {
-  check: { kind: "click", verb: "Check", scroll: true },
-  clear: { kind: "focus", verb: "Type", scroll: false },
-  click: { kind: "click", verb: "Click", scroll: true },
-  dblclick: { kind: "click", verb: "Double-click", scroll: true },
-  dragTo: { kind: "other", verb: "Drag", scroll: true },
-  fill: { kind: "focus", verb: "Type", scroll: false },
-  hover: { kind: "other", verb: "Hover", scroll: true },
+  check: { kind: "click", verb: "Check" },
+  clear: { kind: "focus", verb: "Type" },
+  click: { kind: "click", verb: "Click" },
+  dblclick: { kind: "click", verb: "Double-click" },
+  dragTo: { kind: "other", verb: "Drag" },
+  fill: { kind: "focus", verb: "Type" },
+  hover: { kind: "other", verb: "Hover" },
   press: {
     kind: "focus",
     verb: (args) => (typeof args[0] === "string" ? `Press ${args[0]}` : "Press"),
-    scroll: false,
   },
-  pressSequentially: { kind: "focus", verb: "Type", scroll: false },
-  selectOption: { kind: "other", verb: "Select", scroll: false },
-  selectText: { kind: "focus", verb: "Select text", scroll: false },
+  pressSequentially: { kind: "focus", verb: "Type" },
+  selectOption: { kind: "other", verb: "Select" },
+  selectText: { kind: "focus", verb: "Select text" },
   setChecked: {
     kind: "click",
     verb: (args) => (args[0] === false ? "Uncheck" : "Check"),
-    scroll: true,
   },
-  setInputFiles: { kind: "other", verb: "Upload", scroll: false },
-  tap: { kind: "click", verb: "Click", scroll: true },
-  type: { kind: "focus", verb: "Type", scroll: false },
-  uncheck: { kind: "click", verb: "Uncheck", scroll: true },
+  setInputFiles: { kind: "other", verb: "Upload" },
+  tap: { kind: "click", verb: "Click" },
+  type: { kind: "focus", verb: "Type" },
+  uncheck: { kind: "click", verb: "Uncheck" },
   // Locator declares toString; every object literal already has one, so it is no row.
 } satisfies Partial<Record<Exclude<keyof Locator & string, "toString">, ActionOverlay>>;
 const LOCATOR_ACTIONS = Object.keys(LOCATOR_ACTION_OVERLAY) as (keyof Locator & string)[];
 /** A page action with a selector not in the table (page.focus) is shown like a hover. */
-const FALLBACK_OVERLAY: ActionOverlay = { kind: "other", verb: "Hover", scroll: false };
+const FALLBACK_OVERLAY: ActionOverlay = { kind: "other", verb: "Hover" };
 /** Walkthrough: the Page methods that drive the UI; each is held first. */
 const PAGE_ACTIONS: readonly (keyof Page & string)[] = [
   "check",
@@ -401,7 +397,6 @@ async function holdStepEnd(page: Page): Promise<void> {
 interface PointRequest {
   kind: ActionOverlay["kind"];
   verb: string;
-  scroll: boolean;
   /** The cursor's last position, for a document that has not drawn it yet. */
   from: Point | null;
   glideMs: number;
@@ -538,12 +533,13 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
   if (!target || !req) return null;
 
   // Point where the action will land: on screen, at the target's centre.
-  // A pointer action scrolls its target into view anyway; that scroll is done now, so
-  // the ring is drawn where the action lands. Other actions never scroll the page.
+  // A target below the fold is scrolled into view first, so the viewer sees what is
+  // touched: a click or a focused field would scroll there anyway, and a select or an
+  // upload the viewer could not see would teach nothing. Walkthrough-only.
   let box = target.getBoundingClientRect();
   const offScreen =
     box.top < 0 || box.bottom > innerHeight || box.left < 0 || box.right > innerWidth;
-  if (offScreen && req.scroll) {
+  if (offScreen) {
     target.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
     box = target.getBoundingClientRect();
   }
@@ -645,7 +641,6 @@ async function pointAt(
   const request: PointRequest = {
     kind: overlay.kind,
     verb: typeof overlay.verb === "function" ? overlay.verb(args) : overlay.verb,
-    scroll: overlay.scroll,
     from: state.cursor,
     glideMs: OVERLAY_GLIDE_MS,
     highlightMs: OVERLAY_HIGHLIGHT_MS,
