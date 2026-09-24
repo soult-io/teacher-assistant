@@ -29,6 +29,7 @@ import { buildJourneys, parseEvidence, parseWalkthroughEvidence } from "../engin
 import { buildRunProvenance, sha256Hex } from "../engine/provenance.mjs";
 import {
   aggregate,
+  escapeHtml,
   fillTemplate,
   renderBars,
   renderCallouts,
@@ -47,15 +48,18 @@ const DEFAULT_EVIDENCE = join(REPO_ROOT, "e2e", "test-results", "journey-evidenc
 
 const passOf = (pkgs, name) => pkgs.find((p) => p.name === name)?.pass ?? 0;
 
-function shortSha() {
-  const sha = process.env.GITHUB_SHA;
-  if (sha) return sha.slice(0, 7);
+// The full sha of the commit this page is built from — the TESTED commit. The CI
+// wiring exports it as COMMIT_SHA (and also sets GITHUB_SHA to it for the generate
+// step, since under workflow_run GITHUB_SHA is main's tip, not the tested commit).
+// Locally: the checkout's HEAD. The header shows it short; the CI pills bind to it
+// in full.
+function commitSha() {
+  const sha = process.env.COMMIT_SHA || process.env.GITHUB_SHA;
+  if (sha) return sha;
   try {
-    return execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: REPO_ROOT })
-      .toString()
-      .trim();
+    return execFileSync("git", ["rev-parse", "HEAD"], { cwd: REPO_ROOT }).toString().trim();
   } catch {
-    return "unknown";
+    return null;
   }
 }
 
@@ -199,11 +203,19 @@ async function main() {
   console.log(`  e2e tile: ${e2eCount ?? "— (no verified journey)"}`);
   const metrics = buildMetrics(pkgs, e2eCount);
 
-  console.log("verify-dashboard: reading CI status from GitHub Actions");
+  const sha = commitSha();
+  const shortSha = sha ? sha.slice(0, 7) : "unknown";
+  // One build timestamp: the page date and the "in progress at build time" pills.
+  const builtAt = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  console.log(
+    `verify-dashboard: reading CI status for ${sha ?? "(no commit)"} from GitHub Actions`,
+  );
   const pills = await collectCiPills(
     process.env.GITHUB_REPOSITORY,
     process.env.GITHUB_TOKEN,
     config.ciPillSpecs,
+    sha,
   );
 
   const template = readFileSync(join(ENGINE_DIR, "template.html"), "utf8");
@@ -213,9 +225,10 @@ async function main() {
     EYEBROW: config.branding.eyebrow,
     HEADING: config.branding.heading,
     LEDE: config.branding.lede,
-    COMMIT: shortSha(),
-    GENERATED_DATE: new Date().toISOString().slice(0, 10),
-    CI_PILLS: renderCiPills(pills),
+    COMMIT: escapeHtml(shortSha),
+    GENERATED_DATE: builtAt.slice(0, 10),
+    CI_HEADING: escapeHtml(`CI for ${shortSha}`),
+    CI_PILLS: renderCiPills(pills, { builtAt }),
     SECTIONS: renderSections(config.sections, { metrics, pkgs, journeys }),
     FOOTER_LINKS: renderFooterLinks(config.branding.footerLinks),
     FOOTER_NOTE: config.branding.footerNote,

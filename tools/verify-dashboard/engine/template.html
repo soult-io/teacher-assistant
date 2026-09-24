@@ -81,6 +81,10 @@
   .pill.pass { color:var(--pass); background:var(--pass-soft); border-color:color-mix(in srgb,var(--pass) 30%,transparent); }
   .pill.note { color:var(--warn); background:var(--warn-soft); border-color:color-mix(in srgb,var(--warn) 30%,transparent); }
   .pill.fail { color:var(--fail); background:var(--fail-soft); border-color:color-mix(in srgb,var(--fail) 30%,transparent); }
+  /* Two neutral non-verdicts, distinguishable: no run for the commit (solid) vs API unreadable (dashed). */
+  .pill.none { color:var(--dim); background:var(--surface-2); border-color:var(--border-2); }
+  .pill.unk { color:var(--faint); background:transparent; border-color:var(--border-2); border-style:dashed; }
+  .pill .q { font-weight:400; opacity:.85; }
   .dot { width:.5rem; height:.5rem; border-radius:50%; background:currentColor; }
 
   section { margin-bottom:3rem; }
@@ -292,7 +296,7 @@
   </header>
 
   <div class="ci">
-    <span class="lbl">CI on main</span>
+    <span class="lbl">{{CI_HEADING}}</span>
     {{CI_PILLS}}
   </div>
 

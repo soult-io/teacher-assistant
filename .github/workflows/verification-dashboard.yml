@@ -246,8 +246,9 @@ jobs:
           SOURCE_WORKFLOW: e2e
           SOURCE_JOB: e2e
           SOURCE_RUN_STARTED: ${{ steps.e2e.outputs.created_at }}
-        # The page's COMMIT header reads GITHUB_SHA, which workflow_run sets to main's tip;
-        # a step's env: cannot override GITHUB_*, so the shell sets the tested commit.
+        # The generator binds the COMMIT header and the CI pills to COMMIT_SHA (job env).
+        # GITHUB_SHA is main's tip under workflow_run and is the generator's fallback, so the
+        # shell also sets it to the tested commit (a step's env: cannot override GITHUB_*).
         run: GITHUB_SHA="$COMMIT_SHA" pnpm --filter @teacher-assistant/verify-dashboard run generate
 
       # Hand the static output (index.html + videos/ + traces/ + stills/) to the publish job, which

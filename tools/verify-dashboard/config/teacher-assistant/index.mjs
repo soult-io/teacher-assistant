@@ -33,7 +33,7 @@ export const ferpaPackage = "@teacher-assistant/ferpa-guard";
 export const enginePackage = "@teacher-assistant/domain-core";
 export const pwaPackage = "@teacher-assistant/pwa";
 
-// Which CI workflows/jobs become the "CI on main" pills.
+// Which CI workflows/jobs become the CI pills (each bound to the dashboard's commit).
 export const ciPillSpecs = [
   {
     workflow: "ci.yml",
