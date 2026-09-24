@@ -5,8 +5,9 @@
 // import and the same engine renders another product.
 //
 //   engine counts + CI (config-driven)  +  journey-evidence.json (ingest)
+//     + walkthrough-evidence.json (the human-pace recording of the same commit)
 //   -> Journey[] + tiles/bars -> engine/template.html -> <outDir>/index.html
-//      + videos/*.webm + traces/*.zip + stills/*.jpg (one per journey step)
+//      + videos/*.webm (walkthrough + raw gating) + traces/*.zip + stills/*.jpg
 //
 // The visual proof of each journey is the run's own video + per-step stills (both
 // ingested from the e2e artifacts — the stills are taken by the e2e run itself), so
@@ -21,10 +22,10 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeAssetResolver } from "../engine/assets.mjs";
+import { createByteBudget, makeAssetResolver } from "../engine/assets.mjs";
 import { collectCiPills } from "../engine/ci-status.mjs";
 import { collectPackageCounts, deriveE2eCount } from "../engine/counts.mjs";
-import { buildJourneys, parseEvidence } from "../engine/ingest.mjs";
+import { buildJourneys, parseEvidence, parseWalkthroughEvidence } from "../engine/ingest.mjs";
 import { buildRunProvenance, sha256Hex } from "../engine/provenance.mjs";
 import {
   aggregate,
@@ -87,19 +88,48 @@ function readEvidenceBytes(evidenceFile) {
   }
 }
 
+// The human-pace walkthrough run (non-gating). Absent → every card shows "no
+// walkthrough recorded for this commit"; its videos are never replaced by the gating
+// run's. Its assets count against the same published-bytes budget as the gating run's.
+function loadWalkthrough(outDir, budget) {
+  const file = process.env.WALKTHROUGH_EVIDENCE_FILE;
+  if (!file) {
+    console.warn("  no walkthrough evidence given — cards show no video");
+    return null;
+  }
+  const path = resolve(file);
+  const bytes = readEvidenceBytes(path);
+  if (!bytes) return null;
+  const evidence = parseWalkthroughEvidence(bytes.toString("utf8"));
+  console.log(`  walkthrough evidence for commit ${evidence.commitSha ?? "(none)"}`);
+  return {
+    evidence,
+    run: {
+      ci_run_id: process.env.WALKTHROUGH_RUN_ID || null,
+      ci_run_url: process.env.WALKTHROUGH_RUN_URL || null,
+    },
+    resolveAsset: makeAssetResolver(path, outDir, { budget }),
+  };
+}
+
 function ingestJourneys(evidenceFile, outDir) {
   const bytes = readEvidenceBytes(evidenceFile);
   const evidence = bytes ? parseEvidence(bytes.toString("utf8")) : { tests: [] };
   const provenance = buildRunProvenance(process.env, {
     artifactDigest: bytes ? sha256Hex(bytes) : null,
   });
+  const budget = createByteBudget();
   const journeys = buildJourneys({
     evidence,
     manifest: config.journeyManifest,
     product: config.productSlug,
     provenance,
-    resolveAsset: makeAssetResolver(evidenceFile, outDir),
+    resolveAsset: makeAssetResolver(evidenceFile, outDir, { budget }),
+    walkthrough: loadWalkthrough(outDir, budget),
   });
+  const withVideo = journeys.filter((j) => j.video).length;
+  console.log(`  ${withVideo}/${journeys.length} journeys play a walkthrough recording`);
+  console.log(`  published assets: ${budget.used} / ${budget.limit} bytes`);
   return { journeys, provenance };
 }
 

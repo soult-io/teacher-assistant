@@ -39,6 +39,7 @@ coverage/
 # E2E (Playwright artifacts)
 e2e/.state/
 e2e/test-results/
+e2e/test-results-walkthrough/
 e2e/playwright-report/
 
 # Local data

@@ -148,11 +148,14 @@
   .jprov .sha { color:var(--ink); cursor:help; }
   .jprov a { font-weight:500; }
 
-  /* two-column body: video left (~58%, sticky), steps right (~42%) */
-  .jbody { display:grid; grid-template-columns:1.38fr 1fr; gap:1.3rem; align-items:start; }
+  /* two-column body: walkthrough video left (sticky), steps right. The media column is
+     the walkthrough's own width (a 390px phone recording), so the video plays at 1:1
+     and its text stays sharp; the height follows the video's own aspect ratio. */
+  .jbody { display:grid; grid-template-columns:minmax(0,390px) 1fr; gap:1.3rem; align-items:start; }
   .jvideo { position:sticky; top:1rem; align-self:start; display:flex; flex-direction:column; gap:.4rem; min-width:0; }
-  .jvid { width:100%; display:block; border-radius:10px; border:1px solid var(--border); background:#000; aspect-ratio:16/10; }
-  .jnovideo { border:1px dashed var(--border-2); border-radius:10px; background:var(--surface-2); color:var(--faint); font-family:var(--mono); font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; display:flex; align-items:center; justify-content:center; aspect-ratio:16/10; text-align:center; padding:1rem; }
+  .jvid { width:100%; max-height:85vh; object-fit:contain; display:block; border-radius:10px; border:1px solid var(--border); background:#000; }
+  .jreclabel { font-size:.7rem; color:var(--dim); }
+  .jnovideo { border:1px dashed var(--border-2); border-radius:10px; background:var(--surface-2); color:var(--faint); font-family:var(--mono); font-size:.78rem; text-transform:uppercase; letter-spacing:.06em; display:flex; align-items:center; justify-content:center; aspect-ratio:4/5; text-align:center; padding:1rem; }
   .jnovideo.unver { color:var(--faint); }
 
   .jrail { position:relative; height:1.15rem; margin:.1rem .1rem 0; }
@@ -248,7 +251,8 @@
     });
   })();
 
-  // Journey video <-> step sync. Generic: reads only the data-* attributes the engine
+  // Journey video <-> step sync (the video is the human-pace walkthrough recording;
+  // the step offsets are into that recording). Generic: reads only the data-* attributes the engine
   // emits (data-video, data-seek, data-step, data-fail-seek). With no JS the card is a
   // static, readable list; nothing below is required to understand a journey.
   (function () {
@@ -269,6 +273,21 @@
           if (p && p.catch) p.catch(function () {});
         });
       });
+
+      // The server places markers against the run's recorded test duration; the video
+      // file itself runs a little longer (it ends when the page closes). Once the real
+      // length is known, re-place each marker against it so marker and seek agree.
+      var placeMarks = function () {
+        var total = video.duration * 1000;
+        if (!isFinite(total) || total <= 0) return;
+        marks.forEach(function (m) {
+          var ms = num(m.getAttribute("data-seek"));
+          if (ms === null) return;
+          m.style.left = Math.max(0, Math.min(100, (ms / total) * 100)).toFixed(2) + "%";
+        });
+      };
+      if (video.readyState >= 1) placeMarks();
+      else video.addEventListener("loadedmetadata", placeMarks, { once: true });
 
       // Step offsets, ascending, for highlighting the current step as the video plays.
       var timed = steps

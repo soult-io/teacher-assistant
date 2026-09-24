@@ -135,8 +135,51 @@ jobs:
           run-id: ${{ steps.e2e.outputs.run_id }}
           github-token: ${{ github.token }}
 
+      # The human-pace walkthrough recordings (TEACH-16) come from the walkthrough job of
+      # the SAME e2e run — same run, same commit as the gating evidence above. The job
+      # is non-gating, so it may have failed or not run: then its artifact is absent and
+      # every card shows "no walkthrough recorded for this commit" (never the fast video).
+      - name: Resolve walkthrough job
+        id: walkthrough
+        if: steps.e2e.outputs.run_id
+        uses: actions/github-script@v7
+        env:
+          E2E_RUN_ID: ${{ steps.e2e.outputs.run_id }}
+        with:
+          script: |
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(process.env.E2E_RUN_ID),
+              filter: "latest",
+            });
+            const job = jobs.find((j) => j.name === "walkthrough");
+            if (!job) {
+              core.warning(`run ${process.env.E2E_RUN_ID} has no walkthrough job — cards show no video`);
+              return;
+            }
+            core.info(`walkthrough job ${job.id}: ${job.status}/${job.conclusion}`);
+            if (job.conclusion !== "success") {
+              core.warning(`walkthrough job concluded ${job.conclusion} — failed journeys show no video`);
+            }
+            core.setOutput("job_url", job.html_url);
+
+      - name: Download walkthrough recordings
+        if: steps.walkthrough.outputs.job_url
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: playwright-walkthrough
+          path: walkthrough-artifacts
+          run-id: ${{ steps.e2e.outputs.run_id }}
+          github-token: ${{ github.token }}
+
       - name: Generate dashboard
         env:
+          # Absent file → no walkthrough (the generator warns and renders the no-video panel).
+          WALKTHROUGH_EVIDENCE_FILE: ${{ steps.walkthrough.outputs.job_url && format('{0}/walkthrough-artifacts/walkthrough-evidence.json', github.workspace) || '' }}
+          WALKTHROUGH_RUN_ID: ${{ steps.e2e.outputs.run_id }}
+          WALKTHROUGH_RUN_URL: ${{ steps.walkthrough.outputs.job_url }}
           # The engine derives the artifact digest by hashing this file's bytes.
           EVIDENCE_FILE: ${{ github.workspace }}/e2e-artifacts/journey-evidence.json
           SOURCE_RUN_ID: ${{ steps.e2e.outputs.run_id }}

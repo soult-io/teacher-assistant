@@ -40,7 +40,8 @@ On every push to `main` (and on PRs, as a no-deploy build check):
 4. Reads **CI status** for `main` from the GitHub Actions REST API (best-effort;
    degrades to neutral pills without a token).
 5. Fills `engine/template.html` → `dist-dashboard/index.html` + `videos/` + `traces/`
-   + `stills/`. Each journey renders its own run video and step-synced list. The stills
+   + `stills/`. Each journey renders its human-pace walkthrough video (below) and a
+   step-synced list; the gating run's fast video is only a raw-evidence link. The stills
    are taken by the e2e run itself, so the generator needs no browser and no preview
    server.
 
@@ -52,6 +53,31 @@ tree, and `expect(locator, "message")` surfaces that message verbatim as the ste
 title. So `e2e/reporters/evidence-reporter.ts` records the full step+assertion tree
 into `journey-evidence.json`; the dashboard renders only what a real run produced —
 nothing is hand-authored.
+
+### Walkthrough recording (Phase 3c, TEACH-16)
+
+The gating run is fast (~2s per journey) — right for a pass/fail gate, unwatchable as a
+video. So the card's video comes from a separate, **non-gating** capture:
+`E2E_WALKTHROUGH=1 pnpm --filter @teacher-assistant/e2e e2e` re-runs J1–J6 on chromium
+at the 390×844 phone viewport with `slowMo` 300ms per action, per-character typing
+(80ms/char via `enterText`) and a 1.5s hold at the end of every step, recording video
+1:1. It writes `test-results-walkthrough/walkthrough-evidence.json` (`mode:
+"walkthrough"`, `commitSha`) whose step offsets are measured from the recording's first
+frame, so markers and seek line up with that video. It refuses `E2E_BASE_URL` — it only
+ever records the local synthetic build.
+
+CI: the `walkthrough` job in `e2e.yml` runs after the gating job on pushes to main (and
+manual dispatch), never on PRs, with `continue-on-error` so the workflow conclusion stays
+the gating result. The dashboard downloads its `playwright-walkthrough` artifact from the
+same run and binds a journey's walkthrough only if it is of the **same commit**, agrees
+with the card's verdict (flaky counts as passed) and walked the same steps. Otherwise the
+media slot shows a plain panel ("no walkthrough recorded for this commit", or why it was
+not shown) — it never falls back to the fast video. The card labels the video
+"walkthrough · run #N" linking the walkthrough job.
+
+Size bounds (`engine/assets.mjs`): each video ≤ 20 MB and must be a WebM; every served
+asset from both runs (videos, traces, stills) counts against one 100 MB published bound.
+Over either → the generator fails loud.
 
 ### Per-step stills (Phase 3c)
 
@@ -82,7 +108,7 @@ The card does not render the stills yet (TEACH-15); the Journey model carries th
 
 - `engine/model.mjs` — Journey status derivation, UNVERIFIED, loud validation.
 - `engine/ingest.mjs` — `journey-evidence.json` + manifest + provenance → `Journey[]`.
-- `engine/assets.mjs` — serves run assets (videos, traces, stills) as files next to the page; still size cap.
+- `engine/assets.mjs` — serves run assets (videos, traces, stills) as files next to the page; still + video size caps, one published-bytes budget.
 - `engine/provenance.mjs` — run provenance from CI env + artifact sha256.
 - `engine/counts.mjs` — vitest count mechanics + the journeys→e2e-tile count (`deriveE2eCount`).
 - `engine/ci-status.mjs` — GitHub Actions API → status pills.
