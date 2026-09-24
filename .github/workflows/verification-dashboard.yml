@@ -103,7 +103,7 @@ jobs:
       # single set.
       - name: Resolve e2e run
         id: e2e
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           E2E_RUN_ID: ${{ inputs.e2e_run_id }}
           COMMIT_SHA: ${{ env.COMMIT_SHA }}
@@ -199,7 +199,7 @@ jobs:
       - name: Resolve walkthrough job
         id: walkthrough
         if: steps.e2e.outputs.run_id
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           E2E_RUN_ID: ${{ steps.e2e.outputs.run_id }}
         with:
@@ -294,7 +294,7 @@ jobs:
       - name: Check whether this commit is main's tip
         id: tip
         if: env.PUBLISH == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { data } = await github.rest.repos.getBranch({
