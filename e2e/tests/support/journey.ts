@@ -432,7 +432,7 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
   const w = window as unknown as { __walkthroughOverlay?: Overlay };
   /** The click ripple's animation (ms). */
   const RIPPLE_MS = 550;
-  /** A ring no click or focus lets go of (a select, a hover) is hidden after this (ms). */
+  /** A ring not let go of by a click or a lost focus is hidden after this (ms). */
   const OTHER_RING_MS = 1200;
 
   const hideRing = (o: Overlay): void => {
@@ -531,6 +531,8 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
 
   const o = install();
   if (!target || !req) return null;
+  // Nothing on screen to point at (display:none, a hidden file input): leave it be.
+  if (!target.checkVisibility()) return null;
 
   // Point where the action will land: on screen, at the target's centre.
   // A target below the fold is scrolled into view first, so the viewer sees what is
@@ -617,7 +619,9 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
     o.host.dataset.ringKind = req.kind;
     o.host.dataset.ringShownAt = String(performance.now());
     // An action that neither clicks nor keeps focus (a select, a hover) lets go on its own.
-    if (req.kind === "other") {
+    // A backstop: a ring no click lets go of (a select, a hover, a click the page
+    // swallows) is hidden on its own. A typed-into field keeps its ring while focused.
+    if (req.kind !== "focus") {
       o.releaseTimer = window.setTimeout(() => hideRing(o), req.highlightMs + OTHER_RING_MS);
     }
   }, glideMs);
