@@ -4,7 +4,13 @@ import { buildJourneys, parseEvidence } from "./ingest.mjs";
 const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", job: "e2e" };
 // A resolver that just echoes a deterministic served path, so ingest is tested
 // without touching the filesystem.
-const echoResolver = (_raw, kind, id, engine) => `${kind}/${id}-${engine}.bin`;
+const echoResolver = (_raw, kind, id, engine, index) =>
+  index === undefined ? `${kind}/${id}-${engine}.bin` : `${kind}/${id}-${engine}-${index}.bin`;
+
+const still = (n) => ({
+  path: `/ci/test-results/j1-chromium/step-still-${n}.jpg`,
+  contentType: "image/jpeg",
+});
 
 function record(over = {}) {
   return {
@@ -48,6 +54,33 @@ describe("parseEvidence (loud-fail discipline)", () => {
   it("accepts a well-formed file", () => {
     const ev = parseEvidence(JSON.stringify({ schema: "journey-evidence/1", tests: [] }));
     expect(ev.tests).toEqual([]);
+  });
+  it("accepts the current v2 schema with per-step stills", () => {
+    const text = JSON.stringify({
+      schema: "journey-evidence/2",
+      tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] })],
+    });
+    expect(parseEvidence(text).tests[0].steps[0].screenshot).toEqual(still(0));
+  });
+  it("normalises a v1 file: every step ingests with an explicit null still", () => {
+    const text = JSON.stringify({ schema: "journey-evidence/1", tests: [record()] });
+    expect(parseEvidence(text).tests[0].steps[0].screenshot).toBeNull();
+  });
+  it("fails loud when a v2 step omits the screenshot field (no silent drop)", () => {
+    const text = JSON.stringify({
+      schema: "journey-evidence/2",
+      tests: [record({ steps: [{ label: "Open", assertions: [] }] })],
+    });
+    expect(() => parseEvidence(text)).toThrow(/screenshot/);
+  });
+  it("fails loud on a malformed v2 still record", () => {
+    for (const bad of [{}, { path: "" }, { path: 7 }, "x.jpg"]) {
+      const text = JSON.stringify({
+        schema: "journey-evidence/2",
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+      });
+      expect(() => parseEvidence(text)).toThrow(/screenshot/);
+    }
   });
 });
 
@@ -292,6 +325,121 @@ describe("buildJourneys", () => {
         resolveAsset: echoResolver,
       }),
     ).toThrow(/matched 2 tests/);
+  });
+
+  it("maps each step's still to a served path, keyed by step index", () => {
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [
+        record({
+          steps: [
+            { label: "Open", assertions: [], screenshot: still(0) },
+            { label: "Score", assertions: [], screenshot: still(1) },
+          ],
+        }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps.map((s) => s.screenshot)).toEqual([
+      "still/J1-chromium-0.bin",
+      "still/J1-chromium-1.bin",
+    ]);
+  });
+
+  it("a step with no still stays an explicit null — never borrowed from a neighbour", () => {
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [
+        record({
+          steps: [
+            { label: "Open", assertions: [], screenshot: still(0) },
+            { label: "Capture failed", assertions: [], screenshot: null },
+          ],
+        }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps[1].screenshot).toBeNull();
+  });
+
+  it("an unresolvable still (resolver returns null) is an explicit null", () => {
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] })],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: (_raw, kind) => (kind === "still" ? null : "x"),
+    });
+    expect(j1.steps[0].screenshot).toBeNull();
+  });
+
+  it("stills follow the canonical browser: a firefox-canonical card shows no chromium stills", () => {
+    // chromium passes (with stills), firefox fails (no stills). The card shows
+    // firefox's steps, so chromium's stills must not be grafted onto them.
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [
+        record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] }),
+        record({
+          project: "firefox",
+          status: "failed",
+          outcome: "unexpected",
+          steps: [{ label: "Open", status: "failed", assertions: [], screenshot: null }],
+        }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.status).toBe("failed");
+    expect(j1.steps[0].screenshot).toBeNull();
+  });
+
+  it("a flaky run with stills stays FLAKY — stills never launder a retry into a clean pass", () => {
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [
+        record({
+          outcome: "flaky",
+          retries: 1,
+          steps: [{ label: "Open", assertions: [], screenshot: still(0) }],
+        }),
+        record({ project: "firefox" }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.status).toBe("flaky");
+    expect(j1.browsers.find((b) => b.engine === "chromium")).toMatchObject({
+      status: "flaky",
+      retries: 1,
+    });
+    expect(j1.steps[0].screenshot).toBe("still/J1-chromium-0.bin");
   });
 
   it("survives a journey with no attachments (null video/trace)", () => {

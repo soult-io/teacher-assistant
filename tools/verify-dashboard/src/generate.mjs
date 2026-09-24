@@ -6,28 +6,22 @@
 //
 //   engine counts + CI (config-driven)  +  journey-evidence.json (ingest)
 //   -> Journey[] + tiles/bars -> engine/template.html -> <outDir>/index.html
-//      + videos/*.webm + traces/*.zip
+//      + videos/*.webm + traces/*.zip + stills/*.jpg (one per journey step)
 //
-// The visual proof of each journey is the run's own video (ingested from the e2e
-// artifacts), so there is no separate screenshot capture step: this generator needs
-// no browser and no preview server.
+// The visual proof of each journey is the run's own video + per-step stills (both
+// ingested from the e2e artifacts — the stills are taken by the e2e run itself), so
+// there is no separate screenshot capture step: this generator needs no browser and
+// no preview server.
 //
 // Assumes `pnpm -r run build` has run (the workflow does this first).
 // Usage: node src/generate.mjs [outDir]   (EVIDENCE_FILE env overrides the evidence path)
 
 import { execFileSync } from "node:child_process";
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve, sep } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { makeAssetResolver } from "../engine/assets.mjs";
 import { collectCiPills } from "../engine/ci-status.mjs";
 import { collectPackageCounts, deriveE2eCount } from "../engine/counts.mjs";
 import { buildJourneys, parseEvidence } from "../engine/ingest.mjs";
@@ -74,48 +68,6 @@ function buildMetrics(pkgs, e2eCount) {
     e2eCount,
     engineCount: passOf(pkgs, config.enginePackage),
     pwaCount: passOf(pkgs, config.pwaPackage),
-  };
-}
-
-// Copy a video/trace out of the ingested artifact tree to a served file next to the
-// dashboard, and return its dashboard-relative path. Videos are a few MB — served as
-// files, never inlined as data: URIs. Returns null if the source cannot be located.
-function makeAssetResolver(evidenceFile, outDir) {
-  const artifactRoot = resolve(dirname(evidenceFile));
-  const dirs = { video: "videos", trace: "traces" };
-  const exts = { video: "webm", trace: "zip" };
-  return (rawPath, kind, journeyId, engine) => {
-    // The evidence path is the CI-container absolute path; locally it exists as-is,
-    // in CI it must be remapped under the downloaded artifact root.
-    let src = rawPath;
-    if (!existsSync(src)) {
-      const marker = "test-results/";
-      const idx = rawPath.indexOf(marker);
-      src = idx >= 0 ? join(artifactRoot, rawPath.slice(idx + marker.length)) : rawPath;
-    }
-    // Evidence is untrusted data: confine the copy SOURCE to the artifact tree so a
-    // path in the evidence file can never make us serve an out-of-tree file (a `../`
-    // escape or an absolute path that happens to exist). The dest is already sanitised.
-    const resolvedSrc = resolve(src);
-    if (resolvedSrc !== artifactRoot && !resolvedSrc.startsWith(artifactRoot + sep)) {
-      console.warn(
-        `  asset: ${kind} for ${journeyId}/${engine} resolves outside the artifact tree — skipped`,
-      );
-      return null;
-    }
-    const relDir = dirs[kind];
-    // Sanitise both parts of the served filename so no id/engine value can escape outDir.
-    const safeId = journeyId.replace(/\W/g, "-");
-    const safeEngine = engine.replace(/\W/g, "-");
-    const rel = `${relDir}/${safeId}-${safeEngine}.${exts[kind]}`;
-    try {
-      mkdirSync(join(outDir, relDir), { recursive: true });
-      copyFileSync(src, join(outDir, rel));
-      return rel;
-    } catch (err) {
-      console.warn(`  asset: could not serve ${kind} for ${journeyId}/${engine}: ${err.message}`);
-      return null;
-    }
   };
 }
 

@@ -78,6 +78,20 @@ describe("assertJourney (loud validation)", () => {
       /unverified but carries run/,
     );
   });
+  it("accepts a step still that is a served path or an explicit null", () => {
+    const steps = [
+      { index: 0, screenshot: "stills/J1-chromium-00.jpg" },
+      { index: 1, screenshot: null },
+    ];
+    expect(assertJourney({ ...good, steps }).steps).toBe(steps);
+  });
+  it("rejects a step still that is neither a path nor null", () => {
+    for (const bad of [undefined, "", 7, { src: "x.jpg" }]) {
+      expect(() => assertJourney({ ...good, steps: [{ index: 0, screenshot: bad }] })).toThrow(
+        /screenshot must be a path or null/,
+      );
+    }
+  });
   it("rejects a missing id or name", () => {
     expect(() => assertJourney({ ...good, id: "" })).toThrow(/string id/);
     expect(() => assertJourney({ ...good, name: undefined })).toThrow(/missing a name/);

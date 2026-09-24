@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # teacher-assistant-verify — serves the pre-generated static TRACK Verification
-# dashboard (index.html + videos/ + traces/) via an unprivileged nginx. The dashboard is
+# dashboard (index.html + videos/ + traces/ + stills/) via an unprivileged nginx. The dashboard is
 # produced by the verification-dashboard workflow's generator (tools/verify-dashboard);
 # this image only serves that static output — no app code, no data, PII-free/synthetic,
 # same as the app images. CI builds/pushes ghcr.io/<owner>/teacher-assistant-verify:sha-<commit>.

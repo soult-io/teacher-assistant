@@ -58,5 +58,27 @@
         "organizeImports": "off"
       }
     }
-  }
+  },
+  "overrides": [
+    {
+      "includes": ["e2e/tests/j*.spec.ts"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "paths": {
+                  "@playwright/test": {
+                    "importNames": ["test", "expect"],
+                    "message": "Journey specs import test/expect from ./support/journey and write steps with the `step` fixture — a plain test.step takes no per-step still."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
 }

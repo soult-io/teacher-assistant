@@ -3,7 +3,7 @@
 // the manifest decides which tests are journeys, their order, and their display names.
 
 import { basename } from "node:path";
-import { EVIDENCE_SCHEMA } from "./evidence-schema.mjs";
+import { EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V1 } from "./evidence-schema.mjs";
 import { assertJourney, deriveJourneyStatus, makeUnverified, mapTestStatus } from "./model.mjs";
 
 // Which browser's step tree + video stand in for the journey. Both browsers run the
@@ -22,15 +22,41 @@ export function parseEvidence(text) {
   } catch (err) {
     throw new Error(`journey-evidence is not valid JSON: ${err.message}`);
   }
-  if (data?.schema !== EVIDENCE_SCHEMA) {
+  const schema = data?.schema;
+  if (schema !== EVIDENCE_SCHEMA && schema !== EVIDENCE_SCHEMA_V1) {
     throw new Error(
-      `journey-evidence schema mismatch: expected ${EVIDENCE_SCHEMA}, got ${JSON.stringify(data?.schema)}`,
+      `journey-evidence schema mismatch: expected ${EVIDENCE_SCHEMA} (or ${EVIDENCE_SCHEMA_V1}), got ${JSON.stringify(schema)}`,
     );
   }
   if (!Array.isArray(data.tests)) {
     throw new Error("journey-evidence has no tests array");
   }
+  for (const test of data.tests) {
+    for (const step of test.steps ?? []) {
+      if (schema === EVIDENCE_SCHEMA_V1) step.screenshot = null;
+      else assertStillField(step, test);
+    }
+  }
   return data;
+}
+
+/**
+ * v2 makes `screenshot` a required step field: a still record or an explicit null. A
+ * missing or malformed field is a reporter bug — fail loud rather than read it as
+ * "no still" and silently drop evidence the run produced.
+ */
+function assertStillField(step, test) {
+  const where = `${test.project}/${test.title} step ${JSON.stringify(step.label)}`;
+  if (!("screenshot" in step)) {
+    throw new Error(`journey-evidence ${where} has no screenshot field (required in v2)`);
+  }
+  const still = step.screenshot;
+  if (still === null) return;
+  if (typeof still !== "object" || typeof still.path !== "string" || still.path === "") {
+    throw new Error(
+      `journey-evidence ${where} has a malformed screenshot: ${JSON.stringify(still)}`,
+    );
+  }
 }
 
 /**
@@ -93,7 +119,11 @@ function findAttachment(record, name) {
   return record.attachments.find((a) => a.name === name && a.path) ?? null;
 }
 
-function toSteps(record) {
+/**
+ * @param {object} record the canonical browser's test record
+ * @param {(stillPath: string, index: number) => (string|null)} resolveStill
+ */
+function toSteps(record, resolveStill) {
   return record.steps.map((step, index) => ({
     index,
     label: step.label,
@@ -103,6 +133,11 @@ function toSteps(record) {
     // offset → null, and the renderer degrades to a non-seekable list (never a guess).
     t_start_ms: typeof step.startOffsetMs === "number" ? step.startOffsetMs : null,
     thumbnail: null,
+    // The still the run took at the end of this step, as a served path — or null when
+    // that browser took none (stills come from the canonical browser's own record, so
+    // they always match the steps shown) or the file could not be served. Never a
+    // placeholder, never a neighbour's still.
+    screenshot: step.screenshot?.path ? resolveStill(step.screenshot.path, index) : null,
     assertions: step.assertions.map((a) => ({
       text: a.text,
       status: a.status,
@@ -117,7 +152,7 @@ function toSteps(record) {
  * @param {object[]} records matched, one per engine
  * @param {string} product
  * @param {object} provenance shared run provenance
- * @param {(rawPath:string, kind:string, journeyId:string, engine:string)=>(string|null)} resolveAsset
+ * @param {(rawPath:string, kind:string, journeyId:string, engine:string, index?:number)=>(string|null)} resolveAsset
  */
 function buildJourney(entry, records, product, provenance, resolveAsset) {
   assertSingleTest(entry, records);
@@ -149,7 +184,9 @@ function buildJourney(entry, records, product, provenance, resolveAsset) {
     run: provenance,
     video: videoSrc ? { src: videoSrc, poster: null, duration_ms: canonical.durationMs } : null,
     trace_url: traceUrl,
-    steps: toSteps(canonical),
+    steps: toSteps(canonical, (stillPath, index) =>
+      resolveAsset(stillPath, "still", entry.id, canonical.project, index),
+    ),
   };
 }
 
