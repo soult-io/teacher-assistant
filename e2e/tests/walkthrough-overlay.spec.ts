@@ -7,7 +7,7 @@
 // holds, and never appear in the gating run.
 
 import type { Page } from "@playwright/test";
-import { enterText, expect, screenSignature, test } from "./support/journey";
+import { enterText, expect, OVERLAY_HIGHLIGHT_MS, screenSignature, test } from "./support/journey";
 
 const ORIGIN = "http://overlay.test";
 
@@ -97,8 +97,8 @@ function expectPointedAt(s: Snapshot | undefined, kind: string, caption: string)
   expect(ring?.right).toBeGreaterThanOrEqual(target.right);
   expect(ring?.bottom).toBeGreaterThanOrEqual(target.bottom);
   expect(s.ringKind).toBe(kind);
-  // The fixture's own hold (OVERLAY_HIGHLIGHT_MS); the walkthrough's slowMo adds to it.
-  expect(s.ringUpMs, "ring held before the action").toBeGreaterThanOrEqual(300);
+  // The fixture's own hold; the walkthrough's slowMo adds to it.
+  expect(s.ringUpMs, "ring held before the action").toBeGreaterThanOrEqual(OVERLAY_HIGHLIGHT_MS);
   expect(s.caption).toBe(caption);
   expect(s.underCentre, "the overlay never covers the target for hit-testing").toBe(true);
 }

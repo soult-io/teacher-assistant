@@ -81,32 +81,58 @@ const OVERLAY_GLIDE_MS = 450;
  * slowMo (WALKTHROUGH_SLOWMO_MS) then adds ~300ms before a click lands, so the ring is
  * up ~600ms at the click.
  */
-const OVERLAY_HIGHLIGHT_MS = 300;
+export const OVERLAY_HIGHLIGHT_MS = 300;
 /** Walkthrough overlay: bound on drawing it — the target is already attached (ms). */
 const OVERLAY_DRAW_TIMEOUT_MS = 2000;
 
 /** Page actions that load a document: no target to point at, only the screen hold. */
 const NAVIGATIONS: ReadonlySet<string> = new Set(["goBack", "goForward", "goto", "reload"]);
 
-/** Walkthrough: the Locator and Page methods that drive the UI; each is held first. */
-const LOCATOR_ACTIONS: readonly (keyof Locator & string)[] = [
-  "check",
-  "clear",
-  "click",
-  "dblclick",
-  "dragTo",
-  "fill",
-  "hover",
-  "press",
-  "pressSequentially",
-  "selectOption",
-  "selectText",
-  "setChecked",
-  "setInputFiles",
-  "tap",
-  "type",
-  "uncheck",
-];
+/** How the walkthrough overlay shows one Locator action. */
+interface ActionOverlay {
+  /** "click": ring until the click lands. "focus": ring while the field keeps focus. */
+  kind: "click" | "focus" | "other";
+  /** The caption's verb, from the action's own arguments where they name it. */
+  verb: string | ((args: readonly unknown[]) => string);
+  /** A pointer action: Playwright scrolls its target into view, so the overlay does first. */
+  scroll: boolean;
+}
+
+/**
+ * Walkthrough: the Locator methods that drive the UI — each is held first and pointed
+ * at by the overlay as its row says. One table, so a wrapped action always has a row.
+ */
+const LOCATOR_ACTION_OVERLAY = {
+  check: { kind: "click", verb: "Check", scroll: true },
+  clear: { kind: "focus", verb: "Type", scroll: false },
+  click: { kind: "click", verb: "Click", scroll: true },
+  dblclick: { kind: "click", verb: "Double-click", scroll: true },
+  dragTo: { kind: "other", verb: "Drag", scroll: true },
+  fill: { kind: "focus", verb: "Type", scroll: false },
+  hover: { kind: "other", verb: "Hover", scroll: true },
+  press: {
+    kind: "focus",
+    verb: (args) => (typeof args[0] === "string" ? `Press ${args[0]}` : "Press"),
+    scroll: false,
+  },
+  pressSequentially: { kind: "focus", verb: "Type", scroll: false },
+  selectOption: { kind: "other", verb: "Select", scroll: false },
+  selectText: { kind: "focus", verb: "Select text", scroll: false },
+  setChecked: {
+    kind: "click",
+    verb: (args) => (args[0] === false ? "Uncheck" : "Check"),
+    scroll: true,
+  },
+  setInputFiles: { kind: "other", verb: "Upload", scroll: false },
+  tap: { kind: "click", verb: "Click", scroll: true },
+  type: { kind: "focus", verb: "Type", scroll: false },
+  uncheck: { kind: "click", verb: "Uncheck", scroll: true },
+  // Locator declares toString; every object literal already has one, so it is no row.
+} satisfies Partial<Record<Exclude<keyof Locator & string, "toString">, ActionOverlay>>;
+const LOCATOR_ACTIONS = Object.keys(LOCATOR_ACTION_OVERLAY) as (keyof Locator & string)[];
+/** A page action with a selector not in the table (page.focus) is shown like a hover. */
+const FALLBACK_OVERLAY: ActionOverlay = { kind: "other", verb: "Hover", scroll: false };
+/** Walkthrough: the Page methods that drive the UI; each is held first. */
 const PAGE_ACTIONS: readonly (keyof Page & string)[] = [
   "check",
   "click",
@@ -374,10 +400,8 @@ async function holdStepEnd(page: Page): Promise<void> {
 
 /** What the overlay draws for one action: the ring's style and the caption's verb. */
 interface PointRequest {
-  /** "click": ring until the click lands. "focus": ring while the field keeps focus. */
-  kind: "click" | "focus" | "other";
+  kind: ActionOverlay["kind"];
   verb: string;
-  /** The action scrolls its target into view itself (a pointer action), so scroll first. */
   scroll: boolean;
   /** The cursor's last position, for a document that has not drawn it yet. */
   from: Point | null;
@@ -412,6 +436,10 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
     releaseTimer: number | undefined;
   }
   const w = window as unknown as { __walkthroughOverlay?: Overlay };
+  /** The click ripple's animation (ms). */
+  const RIPPLE_MS = 550;
+  /** A ring no click or focus lets go of (a select, a hover) is hidden after this (ms). */
+  const OTHER_RING_MS = 1200;
 
   const hideRing = (o: Overlay): void => {
     o.ring.style.opacity = "0";
@@ -437,14 +465,14 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
       /* Pink: a colour the app never uses, so the ring never reads as app UI. */
       [part~="ring"] { position: absolute; border-radius: 10px; opacity: 0; }
       [part~="ring"] { border: 3px solid #ec4899; box-shadow: 0 0 0 4px rgba(236,72,153,.3); }
-      [part~="ring"][data-kind="focus"] { border-style: dashed; }
+      :host([data-ring-kind="focus"]) [part~="ring"] { border-style: dashed; }
       [part~="caption"] { position: absolute; left: 0; top: 0; max-width: calc(100vw - 16px);
         padding: 4px 10px; border-radius: 999px; background: rgba(17,24,39,.9); color: #fff;
         font: 600 13px/18px system-ui, sans-serif; white-space: nowrap; overflow: hidden;
         text-overflow: ellipsis; opacity: 0; }
       [part~="ripple"] { position: absolute; width: 44px; height: 44px; margin: -22px 0 0 -22px;
         border-radius: 50%; border: 3px solid #ec4899; background: rgba(236,72,153,.25);
-        animation: ripple 550ms ease-out forwards; }
+        animation: ripple ${RIPPLE_MS}ms ease-out forwards; }
       @keyframes ripple { from { transform: scale(.2); opacity: 1; } to { transform: scale(1.6); opacity: 0; } }
     </style>
     <div part="ring"></div><div part="caption"></div>
@@ -477,7 +505,7 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
         ripple.style.left = `${e.clientX}px`;
         ripple.style.top = `${e.clientY}px`;
         o.root.append(ripple);
-        setTimeout(() => ripple.remove(), 600);
+        setTimeout(() => ripple.remove(), RIPPLE_MS + 50);
       },
       { capture: true, passive: true },
     );
@@ -584,7 +612,6 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
       height: `${now.height + pad * 2}px`,
       opacity: "1",
     });
-    o.ring.dataset.kind = req.kind;
     o.caption.textContent = short ? `${req.verb} · ${short}` : req.verb;
     const cap = o.caption.getBoundingClientRect();
     const below = now.bottom + pad + 8;
@@ -596,68 +623,11 @@ function overlayRuntime(target?: Element, req?: PointRequest): PointResult | nul
     o.host.dataset.ringShownAt = String(performance.now());
     // An action that neither clicks nor keeps focus (a select, a hover) lets go on its own.
     if (req.kind === "other") {
-      o.releaseTimer = window.setTimeout(() => hideRing(o), req.highlightMs + 1200);
+      o.releaseTimer = window.setTimeout(() => hideRing(o), req.highlightMs + OTHER_RING_MS);
     }
   }, glideMs);
 
   return { ...to, waitMs: glideMs + req.highlightMs };
-}
-
-/** The ring style, caption verb and scroll for a Locator action (its own arguments). */
-function describeAction(
-  action: string,
-  args: readonly unknown[],
-): Pick<PointRequest, "kind" | "verb" | "scroll"> {
-  return { ...actionLabel(action, args), scroll: POINTER_ACTIONS.has(action) };
-}
-
-/** Locator actions that scroll their target into view before acting (pointer input). */
-const POINTER_ACTIONS: ReadonlySet<string> = new Set([
-  "check",
-  "click",
-  "dblclick",
-  "dragTo",
-  "hover",
-  "setChecked",
-  "tap",
-  "uncheck",
-]);
-
-/** How the overlay names an action, and which ring it draws. */
-function actionLabel(
-  action: string,
-  args: readonly unknown[],
-): Pick<PointRequest, "kind" | "verb"> {
-  switch (action) {
-    case "click":
-    case "tap":
-      return { kind: "click", verb: "Click" };
-    case "dblclick":
-      return { kind: "click", verb: "Double-click" };
-    case "check":
-      return { kind: "click", verb: "Check" };
-    case "uncheck":
-      return { kind: "click", verb: "Uncheck" };
-    case "setChecked":
-      return { kind: "click", verb: args[0] === false ? "Uncheck" : "Check" };
-    case "clear":
-    case "fill":
-    case "pressSequentially":
-    case "type":
-      return { kind: "focus", verb: "Type" };
-    case "press":
-      return { kind: "focus", verb: typeof args[0] === "string" ? `Press ${args[0]}` : "Press" };
-    case "selectText":
-      return { kind: "focus", verb: "Select text" };
-    case "selectOption":
-      return { kind: "other", verb: "Select" };
-    case "setInputFiles":
-      return { kind: "other", verb: "Upload" };
-    case "dragTo":
-      return { kind: "other", verb: "Drag" };
-    default:
-      return { kind: "other", verb: "Hover" };
-  }
 }
 
 /**
@@ -671,8 +641,12 @@ async function pointAt(
   args: readonly unknown[],
   state: WalkthroughState,
 ): Promise<void> {
+  const overlay: ActionOverlay =
+    (LOCATOR_ACTION_OVERLAY as Record<string, ActionOverlay>)[action] ?? FALLBACK_OVERLAY;
   const request: PointRequest = {
-    ...describeAction(action, args),
+    kind: overlay.kind,
+    verb: typeof overlay.verb === "function" ? overlay.verb(args) : overlay.verb,
+    scroll: overlay.scroll,
     from: state.cursor,
     glideMs: OVERLAY_GLIDE_MS,
     highlightMs: OVERLAY_HIGHLIGHT_MS,
