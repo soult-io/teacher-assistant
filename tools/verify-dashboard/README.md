@@ -87,9 +87,9 @@ it attaches a full-height JPEG still (height capped at 4000px, quality 70) at th
 of every step — including a failing step, which shows the screen it failed on.
 
 **Full height.** The app scrolls inside an inner container, so a `fullPage` screenshot
-is only one viewport. The fixture instead finds the main scroll container (the largest
-visible element that scrolls vertically — no selector, no per-journey tuning), grows the
-viewport height by what that container hides, takes a plain viewport screenshot, then
+is only one viewport. The fixture instead measures what the on-screen vertical
+scrollers hide (the main screen container, an open sheet — no selector, no per-journey
+tuning), grows the viewport height by that, takes a plain viewport screenshot, then
 restores the viewport and every scroll offset. A screen still cut off after that (over
 the 4000px cap, or content that does not grow with the viewport) is recorded as
 `truncated: true` — never silently cropped. The walkthrough project takes no stills,

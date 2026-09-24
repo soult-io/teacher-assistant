@@ -5,7 +5,7 @@
 //
 // Full height: the app scrolls inside an inner container, not the document, so a
 // `fullPage` screenshot is only ever one viewport. `captureStill` instead grows the
-// viewport by the main scroll container's hidden height, takes the still, and puts the
+// viewport by the scroll containers' hidden height, takes the still, and puts the
 // viewport and every scroll position back — see `captureStill`.
 //
 // Stills are opt-in per Playwright project (`stepStills` in playwright.config.ts) —
@@ -114,35 +114,25 @@ export interface StepStillsOptions {
 
 type JourneyStep = <T>(title: string, body: () => Promise<T>) => Promise<T>;
 
-/** What the in-page measure reports: the viewport height that shows the main scroller whole. */
-interface ScrollMeasure {
-  /** Pixels of the main scroll container (or document) still hidden below its fold. */
-  hiddenPx: number;
-}
-
 /**
- * In the page: find the main scroll container — the largest visible element that
- * scrolls vertically (the app's `#screen`; on another app, whatever plays that role)
- * — and report how much of it, and of the document, is hidden below the fold. Generic
- * on purpose: no selector, no per-journey tuning.
+ * In the page: how many pixels of the screen are hidden below a fold — the most any
+ * on-screen vertical scroller hides (the app's `#screen`, an open sheet; on another
+ * app, whatever plays those roles), plus the document's own overflow. Generic on
+ * purpose: no selector, no per-journey tuning.
  */
-function measureHidden(): ScrollMeasure {
-  let main: Element | null = null;
-  let mainArea = 0;
+function measureHidden(): number {
+  let most = 0;
   for (const el of Array.from(document.body.getElementsByTagName("*"))) {
     const { overflowY } = getComputedStyle(el);
     if (overflowY !== "auto" && overflowY !== "scroll") continue;
     if (!el.checkVisibility()) continue;
-    const area = el.clientWidth * el.clientHeight;
-    if (area > mainArea) {
-      main = el;
-      mainArea = area;
-    }
+    // Off-screen (a closed sheet slid away) is not part of the still.
+    const box = el.getBoundingClientRect();
+    if (box.bottom <= 0 || box.top >= window.innerHeight || box.height === 0) continue;
+    most = Math.max(most, el.scrollHeight - el.clientHeight);
   }
   const root = document.scrollingElement ?? document.documentElement;
-  const docHidden = Math.max(0, root.scrollHeight - window.innerHeight);
-  const mainHidden = main ? Math.max(0, main.scrollHeight - main.clientHeight) : 0;
-  return { hiddenPx: docHidden + mainHidden };
+  return most + Math.max(0, root.scrollHeight - window.innerHeight);
 }
 
 /**
@@ -173,13 +163,26 @@ function restoreScroll(): void {
 }
 
 /**
- * Take the step's full-height still. The viewport is grown (width unchanged) until the
- * main scroll container shows everything or the height cap is reached, the still is
+ * Put the page back after a capture, even one that failed part-way: the viewport first
+ * (scroll offsets are only valid at the original height), then every scroll offset.
+ * Each runs even if the other fails; the first failure is then reported.
+ */
+async function restorePage(page: Page, viewport: { width: number; height: number }): Promise<void> {
+  const errors: unknown[] = [];
+  await page.setViewportSize(viewport).catch((err: unknown) => errors.push(err));
+  await page.evaluate(restoreScroll).catch((err: unknown) => errors.push(err));
+  if (errors.length > 0) throw errors[0];
+}
+
+/**
+ * Take the step's full-height still. The viewport is grown (width unchanged) until
+ * every on-screen scroller shows everything or the height cap is reached, the still is
  * taken as a plain viewport screenshot, and then the viewport and every scroll offset
  * are put back exactly — the next step, and the run's video, see the page as it was.
  *
- * A still that could not show the whole screen (over the cap, or content that does not
- * grow with the viewport) is attached with `truncated: true` — cut off, never silently.
+ * A still that could not show the whole screen (over the cap, content that does not
+ * grow with the viewport, such as a fixed-height list) is attached with
+ * `truncated: true` — cut off, never silently.
  */
 async function captureStill(page: Page, testInfo: TestInfo, index: number): Promise<void> {
   const viewport = page.viewportSize();
@@ -189,23 +192,23 @@ async function captureStill(page: Page, testInfo: TestInfo, index: number): Prom
   let meta: StillMeta;
   try {
     let height = viewport.height;
-    let { hiddenPx } = await page.evaluate(measureHidden);
+    let hiddenPx = await page.evaluate(measureHidden);
     for (let pass = 0; pass < STILL_GROW_PASSES && hiddenPx > 0; pass++) {
       const next = Math.min(height + hiddenPx, STILL_MAX_HEIGHT_PX);
       if (next <= height) break;
       height = next;
       await page.setViewportSize({ width: viewport.width, height });
       const before = hiddenPx;
-      ({ hiddenPx } = await page.evaluate(measureHidden));
+      hiddenPx = await page.evaluate(measureHidden);
       // Content that does not grow with the viewport: growing further shows nothing new.
       if (hiddenPx >= before) break;
     }
-    await page.screenshot({ path, type: "jpeg", quality: STILL_JPEG_QUALITY });
+    // CSS pixels: one still pixel per page pixel on any device scale, so the height
+    // cap bounds the file too.
+    await page.screenshot({ path, type: "jpeg", quality: STILL_JPEG_QUALITY, scale: "css" });
     meta = { width: viewport.width, height, truncated: hiddenPx > 0 };
   } finally {
-    // Always put the page back, even when the capture failed part-way.
-    if (page.viewportSize()?.height !== viewport.height) await page.setViewportSize(viewport);
-    await page.evaluate(restoreScroll);
+    await restorePage(page, viewport);
   }
   // Attached INSIDE the step body so the reporter attributes both to this step.
   await testInfo.attach(STEP_STILL_ATTACHMENT, { path, contentType: "image/jpeg" });

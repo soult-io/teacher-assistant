@@ -12,7 +12,7 @@ import { expect, test } from "./support/journey";
 const PHONE = { width: 390, height: 844 };
 
 /** The fixed 100dvh app frame: a header, an inner scroller of `contentPx`, a footer. */
-function appFrame(contentPx: number, scrollerCss = "flex: 1;"): string {
+function appFrame(contentPx: number, scrollerCss = "flex: 1;", inner = ""): string {
   return `<!doctype html><style>
     body { margin: 0; }
     .frame { height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
@@ -21,7 +21,7 @@ function appFrame(contentPx: number, scrollerCss = "flex: 1;"): string {
     .content { height: ${contentPx}px; background: linear-gradient(#fff, #36c); }
   </style>
   <div class="frame"><header></header>
-    <div class="scroller" id="scroller"><div class="content"></div></div>
+    <div class="scroller" id="scroller">${inner}<div class="content"></div></div>
   <footer></footer></div>`;
 }
 
@@ -106,6 +106,35 @@ test.describe("step stills are full height", () => {
     // A fixed-height scroller: a taller viewport shows no more of it.
     await page.setContent(appFrame(2000, "height: 600px;"));
     await step("a fixed-height scroller", async () => undefined);
+    expect(lastStillMeta(testInfo).truncated).toBe(true);
+    expect(page.viewportSize()).toEqual(PHONE);
+  });
+
+  test("an open sheet sized to the screen is grown and captured whole", async ({
+    page,
+    step,
+  }, testInfo) => {
+    // A bottom sheet capped at 90% of the frame, its content a little taller than that.
+    await page.setContent(
+      `${appFrame(300)}<div style="position: fixed; left: 0; right: 0; bottom: 0; max-height: 90%; overflow-y: auto"><div style="height: 900px"></div></div>`,
+    );
+    await step("a tall open sheet", async () => undefined);
+    const meta = lastStillMeta(testInfo);
+    expect(meta.truncated).toBe(false);
+    // 900 / 0.9 = 1000: the viewport the sheet needs to show all of its content.
+    expect(meta.height).toBeGreaterThanOrEqual(1000);
+    expect(page.viewportSize()).toEqual(PHONE);
+  });
+
+  test("a capped inner list that does not grow is flagged truncated", async ({
+    page,
+    step,
+  }, testInfo) => {
+    // The main scroller fits; a fixed-height list inside it does not.
+    const list =
+      '<div style="height: 200px; overflow-y: auto"><div style="height: 900px"></div></div>';
+    await page.setContent(appFrame(300, "flex: 1;", list));
+    await step("a capped inner list", async () => undefined);
     expect(lastStillMeta(testInfo).truncated).toBe(true);
     expect(page.viewportSize()).toEqual(PHONE);
   });
