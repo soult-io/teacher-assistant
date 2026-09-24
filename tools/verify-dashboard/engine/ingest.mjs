@@ -3,7 +3,7 @@
 // the manifest decides which tests are journeys, their order, and their display names.
 
 import { basename } from "node:path";
-import { EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V1 } from "./evidence-schema.mjs";
+import { EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V1, EVIDENCE_SCHEMA_V2 } from "./evidence-schema.mjs";
 import {
   assertJourney,
   deriveJourneyStatus,
@@ -13,6 +13,10 @@ import {
   mapTestStatus,
   RECORDING,
 } from "./model.mjs";
+
+// Every schema tag ingest reads: the current one first, then the older ones it still
+// accepts (see evidence-schema.mjs).
+const READABLE_SCHEMAS = [EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V2, EVIDENCE_SCHEMA_V1];
 
 // Which browser's step tree + video stand in for the journey. Both browsers run the
 // same steps, so a stable preference keeps the canonical view deterministic.
@@ -31,9 +35,9 @@ export function parseEvidence(text) {
     throw new Error(`journey-evidence is not valid JSON: ${err.message}`);
   }
   const schema = data?.schema;
-  if (schema !== EVIDENCE_SCHEMA && schema !== EVIDENCE_SCHEMA_V1) {
+  if (!READABLE_SCHEMAS.includes(schema)) {
     throw new Error(
-      `journey-evidence schema mismatch: expected ${EVIDENCE_SCHEMA} (or ${EVIDENCE_SCHEMA_V1}), got ${JSON.stringify(schema)}`,
+      `journey-evidence schema mismatch: expected one of ${READABLE_SCHEMAS.join(", ")}, got ${JSON.stringify(schema)}`,
     );
   }
   if (!Array.isArray(data.tests)) {
@@ -41,8 +45,13 @@ export function parseEvidence(text) {
   }
   for (const test of data.tests) {
     for (const step of test.steps ?? []) {
-      if (schema === EVIDENCE_SCHEMA_V1) step.screenshot = null;
-      else assertStillField(step, test);
+      if (schema === EVIDENCE_SCHEMA_V1) {
+        step.screenshot = null;
+        continue;
+      }
+      assertStillField(step, test, schema === EVIDENCE_SCHEMA);
+      // v2 recorded no truncation flag: unknown, never read as "complete".
+      if (schema === EVIDENCE_SCHEMA_V2 && step.screenshot) step.screenshot.truncated = null;
     }
   }
   return data;
@@ -67,9 +76,11 @@ export function parseWalkthroughEvidence(text) {
 /**
  * v2 makes `screenshot` a required step field: a still record or an explicit null. A
  * missing or malformed field is a reporter bug — fail loud rather than read it as
- * "no still" and silently drop evidence the run produced.
+ * "no still" and silently drop evidence the run produced. v3 (`sized`) also requires
+ * the still's pixel size and its `truncated` flag: a still with no flag could be a
+ * silently cut-off screen, so it fails loud.
  */
-function assertStillField(step, test) {
+function assertStillField(step, test, sized) {
   const where = `${test.project}/${test.title} step ${JSON.stringify(step.label)}`;
   if (!("screenshot" in step)) {
     throw new Error(`journey-evidence ${where} has no screenshot field (required in v2)`);
@@ -79,6 +90,13 @@ function assertStillField(step, test) {
   if (typeof still !== "object" || typeof still.path !== "string" || still.path === "") {
     throw new Error(
       `journey-evidence ${where} has a malformed screenshot: ${JSON.stringify(still)}`,
+    );
+  }
+  if (!sized) return;
+  const sizeOk = [still.width, still.height].every((n) => Number.isInteger(n) && n > 0);
+  if (!sizeOk || typeof still.truncated !== "boolean") {
+    throw new Error(
+      `journey-evidence ${where} still has no valid width/height/truncated (required in v3): ${JSON.stringify(still)}`,
     );
   }
 }
@@ -196,14 +214,22 @@ function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
   };
 }
 
+/** The canonical browser's test record's steps, as Journey steps (see toStep). */
+function toSteps(record, resolveStill, offsets) {
+  return record.steps.map((step, index) => toStep(step, index, resolveStill, offsets));
+}
+
 /**
- * @param {object} record the canonical browser's test record
+ * One step of the canonical browser's record, as a Journey step.
+ * @param {object} step the evidence step
+ * @param {number} index its position in the record
  * @param {(stillPath: string, index: number) => (string|null)} resolveStill
  * @param {(number|null)[]|null} offsets each step's offset into the card's video (the
  *   walkthrough), or null when the card has no video
  */
-function toSteps(record, resolveStill, offsets) {
-  return record.steps.map((step, index) => ({
+function toStep(step, index, resolveStill, offsets) {
+  const served = step.screenshot?.path ? resolveStill(step.screenshot.path, index) : null;
+  return {
     index,
     label: step.label,
     status: step.status ?? "passed",
@@ -217,13 +243,17 @@ function toSteps(record, resolveStill, offsets) {
     // that browser took none (stills come from the canonical browser's own record, so
     // they always match the steps shown) or the file could not be served. Never a
     // placeholder, never a neighbour's still.
-    screenshot: step.screenshot?.path ? resolveStill(step.screenshot.path, index) : null,
+    screenshot: served,
+    // Whether that still is cut off at the height cap: true/false as the run recorded
+    // it, null when there is no still or the run predates the record (v2) — unknown is
+    // never shown as complete.
+    screenshot_truncated: served ? (step.screenshot.truncated ?? null) : null,
     assertions: step.assertions.map((a) => ({
       text: a.text,
       status: a.status,
       actual: a.detail ?? null,
     })),
-  }));
+  };
 }
 
 /**

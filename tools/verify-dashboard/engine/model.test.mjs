@@ -80,15 +80,31 @@ describe("assertJourney (loud validation)", () => {
   });
   it("accepts a step still that is a served path or an explicit null", () => {
     const steps = [
-      { index: 0, screenshot: "stills/J1-chromium-00.jpg" },
-      { index: 1, screenshot: null },
+      { index: 0, screenshot: "stills/J1-chromium-00.jpg", screenshot_truncated: false },
+      { index: 1, screenshot: "stills/J1-chromium-01.jpg", screenshot_truncated: true },
+      { index: 2, screenshot: "stills/J1-chromium-02.jpg", screenshot_truncated: null },
+      { index: 3, screenshot: null, screenshot_truncated: null },
     ];
     expect(assertJourney({ ...good, steps }).steps).toBe(steps);
   });
   it("rejects a step still that is neither a path nor null", () => {
     for (const bad of [undefined, "", 7, { src: "x.jpg" }]) {
-      expect(() => assertJourney({ ...good, steps: [{ index: 0, screenshot: bad }] })).toThrow(
+      const step = { index: 0, screenshot: bad, screenshot_truncated: null };
+      expect(() => assertJourney({ ...good, steps: [step] })).toThrow(
         /screenshot must be a path or null/,
+      );
+    }
+  });
+  it("rejects a truncation flag that is not a boolean/null, or set with no still", () => {
+    const bads = [
+      { screenshot: "stills/J1-chromium-00.jpg", screenshot_truncated: undefined },
+      { screenshot: "stills/J1-chromium-00.jpg", screenshot_truncated: "yes" },
+      { screenshot: null, screenshot_truncated: false },
+      { screenshot: null, screenshot_truncated: undefined },
+    ];
+    for (const bad of bads) {
+      expect(() => assertJourney({ ...good, steps: [{ index: 0, ...bad }] })).toThrow(
+        /screenshot_truncated must be/,
       );
     }
   });

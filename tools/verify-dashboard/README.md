@@ -85,22 +85,35 @@ Over either → the generator fails loud.
 
 Journey specs call the `step` fixture from `e2e/tests/support/journey.ts` instead of
 `test.step`. On the canonical browser (the chromium project sets `stepStills: true`)
-it attaches a full-page JPEG still (height capped at 4000px, quality 70) at the end
-of every step — including a failing step, which shows the screen it failed on. The
-reporter records it as `steps[].screenshot` (schema `journey-evidence/2`): a
-`{path, contentType}` record, or `null` when there is none. Ingest maps it onto the
-Journey model as `steps[].screenshot` — a served `stills/<journey>-<engine>-<NN>.jpg`
-path, or `null`:
+it attaches a full-height JPEG still (height capped at 4000px, quality 70) at the end
+of every step — including a failing step, which shows the screen it failed on.
+
+**Full height.** The app scrolls inside an inner container, so a `fullPage` screenshot
+is only one viewport. The fixture instead measures what the on-screen vertical
+scrollers hide (the main screen container, an open sheet — no selector, no per-journey
+tuning), grows the viewport height by that, takes a plain viewport screenshot, then
+restores the viewport and every scroll offset. A screen still cut off after that (over
+the 4000px cap, or content that does not grow with the viewport) is recorded as
+`truncated: true` — never silently cropped. The walkthrough project takes no stills,
+so its video is untouched.
+
+The reporter records the still as `steps[].screenshot` (schema `journey-evidence/3`):
+a `{path, contentType, width, height, truncated}` record, or `null` when there is none.
+Ingest maps it onto the Journey model as `steps[].screenshot` — a served
+`stills/<journey>-<engine>-<NN>.jpg` path, or `null` — and `steps[].screenshot_truncated`:
+`true`/`false` as recorded, or `null` when there is no still or the run predates the
+flag (v2):
 
 - **Absent is explicit.** A step with no still (a firefox-canonical card, a capture
   that failed, a file missing from the artifact) is `null` — never a placeholder, never
   a neighbour's still. Stills come only from the canonical browser's own record, so
   they always match the steps shown.
-- **Loud on a broken contract.** A v2 step without the field, a malformed record, a
-  file that is not a jpeg/png (extension and leading bytes), or a still over 2 MiB
-  fails the generator.
-- **v1 still ingests** (every step `null`), so a dashboard built before the first v2
-  e2e run reaches main keeps rendering.
+- **Loud on a broken contract.** A v2/v3 step without the field, a malformed record, a
+  v3 still without a valid `width`/`height`/`truncated`, a file that is not a jpeg/png
+  (extension and leading bytes), or a still over 2 MiB fails the generator.
+- **v1 and v2 still ingest** (v1: every step `null`; v2: stills with
+  `screenshot_truncated: null`, unknown — never shown as complete), so a dashboard
+  pinned to an older run keeps rendering.
 - **Flaky stays flaky.** Stills come from the final attempt, but journey status still
   comes from Playwright's `outcome`, so a retry that passed renders FLAKY.
 
