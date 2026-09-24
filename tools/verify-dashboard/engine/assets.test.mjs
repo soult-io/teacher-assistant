@@ -4,6 +4,11 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { MAX_STILL_BYTES, makeAssetResolver } from "./assets.mjs";
 
+// Minimal leading bytes of a real JPEG / PNG — the resolver checks them.
+const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0]);
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a]);
+const jpegOf = (size) => Buffer.concat([JPEG, Buffer.alloc(size - JPEG.length)]);
+
 let root;
 let artifacts;
 let out;
@@ -34,7 +39,7 @@ describe("makeAssetResolver", () => {
 
   it("serves a still under stills/, named per journey, engine and zero-padded step", () => {
     const src = join(artifacts, "j1-chromium", "attachments", "step-still-abc.jpg");
-    writeFileSync(src, "jpeg-bytes");
+    writeFileSync(src, JPEG);
     const resolve = makeAssetResolver(evidenceFile, out);
     const rel = resolve(
       ciPath("j1-chromium/attachments/step-still-abc.jpg"),
@@ -44,11 +49,11 @@ describe("makeAssetResolver", () => {
       3,
     );
     expect(rel).toBe("stills/J5-draft-chromium-03.jpg");
-    expect(readFileSync(join(out, rel), "utf8")).toBe("jpeg-bytes");
+    expect(readFileSync(join(out, rel))).toEqual(JPEG);
   });
 
   it("keeps a png still's extension", () => {
-    writeFileSync(join(artifacts, "j1-chromium", "s.png"), "png");
+    writeFileSync(join(artifacts, "j1-chromium", "s.png"), PNG);
     const resolve = makeAssetResolver(evidenceFile, out);
     expect(resolve(ciPath("j1-chromium/s.png"), "still", "J1", "chromium", 0)).toBe(
       "stills/J1-chromium-00.png",
@@ -63,8 +68,16 @@ describe("makeAssetResolver", () => {
     );
   });
 
+  it("fails loud on a .jpg whose bytes are not a JPEG", () => {
+    writeFileSync(join(artifacts, "j1-chromium", "fake.jpg"), "<html>not an image</html>");
+    const resolve = makeAssetResolver(evidenceFile, out);
+    expect(() => resolve(ciPath("j1-chromium/fake.jpg"), "still", "J1", "chromium", 0)).toThrow(
+      /not a jpeg\/png/,
+    );
+  });
+
   it("fails loud on a still over the size cap — never serves or silently drops it", () => {
-    writeFileSync(join(artifacts, "j1-chromium", "big.jpg"), Buffer.alloc(MAX_STILL_BYTES + 1));
+    writeFileSync(join(artifacts, "j1-chromium", "big.jpg"), jpegOf(MAX_STILL_BYTES + 1));
     const resolve = makeAssetResolver(evidenceFile, out);
     expect(() => resolve(ciPath("j1-chromium/big.jpg"), "still", "J1", "chromium", 0)).toThrow(
       /exceeds the .* byte cap/,
@@ -73,7 +86,7 @@ describe("makeAssetResolver", () => {
   });
 
   it("accepts a still exactly at the size cap", () => {
-    writeFileSync(join(artifacts, "j1-chromium", "edge.jpg"), Buffer.alloc(MAX_STILL_BYTES));
+    writeFileSync(join(artifacts, "j1-chromium", "edge.jpg"), jpegOf(MAX_STILL_BYTES));
     const resolve = makeAssetResolver(evidenceFile, out);
     expect(resolve(ciPath("j1-chromium/edge.jpg"), "still", "J1", "chromium", 1)).toBe(
       "stills/J1-chromium-01.jpg",
@@ -94,7 +107,7 @@ describe("makeAssetResolver", () => {
   });
 
   it("requires a step index for a still", () => {
-    writeFileSync(join(artifacts, "j1-chromium", "s.jpg"), "x");
+    writeFileSync(join(artifacts, "j1-chromium", "s.jpg"), JPEG);
     const resolve = makeAssetResolver(evidenceFile, out);
     expect(() => resolve(ciPath("j1-chromium/s.jpg"), "still", "J1", "chromium")).toThrow(
       /step index/,

@@ -69,7 +69,8 @@ path, or `null`:
   a neighbour's still. Stills come only from the canonical browser's own record, so
   they always match the steps shown.
 - **Loud on a broken contract.** A v2 step without the field, a malformed record, a
-  non-jpeg/png file, or a still over 2 MiB fails the generator.
+  file that is not a jpeg/png (extension and leading bytes), or a still over 2 MiB
+  fails the generator.
 - **v1 still ingests** (every step `null`), so a dashboard built before the first v2
   e2e run reaches main keeps rendering.
 - **Flaky stays flaky.** Stills come from the final attempt, but journey status still

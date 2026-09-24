@@ -22,8 +22,10 @@ on:
         required: false
         default: ""
 
+# The event name is in the group so a manual (dispatch) run on main can never cancel
+# the push run that publishes the image for a merge.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 env:
@@ -88,6 +90,11 @@ jobs:
                 core.setFailed(
                   `run ${pinned} is ${run.path} (${run.conclusion}) — need a successful e2e.yml run`,
                 );
+                return;
+              }
+              // Same-repo runs only: a fork PR's artifacts are attacker-controlled bytes.
+              if (run.head_repository?.full_name !== `${context.repo.owner}/${context.repo.repo}`) {
+                core.setFailed(`run ${pinned} is from ${run.head_repository?.full_name} — same-repo runs only`);
                 return;
               }
               core.setOutput("run_id", String(run.id));

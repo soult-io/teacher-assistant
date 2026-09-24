@@ -3,7 +3,15 @@
 // Assets are served as files, never inlined as data: URIs. Product-agnostic: it knows
 // kinds of evidence, not what a journey is about.
 
-import { copyFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import {
+  closeSync,
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  statSync,
+} from "node:fs";
 import { dirname, extname, join, resolve, sep } from "node:path";
 
 /**
@@ -13,7 +21,23 @@ import { dirname, extname, join, resolve, sep } from "node:path";
  */
 export const MAX_STILL_BYTES = 2 * 1024 * 1024;
 
-const STILL_EXTS = new Set([".jpg", ".jpeg", ".png"]);
+// A still's extension must match its leading bytes (the artifact is untrusted data).
+const STILL_MAGIC = {
+  ".jpg": [0xff, 0xd8, 0xff],
+  ".jpeg": [0xff, 0xd8, 0xff],
+  ".png": [0x89, 0x50, 0x4e, 0x47],
+};
+
+function hasMagic(src, magic) {
+  const head = Buffer.alloc(magic.length);
+  const fd = openSync(src, "r");
+  try {
+    readSync(fd, head, 0, magic.length, 0);
+  } finally {
+    closeSync(fd);
+  }
+  return magic.every((byte, i) => head[i] === byte);
+}
 
 const KINDS = {
   video: { dir: "videos", ext: () => "webm" },
@@ -35,7 +59,8 @@ function servedName(kind, journeyId, engine, index) {
 /** A still must be a jpeg/png within the byte cap — otherwise the run broke its contract. */
 function assertStillServable(src, journeyId, engine, index) {
   const where = `still for ${journeyId}/${engine} step ${index}`;
-  if (!STILL_EXTS.has(extname(src).toLowerCase())) {
+  const magic = STILL_MAGIC[extname(src).toLowerCase()];
+  if (!magic || !hasMagic(src, magic)) {
     throw new Error(`${where} is not a jpeg/png image: ${src}`);
   }
   const bytes = statSync(src).size;
