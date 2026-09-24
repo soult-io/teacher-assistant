@@ -15,6 +15,12 @@
 // dashboard plays: every step ends with a hold so its screen can be read, and
 // `enterText` types character by character instead of filling. The gating run leaves
 // the option off, so none of this slows it.
+//
+// A step can show more than one screen: a click mid-step opens Goal Detail, a sheet,
+// or another view before the step's own end. slowMo only pauses briefly after each
+// action (WALKTHROUGH_SLOWMO_MS), so the walkthrough also holds before any UI action that would leave a screen
+// not yet held — see `holdIfNewScreen`. Typing and clicks within one screen keep the
+// ordinary slowMo pace.
 
 import { test as base, type Locator, type Page, type TestInfo } from "@playwright/test";
 import {
@@ -33,6 +39,58 @@ const STILL_JPEG_QUALITY = 70;
 const WALKTHROUGH_STEP_HOLD_MS = 1500;
 /** Walkthrough: delay between typed characters (ms) — a person typing, not a paste. */
 const WALKTHROUGH_TYPE_DELAY_MS = 80;
+
+/** Walkthrough: where the app shell (AppShell.tsx) mounts the view on screen. */
+const VIEW_SELECTORS = {
+  /** The screen container; its children are the view. */
+  container: "#screen",
+  /** The desktop shell's inner column, one level deeper, when present. */
+  inner: ":scope > .screen-inner",
+  /** No container (the lock screen): the app root's children are the view. */
+  root: "#root",
+};
+/** Walkthrough: how long a held action first waits for its target to exist (ms). */
+const WALKTHROUGH_TARGET_WAIT_MS = 10_000;
+/** Walkthrough: holds in a row before one action, while the screen keeps changing. */
+const WALKTHROUGH_MAX_HOLDS = 3;
+
+/** Walkthrough: the Locator and Page methods that drive the UI; each is held first. */
+const LOCATOR_ACTIONS: readonly (keyof Locator & string)[] = [
+  "check",
+  "clear",
+  "click",
+  "dblclick",
+  "dragTo",
+  "fill",
+  "hover",
+  "press",
+  "pressSequentially",
+  "selectOption",
+  "selectText",
+  "setChecked",
+  "setInputFiles",
+  "tap",
+  "type",
+  "uncheck",
+];
+const PAGE_ACTIONS: readonly (keyof Page & string)[] = [
+  "check",
+  "click",
+  "dblclick",
+  "fill",
+  "goBack",
+  "goForward",
+  "goto",
+  "hover",
+  "press",
+  "reload",
+  "selectOption",
+  "setChecked",
+  "setInputFiles",
+  "tap",
+  "type",
+  "uncheck",
+];
 
 export interface StepStillsOptions {
   /** Take a full-page still at the end of every journey step (canonical browser only). */
@@ -95,6 +153,128 @@ async function holdForViewer(page: Page): Promise<void> {
 }
 
 /**
+ * What screen the viewer sees, as a string that changes exactly when the screen does:
+ * the document and URL, the mounted view elements, each open dialog/sheet, and how
+ * many elements the view and each dialog hold (a row added or removed, a sheet
+ * switching mode). Elements
+ * are compared by identity, not markup — a new view mounts a new element, while the
+ * same view re-rendering (a typed character, a ticked box) keeps its own. Null when
+ * the page cannot answer (closed, mid-navigation): no hold is better than a crash.
+ */
+async function screenSignature(page: Page): Promise<string | null> {
+  return page
+    .evaluate((selectors) => {
+      // Per document: a random tag (a reload is a new screen) and element ids.
+      const w = window as unknown as {
+        __walkthrough?: { doc: string; ids: WeakMap<Element, number>; next: number };
+      };
+      w.__walkthrough ??= { doc: Math.random().toString(36).slice(2), ids: new WeakMap(), next: 0 };
+      const state = w.__walkthrough;
+      const idOf = (el: Element): number => {
+        let id = state.ids.get(el);
+        if (id === undefined) {
+          state.next += 1;
+          id = state.next;
+          state.ids.set(el, id);
+        }
+        return id;
+      };
+      const parts = [state.doc, location.href];
+      const container = document.querySelector(selectors.container);
+      const holder = container?.querySelector(selectors.inner) ?? container;
+      const viewParent = holder ?? document.querySelector(selectors.root) ?? document.body;
+      for (const view of Array.from(viewParent?.children ?? [])) {
+        parts.push(`view:${idOf(view)}`);
+      }
+      // Typed text and a changed number add or remove no elements; a new row does.
+      parts.push(`elements:${viewParent?.getElementsByTagName("*").length ?? 0}`);
+      const dialogs = document.querySelectorAll(
+        '[role="dialog"], [aria-modal="true"], dialog[open]',
+      );
+      for (const dialog of Array.from(dialogs)) {
+        if (dialog.checkVisibility()) {
+          parts.push(`dialog:${idOf(dialog)}:${dialog.getElementsByTagName("*").length}`);
+        }
+      }
+      return parts.join("|");
+    }, VIEW_SELECTORS)
+    .catch(() => null);
+}
+
+/** Per walkthrough page: the screen last held for the viewer. */
+const heldScreens = new WeakMap<Page, { signature: string | null }>();
+
+/**
+ * Before a UI action: if the screen changed since it was last held, hold it now, so a
+ * screen reached mid-step (a view opened by a click, a sheet) is on screen at least
+ * WALKTHROUGH_STEP_HOLD_MS before the action that leaves it. No-op off walkthrough.
+ */
+async function holdIfNewScreen(page: Page): Promise<void> {
+  const held = heldScreens.get(page);
+  if (!held) return;
+  // Sampled again after each hold: a screen that arrived DURING the hold (an async
+  // swap still landing) gets its own full hold before the action.
+  for (let i = 0; i < WALKTHROUGH_MAX_HOLDS; i++) {
+    const signature = await screenSignature(page);
+    if (signature === null || signature === held.signature) return;
+    // Recorded BEFORE the hold: a nested action (clear() calls fill()) must not hold again.
+    held.signature = signature;
+    await holdForViewer(page);
+  }
+}
+
+/** End of a step: always hold, and record the screen held so the next action skips it. */
+async function holdStepEnd(page: Page): Promise<void> {
+  const held = heldScreens.get(page);
+  if (held) held.signature = await screenSignature(page);
+  await holdForViewer(page);
+}
+
+let actionsWrapped = false;
+
+/**
+ * Route every UI action through `holdIfNewScreen`. Playwright has no before-action
+ * hook, so the public Locator and Page methods are wrapped on their prototypes, once
+ * per worker. Only pages registered in `heldScreens` (walkthrough) are ever held.
+ */
+function wrapActionsOnce(page: Page): void {
+  if (actionsWrapped) return;
+  actionsWrapped = true;
+  wrapActions(Object.getPrototypeOf(page) as Page, PAGE_ACTIONS, (self) => holdIfNewScreen(self));
+  wrapActions(
+    Object.getPrototypeOf(page.locator("body")) as Locator,
+    LOCATOR_ACTIONS,
+    async (self) => {
+      if (!heldScreens.has(self.page())) return;
+      // Wait for the action's own target first: when it belongs to a screen still
+      // arriving (an async swap), that screen is sampled — and held — before the
+      // action, not missed. A target that never comes is left to the action to report.
+      await self
+        .waitFor({ state: "attached", timeout: WALKTHROUGH_TARGET_WAIT_MS })
+        .catch(() => undefined);
+      await holdIfNewScreen(self.page());
+    },
+  );
+}
+
+/** Replace each named method on `proto` with one that awaits `before(this)` first. */
+function wrapActions<T extends object>(
+  proto: T,
+  names: readonly (keyof T & string)[],
+  before: (self: T) => Promise<void>,
+): void {
+  const methods = proto as Record<string, unknown>;
+  for (const name of names) {
+    const original = methods[name];
+    if (typeof original !== "function") continue;
+    methods[name] = async function (this: T, ...args: unknown[]) {
+      await before(this);
+      return original.apply(this, args);
+    };
+  }
+}
+
+/**
  * Put `text` into a text field. The gating run fills it in one call; a walkthrough
  * types it at a person's pace so the recording shows the text being entered.
  */
@@ -112,7 +292,12 @@ export const test = base.extend<StepStillsOptions & { step: JourneyStep }>({
   stepStills: [false, { option: true }],
   walkthrough: [false, { option: true }],
   step: async ({ page, stepStills, walkthrough }, use, testInfo) => {
-    if (walkthrough) await markRecordingStart(page, testInfo);
+    if (walkthrough) {
+      await markRecordingStart(page, testInfo);
+      wrapActionsOnce(page);
+      // The grey sync frame counts as held: the first navigation away is not delayed.
+      heldScreens.set(page, { signature: await screenSignature(page) });
+    }
     let index = 0;
     const step: JourneyStep = <T>(title: string, body: () => Promise<T>) =>
       base.step(title, async (): Promise<T> => {
@@ -129,9 +314,10 @@ export const test = base.extend<StepStillsOptions & { step: JourneyStep }>({
               noteMissingStill(testInfo, title, captureErr),
             );
           }
-          if (walkthrough) await holdForViewer(page);
+          if (walkthrough) await holdStepEnd(page);
         }
       });
     await use(step);
+    heldScreens.delete(page);
   },
 });
