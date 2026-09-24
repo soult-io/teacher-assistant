@@ -223,6 +223,8 @@
   .jfailbtn { margin:0 .65rem .6rem 1.9rem; min-height:2.25rem; font-family:var(--mono); font-size:.74rem; font-weight:600; color:var(--fail); background:var(--surface); border:1px solid var(--fail); border-radius:8px; padding:.3rem .7rem; cursor:pointer; }
   .jfailbtn[hidden] { display:none; }
   .js .jshot, .js .jnoshot-inline { display:none; }
+  .js .nojs .jshot, .js .nojs .jnoshot-inline { display:block; }
+  .js .nojs .jmodes, .js .nojs .jscreens, .js .nojs .jfailbtn { display:none; }
 
   .jsteps-wrap { min-width:0; }
   .jsteps { list-style:none; margin:0; padding:0; counter-reset:jstep; display:flex; flex-direction:column; gap:.5rem; }
@@ -356,6 +358,9 @@
       });
       var img = document.createElement("img");
       img.decoding = "async";
+      // A card that opens on a still (failed, or no walkthrough) loads it only as it
+      // nears the screen.
+      img.loading = "lazy";
       var cur = -1;
       var mode = "video";
       var warmed = {};
@@ -398,7 +403,9 @@
         cap.appendChild(meta);
       }
 
-      function show(i) {
+      // `byUser` is false only for the view a card opens on: that still is not announced
+      // and its neighbours are not warmed until the reader moves.
+      function show(i, byUser) {
         if (i < 0 || i >= total) return;
         cur = i;
         var d = data[i];
@@ -411,8 +418,7 @@
           img.alt = "Screen for step " + (i + 1) + " of " + total + ": " + d.label + (d.failed ? " (failed)" : "");
           img.src = d.src;
           stage.appendChild(img);
-          warm(i - 1);
-          warm(i + 1);
+          if (byUser) { warm(i - 1); warm(i + 1); }
         } else {
           var none = document.createElement("div");
           none.className = "jnoshot";
@@ -421,7 +427,7 @@
         }
         pos.textContent = "Step " + (i + 1) + " of " + total + (d.failed ? " · failed" : "");
         // Screen readers get position, status and label (or the missing screen) in one.
-        live.textContent = "Step " + (i + 1) + " of " + total + (d.failed ? ", failed" : "") +
+        if (byUser) live.textContent = "Step " + (i + 1) + " of " + total + (d.failed ? ", failed" : "") +
           ": " + (d.src ? d.label : "no screen captured");
         prev.disabled = i === 0;
         next.disabled = i === total - 1;
@@ -444,7 +450,7 @@
         return f !== null && f < total ? f : 0;
       }
 
-      function setMode(m) {
+      function setMode(m, byUser, at) {
         if (m === "video" && !videoPane) m = "screens";
         mode = m;
         tabs.forEach(function (t) {
@@ -456,18 +462,21 @@
         pane.hidden = m !== "screens";
         if (m === "screens") {
           if (video) video.pause();
-          show(startStep());
+          show(at === undefined ? startStep() : at, byUser);
         } else {
           data.forEach(function (s) { s.li.removeAttribute("aria-current"); });
           if (video && cur >= 0 && data[cur].ms !== null) {
             video.currentTime = data[cur].ms / 1000;   // paused on the step; no autoplay
+          } else {
+            // No seek, so no timeupdate to re-highlight: drop the viewer's highlight.
+            data.forEach(function (s) { s.li.classList.remove("current"); });
           }
         }
       }
 
       head.hidden = false;
       tabs.forEach(function (t, i) {
-        t.addEventListener("click", function () { setMode(t.getAttribute("data-mode")); });
+        t.addEventListener("click", function () { setMode(t.getAttribute("data-mode"), true); });
         t.addEventListener("keydown", function (e) {
           var n = tabs.length;
           var j = e.key === "ArrowRight" ? (i + 1) % n : e.key === "ArrowLeft" ? (i - 1 + n) % n
@@ -475,29 +484,29 @@
           if (j < 0) return;
           e.preventDefault();
           tabs[j].focus();
-          setMode(tabs[j].getAttribute("data-mode"));
+          setMode(tabs[j].getAttribute("data-mode"), true);
         });
       });
-      prev.addEventListener("click", function () { show(cur - 1); });
-      next.addEventListener("click", function () { show(cur + 1); });
+      prev.addEventListener("click", function () { show(cur - 1, true); });
+      next.addEventListener("click", function () { show(cur + 1, true); });
       // Arrow keys step only while focus is in the viewer — never page-wide.
       function onKey(e) {
         var j = e.key === "ArrowLeft" ? cur - 1 : e.key === "ArrowRight" ? cur + 1
           : e.key === "Home" ? 0 : e.key === "End" ? total - 1 : null;
         if (j === null) return;
         e.preventDefault();
-        show(Math.max(0, Math.min(total - 1, j)));
+        show(Math.max(0, Math.min(total - 1, j)), true);
       }
       stage.addEventListener("keydown", onKey);
       stepper.addEventListener("keydown", onKey);
       data.forEach(function (d, i) {
         if (d.hd && d.hd.tagName === "BUTTON") {
-          d.hd.addEventListener("click", function () { if (mode === "screens") show(i); });
+          d.hd.addEventListener("click", function () { if (mode === "screens") show(i, true); });
         }
         var fb = d.li.querySelector(".jfailbtn");
         if (fb) {
           fb.hidden = false;
-          fb.addEventListener("click", function () { setMode("screens"); show(i); stage.focus(); });
+          fb.addEventListener("click", function () { setMode("screens", true, i); stage.focus(); });
         }
       });
       setMode(media.getAttribute("data-view") === "screens" ? "screens" : "video");
@@ -507,7 +516,14 @@
     document.querySelectorAll(".jcard").forEach(function (card) {
       var video = card.querySelector("[data-video]");
       var steps = [].slice.call(card.querySelectorAll(".jstep[data-step]"));
-      var viewer = screensViewer(card, steps, video);
+      var viewer = null;
+      try {
+        viewer = screensViewer(card, steps, video);
+      } catch (err) {
+        // A broken viewer must not hide the stills: this card falls back to its links.
+        card.classList.add("nojs");
+        if (window.console) console.error(err);
+      }
       if (!video) return;
       var screensOn = function () { return !!viewer && viewer.active(); };
       var marks = [].slice.call(card.querySelectorAll(".jmark"));

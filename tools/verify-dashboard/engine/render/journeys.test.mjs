@@ -329,7 +329,7 @@ describe("renderJourneyCard — step screens, passed card with a walkthrough", (
   it("renders the screen viewer hidden, with an empty stage (nothing fetched on load)", () => {
     const viewer = between(html, 'class="jscreens"', 'class="jsteps-wrap"');
     expect(viewer).toContain("hidden");
-    expect(viewer).toContain('class="jstage" tabindex="0"');
+    expect(viewer).toContain('class="jstage" role="group" tabindex="0"');
     expect(viewer).toContain('class="jlive" aria-live="polite" aria-atomic="true"');
     expect(viewer).not.toContain("<img");
     expect(viewer).not.toContain("stills/");
@@ -444,6 +444,11 @@ describe("renderJourneyCard — still path safety", () => {
       "../x.jpg",
       "a/../../x.jpg",
       "a\\b.jpg",
+      " //evil.test/x.jpg",
+      "java\tscript:alert(1)",
+      "a/%2e%2e/x.jpg",
+      "./x.jpg",
+      "stills/x.jpg ",
     ]) {
       const html = renderJourneyCard(
         {
@@ -456,13 +461,26 @@ describe("renderJourneyCard — still path safety", () => {
       expect(stepHtml(html, 0)).toContain("no screen captured");
     }
   });
-  it("escapes a still path", () => {
+  it("rejects a still path carrying HTML-significant characters — never rendered", () => {
     const html = renderJourneyCard(
-      { ...withStills, steps: [{ ...withStills.steps[0], screenshot: 'stills/a"b<.jpg' }] },
+      {
+        ...withStills,
+        steps: [{ ...withStills.steps[0], screenshot: 'stills/a"b<.jpg' }, withStills.steps[1]],
+      },
       0,
     );
-    expect(html).toContain("stills/a&quot;b&lt;.jpg");
     expect(html).not.toContain('a"b<');
+    expect(html).not.toContain("a&quot;b");
+    expect(stepHtml(html, 0)).toContain("no screen captured");
+  });
+  it("escapes step labels in the still's accessible name", () => {
+    const html = renderJourneyCard(
+      { ...withStills, steps: [{ ...withStills.steps[0], label: 'Open <b>"x"' }] },
+      0,
+    );
+    expect(html).toContain(
+      'aria-label="Screen for step 1 of 1: Open &lt;b&gt;&quot;x&quot; (opens the image)"',
+    );
   });
 });
 

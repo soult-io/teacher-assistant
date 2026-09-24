@@ -270,12 +270,14 @@ function stepColumn(journey, screens) {
   return `<div class="jsteps-wrap"><ol class="jsteps">${items}</ol></div>`;
 }
 
-// A still path is served next to the page: relative, no scheme, no parent segment. A
-// path that is not (the evidence is untrusted data) is treated as no still at all.
+// A still path is served next to the page: plain relative segments of safe characters
+// only (an allowlist — no scheme, no leading or embedded whitespace, no percent
+// escapes, no "." or ".." segment). Anything else (the evidence is untrusted data) is
+// treated as no still at all.
+const SAFE_PATH = /^[A-Za-z0-9_-][A-Za-z0-9._-]*(\/[A-Za-z0-9._-]+)*$/;
 function servedStillPath(src) {
-  if (typeof src !== "string" || src === "") return null;
-  if (src.startsWith("/") || src.includes("\\") || /^[a-z][a-z0-9+.-]*:/i.test(src)) return null;
-  if (src.split("/").includes("..")) return null;
+  if (typeof src !== "string" || !SAFE_PATH.test(src)) return null;
+  if (src.split("/").some((seg) => seg === "." || seg === "..")) return null;
   return src;
 }
 
@@ -345,7 +347,7 @@ function screensMedia(journey, screens, hasVideo) {
           ${video}
           <div class="jscreens" id="${id}-pane-s"${panel} hidden>
             ${flaky}
-            <div class="jstage" tabindex="0" aria-roledescription="screen viewer" aria-label="Step screens. Left and right arrow keys move between steps; up and down scroll the screen."></div>
+            <div class="jstage" role="group" tabindex="0" aria-roledescription="screen viewer" aria-label="Step screens. Left and right arrow keys move between steps; up and down scroll the screen."></div>
             <div class="jstepper">
               <button type="button" class="jprev" aria-label="Previous step">‹ Prev</button>
               <span class="jpos mono"></span>
