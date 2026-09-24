@@ -22,10 +22,12 @@ only a new config — brain #3654, a hard Phase 3 acceptance criterion.
 
 ## What it does
 
-On every push to `main` (and on PRs, as a no-deploy build check):
+When a push to `main` finishes its `e2e` run green (and on PRs, as a no-deploy build
+check):
 
 1. Runs each configured workspace's vitest with `--reporter=json` for **live counts**.
-2. **Ingests journeys** from the latest successful main `e2e` run's
+2. **Ingests journeys** from that same commit's `e2e` run (on a PR: the latest
+   successful main run's)
    `journey-evidence.json` (steps + assertion text + per-browser results + video/trace
    + a per-step still),
    maps them onto the config manifest → `Journey[]`, each stamped with the run's
@@ -152,12 +154,15 @@ now carries nothing a real run did not produce.
 
 ## Hosting
 
-**Private**, on the Lexington infra — not public GitHub Pages (Neil's call). On push
-to `main` the workflow builds the generated output (`dist-dashboard/`) into a static
+**Private**, on the Lexington infra — not public GitHub Pages (Neil's call). When a
+push to `main` finishes its `e2e` run green, the workflow (triggered by `workflow_run`)
+checks out that commit and builds the generated output (`dist-dashboard/`) into a static
 nginx image and pushes it to GHCR:
 
 - `ghcr.io/soult-io/teacher-assistant-verify:sha-<commit>` (immutable, pinned in the
-  deploy stack) + a moving `:latest`.
+  deploy stack) + a moving `:latest` (only while that commit is still main's tip).
+  The image's provenance commit always equals its sha tag: the workflow fails rather
+  than publish another commit's evidence (TEACH-21).
 
 No screenshots or videos are committed to `main`. The deploy stack
 `nsoult-agentic/stack-lexington-teacher-assistant` pins the image by tag + digest and
