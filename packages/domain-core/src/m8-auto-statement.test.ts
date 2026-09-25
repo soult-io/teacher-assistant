@@ -450,6 +450,8 @@ describe("the F4 window is the tail of the comparable points (prior window = the
     if (stmt === null) return;
     expect(stmt.slots.totalPoints).toBe(len);
     expect(stmt.slots.nUsed).toBe(Math.min(5, len));
+    // The displayed average is the mean of the trendPoints tail [max(0, len−5), len).
+    expect(stmt.slots.avgRecent).toBe(len === 0 ? null : 40 + 2 * (Math.max(0, len - 5) + len - 1));
     const a = Math.max(0, len - 10);
     const b = len - 5;
     expect(stmt.slots.priorPeriodAvg).toBe(b <= 0 ? null : 40 + 2 * (a + b - 1));
