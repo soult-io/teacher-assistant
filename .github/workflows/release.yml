@@ -69,22 +69,46 @@ jobs:
           MINOR="${TAG%.*}"
           echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "minor_tag=${MINOR}" >> "$GITHUB_OUTPUT"
+      # Build and scan BEFORE any push: a release image that fails the scan must never
+      # reach GHCR. pull: true re-resolves the base tag so the scanned base is current.
+      - name: Build the image (local, for the scan)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          pull: true
+          load: true
+          push: false
+          tags: teacher-assistant-${{ matrix.name }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: teacher-assistant-${{ matrix.name }}:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+      # Log in only after the scan: the third-party scan step never sees a push token.
       - uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:${{ steps.version.outputs.release_tag }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:${{ steps.version.outputs.minor_tag }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # Push the exact image Trivy scanned (a rebuild could re-resolve the base tag to a
+      # digest that was never scanned): release tag + minor + latest.
+      - name: Push the scanned image
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+          RELEASE_TAG: ${{ steps.version.outputs.release_tag }}
+          MINOR_TAG: ${{ steps.version.outputs.minor_tag }}
+        run: |
+          for tag in "$RELEASE_TAG" "$MINOR_TAG" latest; do
+            docker tag "$SCAN_IMAGE" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
 
   github-release:
     needs: [push-images]
