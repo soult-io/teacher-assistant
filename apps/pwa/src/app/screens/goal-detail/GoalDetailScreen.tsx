@@ -285,7 +285,9 @@ function ConsistencyCard({
         <b>Consistency window</b>
         <InfoTip label="How the consistency window works">
           Consecutive means consecutive probes in admin-date order — never cherry-picked weeks. A ⊘
-          pauses the run, it never breaks or resets it.
+          pauses the run, it never breaks or resets it. If a student scores below the goal on any
+          probe that day, the streak starts over after that day, no matter which one you entered
+          first.
         </InfoTip>
       </div>
       <div className="window" data-testid="consistency-window">

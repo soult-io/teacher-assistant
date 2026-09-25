@@ -14,7 +14,7 @@ import type {
   OpaqueId,
   ProgressDataPoint,
 } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcNewestFirst, compareCodePoints } from "./comparators.js";
 import { isoWeekId } from "./instructional-weeks.js";
 import {
   clampAfterFromRevisions,
@@ -66,9 +66,14 @@ export function isIcExportable(goal: IEPGoal): boolean {
   );
 }
 
-/** Pick the single representative point for a week: a scored point wins over a ⊘; latest admin-date otherwise. */
+/**
+ * Pick the single representative point for a week: the LAST scored point under the
+ * shared oldest-first order (latest admin date, then latest entry time — TEACH-27);
+ * a ⊘ only when the week has no scored point. Walks the exact reverse
+ * (compareArcNewestFirst), so the first match is the last in oldest-first order.
+ */
 function pickWeekPoint(weekPoints: ProgressDataPoint[]): ProgressDataPoint | undefined {
-  const ordered = [...weekPoints].sort((a, b) => compareCodePoints(b.admin_date, a.admin_date));
+  const ordered = [...weekPoints].sort(compareArcNewestFirst);
   return ordered.find((p) => p.state === "scored") ?? ordered[0];
 }
 

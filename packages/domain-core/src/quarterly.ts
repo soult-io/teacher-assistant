@@ -7,7 +7,7 @@
 // destination than the weekly value — never overwrites it.
 
 import type { IEPGoal, IsoDate, ProgressDataPoint, Revision } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcOldestFirst } from "./comparators.js";
 import { isoWeekId } from "./instructional-weeks.js";
 import { inComputedMath, isCountedOffBasis, isUnresolvedMismatch } from "./mismatch.js";
 import { computeValue } from "./value.js";
@@ -92,13 +92,10 @@ export function computeQuarterlySummary(
 
   const scored = mine
     .filter((p) => p.state === "scored" && (clampAfter === undefined || p.admin_date >= clampAfter))
-    // Admin-date order, with a data_point_id tiebreak so window membership is
-    // deterministic when two points share an admin date.
-    .sort(
-      (a, b) =>
-        compareCodePoints(a.admin_date, b.admin_date) ||
-        compareCodePoints(a.data_point_id, b.data_point_id),
-    );
+    // The shared oldest-first order (admin date, then entry time, then id) — so when
+    // two points share an admin date, window membership follows entry time, never
+    // an arbitrary id (TEACH-27).
+    .sort(compareArcOldestFirst);
 
   // Averageable = not-mismatched OR teacher-elected "counted" (clamp already applied).
   const comparable = scored.filter(inComputedMath);
