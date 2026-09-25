@@ -406,3 +406,54 @@ describe("condition-mismatched points are excluded from BOTH the displayed avera
     expect(stmt?.variant).toBe("on_track");
   });
 });
+
+describe("a counted mismatch in the last 5 does not shift the prior-period boundary (TEACH-30)", () => {
+  // Clean W1–W8 = 50,55,…,85. F4 window = last 5 clean (65,70,75,80,85) → avg 75.
+  // Prior = the clean points before it (50,55,60) → avg 55. delta_prior = 75 − 55 = 20.
+  // C = 100 is denominator-mismatched with a "counted" disposition: M8 hard-excludes it
+  // from both windows, so any leak would move avgRecent or priorPeriodAvg off 75/55.
+  it.each([
+    ["between W6 and W7 (inside the recent window)", "2026-10-15"],
+    ["between W2 and W3 (inside the prior window)", "2026-09-17"],
+  ])("C dated %s", (_label, cDate) => {
+    const goal = makeGoal({ baselineValue: 50, criterionLevel: 80 });
+    const clean = series(goal, [50, 55, 60, 65, 70, 75, 80, 85]);
+    const counted: ProgressDataPoint = {
+      ...scored(goal, cDate, 100),
+      denominator_mismatch: true,
+      mismatch_window_disposition: "counted",
+    };
+    const stmt = computeAutoStatement(goal, "YZ", [...clean, counted], {
+      isNonInstructional: noBreaks,
+    });
+    expect(stmt).not.toBeNull();
+    if (stmt === null) return;
+    expect(stmt.slots.nUsed).toBe(5);
+    expect(stmt.slots.nUsed).toBe(Math.min(5, stmt.slots.totalPoints));
+    expect(stmt.slots.avgRecent).toBe(75);
+    expect(stmt.slots.priorPeriodAvg).toBe(55);
+    expect(stmt.slots.deltaPrior).toBe(20);
+    expect(stmt.slots.totalPoints).toBe(8);
+    expect(stmt.excludedMismatches).toBe(1);
+  });
+});
+
+describe("the F4 window is the tail of the comparable points (prior window = the 5 before it)", () => {
+  // Clean y_i = 40 + 4i at weekly dates. For len points: nUsed = min(5, len); the prior
+  // window is indices [max(0, len−10), len−5), empty (null) when len ≤ 5. The mean of
+  // y over indices a..b−1 is 40 + 2(a + b − 1), always an integer here.
+  it.each(Array.from({ length: 11 }, (_, len) => len))("len = %i", (len) => {
+    const goal = makeGoal({ baselineValue: 50, criterionLevel: 80 });
+    const pts = THIRTEEN_WEEKLY.slice(0, len).map((d, i) => scored(goal, d, 40 + i * 4));
+    const stmt = computeAutoStatement(goal, "ST", pts, { isNonInstructional: noBreaks });
+    expect(stmt).not.toBeNull();
+    if (stmt === null) return;
+    expect(stmt.slots.totalPoints).toBe(len);
+    expect(stmt.slots.nUsed).toBe(Math.min(5, len));
+    // The displayed average is the mean of the trendPoints tail [max(0, len−5), len).
+    expect(stmt.slots.avgRecent).toBe(len === 0 ? null : 40 + 2 * (Math.max(0, len - 5) + len - 1));
+    const a = Math.max(0, len - 10);
+    const b = len - 5;
+    expect(stmt.slots.priorPeriodAvg).toBe(b <= 0 ? null : 40 + 2 * (a + b - 1));
+  });
+});
