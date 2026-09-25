@@ -35,6 +35,13 @@ try {
 }
 const { findings, scanned, media } = result;
 if (findings.length > 0) {
+  // An annotation on the run page: a refused walkthrough upload fails only a non-gating
+  // job, which a green run would otherwise hide.
+  if (process.env.GITHUB_ACTIONS) {
+    console.log(
+      `::error title=Student-data scan refused an upload::${arg}: ${findings.length} finding(s) — the artifact was not uploaded`,
+    );
+  }
   console.error(
     `scan-artifacts: ${arg} refused — ${findings.length} finding(s) (values not logged):\n${formatFindings(findings)}`,
   );

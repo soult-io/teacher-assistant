@@ -182,6 +182,16 @@ describe("scanTraceZip", () => {
       ]);
     }
   });
+  it("refuses an entry that is neither UTF-8 text nor a known image or font", () => {
+    const zip = makeZip({
+      "resources/a.bin": Buffer.from([0x78, 0xff, 0xfe, 0x80]),
+      "resources/b.woff2": Buffer.from([...Buffer.from("wOF2"), 0x00, 0x01]),
+      "resources/c.png": Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]),
+    });
+    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([
+      { file: "trace.zip", kind: "unreadable", location: "resources/a.bin" },
+    ]);
+  });
   it("refuses an archive it cannot read", () => {
     expect(scanTraceZip(Buffer.from("not a zip"), "trace.zip", "127.0.0.1:4173")).toEqual([
       { file: "trace.zip", kind: "unreadable", location: "archive" },
@@ -191,7 +201,7 @@ describe("scanTraceZip", () => {
     const zip = makeZip({
       "resources/snap.html": `<p>${EMAIL}</p>`,
       "test.trace": `{"x":"${SSN}"}\n{"initials":"ABCD"}`,
-      "screencast/a.jpeg": Buffer.from([0xff, 0xd8, 0x00, 0x40]),
+      "screencast/a.jpeg": Buffer.from([0xff, 0xd8, 0xff, 0x00, 0x40]),
     });
     expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([
       { file: "trace.zip", kind: "email", location: "resources/snap.html:1:4" },

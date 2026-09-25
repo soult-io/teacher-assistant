@@ -34,8 +34,8 @@ describe("scanArtifactDir", () => {
     put("journey-evidence.json", evidence(BASE_URL));
     put("results.json", '{"stats":{"expected":1}}');
     put("j1-chromium/trace.zip", makeZip({ "0.network": request(`${BASE_URL}/index.html`) }));
-    put("j1-chromium/video.webm", Buffer.from([0, 1, 2]));
-    put("j1-chromium/still.jpeg", Buffer.from([0xff, 0xd8, 0]));
+    put("j1-chromium/video.webm", Buffer.from([0x1a, 0x45, 0xdf, 0xa3, 0]));
+    put("j1-chromium/still.jpeg", Buffer.from([0xff, 0xd8, 0xff, 0]));
     const { findings, scanned, media } = scan();
     expect(findings).toEqual([]);
     expect(scanned).toBe(3);
@@ -62,6 +62,54 @@ describe("scanArtifactDir", () => {
     expect(summary(scan().findings)).toEqual(["j4-chromium/blob.dat unreadable"]);
   });
 
+  it("refuses a file of invalid UTF-8 with no NUL byte (e.g. compressed text)", () => {
+    put("j4-chromium/blob.gz", Buffer.from([0x78, 0xff, 0xfe, 0x80, 0x67]));
+    expect(summary(scan().findings)).toEqual(["j4-chromium/blob.gz unreadable"]);
+  });
+
+  it("text-scans nothing named as media unless its bytes say it is media", () => {
+    put("j4-chromium/fake.png", `note ${EMAIL}`);
+    expect(summary(scan().findings)).toEqual(["j4-chromium/fake.png unreadable"]);
+  });
+
+  it("scans base64 attachment bodies and stdout buffers inside results.json", () => {
+    const b64 = (text) => Buffer.from(text).toString("base64");
+    put(
+      "results.json",
+      JSON.stringify({
+        suites: [
+          {
+            attachments: [{ name: "note", contentType: "text/plain", body: b64(EMAIL) }],
+            stdout: [{ text: "ok" }, { buffer: b64(`{"initials":"${NAME}"}`) }],
+          },
+        ],
+      }),
+    );
+    expect(scan().findings.map((f) => `${f.kind} ${f.location.split(":")[0]}`)).toEqual([
+      "email $.suites[0].attachments[0].body",
+      "initials $.suites[0].stdout[1].buffer",
+    ]);
+  });
+
+  it("passes a base64 image body, refuses an unreadable one", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
+    put(
+      "results.json",
+      JSON.stringify({
+        attachments: [
+          { contentType: "image/png", body: png.toString("base64") },
+          {
+            contentType: "application/gzip",
+            body: Buffer.from([0x1f, 0x8b, 0]).toString("base64"),
+          },
+        ],
+      }),
+    );
+    expect(scan().findings.map((f) => `${f.kind} ${f.location}`)).toEqual([
+      "unreadable $.attachments[1].body",
+    ]);
+  });
+
   it("refuses a trace that reached a non-local host", () => {
     put("j5-chromium/trace.zip", makeZip({ "0.network": request("https://ic.fcps.net/x") }));
     expect(summary(scan().findings)).toEqual(["j5-chromium/trace.zip network-host"]);
@@ -75,6 +123,11 @@ describe("scanArtifactDir", () => {
   it("refuses evidence stamped with another origin", () => {
     put("walkthrough-evidence.json", evidence("https://ta.example.org"));
     expect(summary(scan().findings)).toEqual(["walkthrough-evidence.json origin"]);
+  });
+
+  it("refuses evidence with no origin stamp (this run wrote it, so it must be v4)", () => {
+    put("journey-evidence.json", JSON.stringify({ schema: "ta/journey-evidence/3", tests: [] }));
+    expect(summary(scan().findings)).toEqual(["journey-evidence.json origin"]);
   });
 
   it("refuses evidence that is not JSON", () => {

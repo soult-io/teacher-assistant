@@ -246,9 +246,12 @@ published its artifacts, so `e2e.yml` also runs them first:
 `node tools/verify-dashboard/src/scan-artifacts.mjs <dir>` (`engine/artifact-scan.mjs`)
 runs before each upload (`e2e/test-results/`, `e2e/test-results-walkthrough/`), pass or
 fail, and the upload runs only when it exits 0. It walks the whole directory, fail-closed:
-every `*.zip` gets the trace checks, videos and stills (`.webm .mp4 .png .jpg .jpeg .webp
-.gif`) are skipped as pixels, every other file is text-scanned (a file with a NUL byte, or
-a symlink, is a finding), and each `*-evidence.json` must carry the local origin stamp.
+every `*.zip` gets the trace checks; a file named as a video or still (`.webm .mp4 .png
+.jpg .jpeg .webp .gif`) is skipped as pixels only when its leading bytes say it is one;
+every other file must be UTF-8 text (no lossy decoding) and is text-scanned, including the
+base64 attachment bodies and stdout buffers inside any `*.json`; each `*-evidence.json`
+must carry the local origin stamp (v4); a symlink is a finding. Inside a trace, binary
+other than an image or font is a finding too.
 The CI run writes no Playwright HTML report: it was an unscanned public copy of every
 trace. The walkthrough records a trace (snapshots on — without them Playwright logs no
 network) so its videos get the network check too; it is never copied into the page.

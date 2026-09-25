@@ -5,40 +5,94 @@
 // Fail-closed over the whole tree, not a list of known names: whatever Playwright writes
 // (evidence, results.json, error-context.md page snapshots, stdout attachments) is read.
 // - every *.zip: scanTraceZip (the text scan over its entries + the network-host check)
-// - a video or still: skipped, pixels (their guard is the evidence origin stamp)
-// - every other file: the text scan; a file with a NUL byte cannot be read as text, so it
-//   is a finding, not skipped
-// - an evidence file (*-evidence.json): its origin stamp must be the local build
-// - a symlink: a finding (upload-artifact would follow it out of the directory)
+// - a video or still: skipped as pixels, but only when its leading bytes say it is one
+//   (a text file named x.png is a finding); their guard is the origin stamp + the trace
+//   network check (pii-scan.mjs header)
+// - every other file: the text scan; a file that is not UTF-8 text is a finding
+// - every *.json: base64 bodies inside it (the JSON reporter's inline attachments and
+//   non-text stdout) are decoded and scanned too
+// - an evidence file (*-evidence.json): must carry the local origin stamp. This run wrote
+//   it, so an unstamped (pre-v4) file is a finding too
+// - a symlink or special file: a finding (upload-artifact would follow a link out)
 
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join, relative } from "node:path";
+import { closeSync, lstatSync, openSync, readdirSync, readFileSync, readSync } from "node:fs";
+import { join } from "node:path";
 import { checkRunOrigin } from "./ingest.mjs";
-import { scanBuild } from "./pii-scan.mjs";
+import { decodeText, isKnownMedia, scanText, scanTraceZip } from "./pii-scan.mjs";
 
-/** Pixels: no text scan can read them. */
 const MEDIA = /\.(?:webm|mp4|png|jpe?g|webp|gif)$/i;
 const EVIDENCE = /-evidence\.json$/;
+/** Enough leading bytes for every signature isKnownMedia checks. */
+const MAGIC_BYTES = 16;
 
 /** @typedef {import("./pii-scan.mjs").Finding} Finding */
 
+function leadingBytes(path) {
+  const buf = Buffer.alloc(MAGIC_BYTES);
+  const fd = openSync(path, "r");
+  try {
+    return buf.subarray(0, readSync(fd, buf, 0, MAGIC_BYTES, 0));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** The evidence file's origin stamp, as findings. The stamped value is never logged. */
+function originFindings(json, file, expectedBaseURL) {
+  try {
+    if (checkRunOrigin(json, expectedBaseURL)) return [];
+  } catch {
+    // Stamped with another origin: fall through.
+  }
+  return [{ file, kind: "origin", location: "baseURL" }];
+}
+
+/** Is `node[key]` a base64 body: an attachment `body` beside its `contentType`, or a
+ * stdout/stderr `buffer`? */
+function isBase64Field(node, key) {
+  if (typeof node[key] !== "string") return false;
+  return (key === "body" && "contentType" in node) || key === "buffer";
+}
+
+/** Decoded text is scanned; decoded binary must be an image or font. */
+function decodedFindings(value, file, at) {
+  const data = Buffer.from(value, "base64");
+  const text = decodeText(data);
+  if (text !== null) return scanText(text, file, `${at}:`);
+  return isKnownMedia(data) ? [] : [{ file, kind: "unreadable", location: at }];
+}
+
 /**
- * The evidence file's origin stamp, as findings (none when it is the local build or the
- * file predates the stamp). The stamped value is never logged.
+ * Findings in the base64 bodies of a JSON document (the JSON reporter's inline
+ * attachments and non-text stdout), at their JSON path.
  */
-function originFindings(text, file, expectedBaseURL) {
-  let evidence;
-  try {
-    evidence = JSON.parse(text);
-  } catch {
-    return [{ file, kind: "unreadable", location: "json" }];
+function base64Findings(node, file, path = "$") {
+  if (Array.isArray(node)) {
+    return node.flatMap((v, i) => base64Findings(v, file, `${path}[${i}]`));
   }
+  if (node === null || typeof node !== "object") return [];
+  return Object.keys(node).flatMap((key) =>
+    isBase64Field(node, key)
+      ? decodedFindings(node[key], file, `${path}.${key}`)
+      : base64Findings(node[key], file, `${path}.${key}`),
+  );
+}
+
+/** Findings for one text file: the text scan, plus the JSON checks for a *.json. */
+function textFileFindings(text, rel, baseURL) {
+  const findings = scanText(text, rel);
+  if (!rel.endsWith(".json")) return findings;
+  let json;
   try {
-    checkRunOrigin(evidence, expectedBaseURL);
-    return [];
+    json = JSON.parse(text);
   } catch {
-    return [{ file, kind: "origin", location: "baseURL" }];
+    // An evidence file must be read to check its stamp; any other .json was text-scanned.
+    if (EVIDENCE.test(rel)) findings.push({ file: rel, kind: "unreadable", location: "json" });
+    return findings;
   }
+  findings.push(...base64Findings(json, rel));
+  if (EVIDENCE.test(rel)) findings.push(...originFindings(json, rel, baseURL));
+  return findings;
 }
 
 /**
@@ -48,9 +102,9 @@ function originFindings(text, file, expectedBaseURL) {
  * @returns {{findings: Finding[], scanned: number, media: number}}
  */
 export function scanArtifactDir(dir, { baseURL }) {
+  const allowedHost = new URL(baseURL).host;
   const findings = [];
-  const files = [];
-  const traceZips = [];
+  let scanned = 0;
   let media = 0;
   for (const rel of readdirSync(dir, { recursive: true })) {
     const path = join(dir, rel);
@@ -61,27 +115,19 @@ export function scanArtifactDir(dir, { baseURL }) {
       continue;
     }
     if (MEDIA.test(rel)) {
-      media++;
+      if (isKnownMedia(leadingBytes(path))) media++;
+      else findings.push({ file: rel, kind: "unreadable", location: "not the media it is named" });
       continue;
     }
-    if (rel.endsWith(".zip")) {
-      traceZips.push(path);
-      continue;
-    }
+    scanned++;
     const buf = readFileSync(path);
-    if (buf.includes(0)) {
-      findings.push({ file: rel, kind: "unreadable", location: "binary" });
+    if (rel.endsWith(".zip")) {
+      findings.push(...scanTraceZip(buf, rel, allowedHost));
       continue;
     }
-    files.push(path);
-    if (EVIDENCE.test(basename(rel))) {
-      findings.push(...originFindings(buf.toString("utf8"), rel, baseURL));
-    }
+    const text = decodeText(buf);
+    if (text === null) findings.push({ file: rel, kind: "unreadable", location: "not UTF-8 text" });
+    else findings.push(...textFileFindings(text, rel, baseURL));
   }
-  const scanned = scanBuild({ files, traceZips, allowedHost: new URL(baseURL).host }).map((f) => ({
-    ...f,
-    file: relative(dir, f.file),
-  }));
-  findings.push(...scanned);
-  return { findings, scanned: files.length + traceZips.length, media };
+  return { findings, scanned, media };
 }

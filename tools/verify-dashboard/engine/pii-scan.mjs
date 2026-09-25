@@ -12,7 +12,7 @@
 //
 // Not covered here: videos and stills (pixels). Their guard is the origin stamp
 // (checkRunOrigin in ingest.mjs); the gating run's own traces back it at network level.
-// The walkthrough records a trace too (never published, not even copied into the page):
+// The walkthrough records a trace too (in its artifact, never copied into the page):
 // its network log is the same proof for the walkthrough videos. This scan checks every
 // request that is logged; it cannot tell a trace that logged none because snapshots were
 // off (Playwright then writes empty *.network entries) from a test that made no request.
@@ -127,12 +127,43 @@ export function scanText(text, file, where = "") {
   }));
 }
 
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+
 /**
- * The entry as text, or null for a binary entry (an image, a font: any NUL byte, which
- * also rules out UTF-16 text). Decoded lossily, so a Latin-1 resource is still scanned.
+ * The bytes as text, or null when they are not text: any NUL byte (which also rules out
+ * UTF-16) or any invalid UTF-8. Never decoded lossily — a compressed or encoded blob
+ * with no NUL byte would otherwise be scanned as mojibake and pass.
+ * @param {Uint8Array} data
+ * @returns {string|null}
  */
-function asText(data) {
-  return data.includes(0) ? null : data.toString("utf8");
+export function decodeText(data) {
+  if (data.includes(0)) return null;
+  try {
+    return UTF8.decode(data);
+  } catch {
+    return null;
+  }
+}
+
+/** Leading bytes of the image, video and font formats a run legitimately holds. */
+const MEDIA_MAGIC = [
+  { at: 0, bytes: [0xff, 0xd8, 0xff] }, // JPEG
+  { at: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] }, // PNG
+  { at: 0, bytes: [...Buffer.from("GIF8")] },
+  { at: 8, bytes: [...Buffer.from("WEBP")] }, // RIFF container
+  { at: 0, bytes: [0x1a, 0x45, 0xdf, 0xa3] }, // WebM / Matroska
+  { at: 4, bytes: [...Buffer.from("ftyp")] }, // MP4
+  { at: 0, bytes: [...Buffer.from("wOFF")] },
+  { at: 0, bytes: [...Buffer.from("wOF2")] },
+  { at: 0, bytes: [0x00, 0x01, 0x00, 0x00] }, // TrueType
+  { at: 0, bytes: [...Buffer.from("OTTO")] }, // OpenType
+  { at: 0, bytes: [0x00, 0x00, 0x01, 0x00] }, // ICO
+];
+
+/** Is this an image, video or font by its leading bytes (never by its name)? Pixels and
+ * glyphs are the only binary a scan may pass unread. */
+export function isKnownMedia(data) {
+  return MEDIA_MAGIC.some(({ at, bytes }) => bytes.every((b, i) => data[at + i] === b));
 }
 
 /** Does a network-log URL stay local: the allowed host:port, an unresolvable name, or
@@ -194,10 +225,13 @@ export function scanTraceZip(buf, file, allowedHost) {
   }
   const findings = [];
   for (const { name, data } of entries) {
-    const text = asText(data);
+    const text = decodeText(data);
     if (text === null) {
-      // A trace's own logs are never skipped as binary: unreadable, not clean.
-      if (TEXT_ENTRY.test(name)) findings.push({ file, kind: "unreadable", location: name });
+      // A trace's own logs are never skipped as binary, and binary other than an image or
+      // font cannot be read: unreadable, not clean.
+      if (TEXT_ENTRY.test(name) || !isKnownMedia(data)) {
+        findings.push({ file, kind: "unreadable", location: name });
+      }
       continue;
     }
     if (name.endsWith(".network")) findings.push(...scanNetwork(text, file, name, allowedHost));
@@ -207,19 +241,22 @@ export function scanTraceZip(buf, file, allowedHost) {
 }
 
 /**
- * Scan everything the dashboard is built from and the page itself (`html`, absent when
- * scanning an artifact before upload).
- * @param {{files: string[], traceZips: string[], html?: {file: string, text: string},
+ * Scan everything the dashboard is built from and the page itself.
+ * @param {{files: string[], traceZips: string[], html: {file: string, text: string},
  *   allowedHost: string}} args every listed file must exist (the caller drops absent ones)
  * @returns {Finding[]}
  */
 export function scanBuild({ files, traceZips, html, allowedHost }) {
   const findings = [];
-  for (const file of files) findings.push(...scanText(readFileSync(file, "utf8"), file));
+  for (const file of files) {
+    const text = decodeText(readFileSync(file));
+    if (text === null) findings.push({ file, kind: "unreadable", location: "not UTF-8 text" });
+    else findings.push(...scanText(text, file));
+  }
   for (const file of traceZips) {
     findings.push(...scanTraceZip(readFileSync(file), file, allowedHost));
   }
-  if (html) findings.push(...scanText(html.text, html.file));
+  findings.push(...scanText(html.text, html.file));
   return findings;
 }
 
