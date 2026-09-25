@@ -69,14 +69,16 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Build the four deployable images. Validates the Dockerfiles on every PR;
-  # pushes sha-<commit> + latest only from main (the stack repo pins by sha/tag).
+  # Build + Trivy-scan the four deployable images on every run (PRs included). Only
+  # on main does publish-images push the scanned image as sha-<commit> + latest (the
+  # stack repo pins by sha/tag). The job name prefix is read by the verify dashboard.
   build-images:
     needs: [verify]
     runs-on: ubuntu-latest
+    # Read-only on purpose: trivy-action is third-party and receives github.token (its
+    # token-setup-trivy input defaults to it). This job's token cannot push packages.
     permissions:
       contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -91,25 +93,86 @@ jobs:
             dockerfile: services/diff-orchestrator/Dockerfile
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to GHCR (main only)
+      # pull: true re-resolves the base tag each run, so a patched base is used as soon
+      # as it is published.
+      - name: Build the image (local, for the scan)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          pull: true
+          load: true
+          push: false
+          tags: teacher-assistant-${{ matrix.name }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: teacher-assistant-${{ matrix.name }}:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      # Hand the exact scanned image to the push job (a rebuild could re-resolve the
+      # base tag to a digest that was never scanned).
+      - name: Save the scanned image (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+        run: docker save "$SCAN_IMAGE" | gzip > image.tar.gz
+
+      - name: Upload the scanned image (main only)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-${{ matrix.name }}
+          path: image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job with packages: write. Runs no third-party action; it pushes the image
+  # build-images scanned. needs: waits for every matrix leg, so one failed scan blocks
+  # all four pushes.
+  publish-images:
+    needs: [build-images]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [pwa, sync-relay, content-api, diff-orchestrator]
+    steps:
+      - name: Download the scanned image
+        uses: actions/download-artifact@v7
+        with:
+          name: image-${{ matrix.name }}
+
+      - name: Load the scanned image
+        run: gunzip -c image.tar.gz | docker load
+
+      - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build (and push on main)
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:sha-${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      - name: Push the scanned image
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+        run: |
+          for tag in "sha-$GITHUB_SHA" latest; do
+            docker tag "$SCAN_IMAGE" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done

@@ -41,12 +41,14 @@ jobs:
       - name: FERPA-guard static checks
         run: pnpm --filter @teacher-assistant/ferpa-guard run test
 
-  push-images:
+  # Build + Trivy-scan the four images. Read-only; nothing here can push.
+  scan-images:
     needs: [verify]
     runs-on: ubuntu-latest
+    # Read-only on purpose: trivy-action is third-party and receives github.token (its
+    # token-setup-trivy input defaults to it). This job's token cannot push packages.
     permissions:
       contents: read
-      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -61,30 +63,89 @@ jobs:
             dockerfile: services/diff-orchestrator/Dockerfile
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
       - uses: docker/setup-buildx-action@v3
-      - name: Compute tags
-        id: version
-        run: |
-          TAG="${GITHUB_REF_NAME}"
-          MINOR="${TAG%.*}"
-          echo "release_tag=${TAG}" >> "$GITHUB_OUTPUT"
-          echo "minor_tag=${MINOR}" >> "$GITHUB_OUTPUT"
-      - uses: docker/login-action@v4
+
+      # pull: true re-resolves the base tag each run, so a patched base is used as soon
+      # as it is published.
+      - name: Build the image (local, for the scan)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          pull: true
+          load: true
+          push: false
+          tags: teacher-assistant-${{ matrix.name }}:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: teacher-assistant-${{ matrix.name }}:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      # Hand the exact scanned image to the push job (a rebuild could re-resolve the
+      # base tag to a digest that was never scanned).
+      - name: Save the scanned image
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+        run: docker save "$SCAN_IMAGE" | gzip > image.tar.gz
+
+      - name: Upload the scanned image
+        uses: actions/upload-artifact@v7
+        with:
+          name: image-${{ matrix.name }}
+          path: image.tar.gz
+          if-no-files-found: error
+          retention-days: 1
+
+  # The only job with packages: write. Runs no third-party action; it pushes the image
+  # scan-images scanned. needs: waits for every matrix leg, so one failed scan blocks
+  # all four pushes (no half-published release).
+  push-images:
+    needs: [scan-images]
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        name: [pwa, sync-relay, content-api, diff-orchestrator]
+    steps:
+      - name: Download the scanned image
+        uses: actions/download-artifact@v7
+        with:
+          name: image-${{ matrix.name }}
+
+      - name: Load the scanned image
+        run: gunzip -c image.tar.gz | docker load
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:${{ steps.version.outputs.release_tag }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:${{ steps.version.outputs.minor_tag }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+
+      - name: Push the scanned image
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        # vX.Y.Z → also vX.Y (minor) and latest.
+        run: |
+          MINOR_TAG="${RELEASE_TAG%.*}"
+          for tag in "$RELEASE_TAG" "$MINOR_TAG" latest; do
+            docker tag "$SCAN_IMAGE" "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
 
   github-release:
     needs: [push-images]
