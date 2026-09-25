@@ -7,7 +7,7 @@ import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { buildToScoreQueue } from "@teacher-assistant/store";
 import { Avatar } from "../../design/Avatar.js";
 import type { DecryptedRecords } from "../../data/repository.js";
-import type { Lookups } from "./dashboard/dashboard-vm.js";
+import { type Lookups, orderToScoreQueue } from "./dashboard/dashboard-vm.js";
 
 export interface ToScoreScreenProps {
   readonly records: DecryptedRecords;
@@ -18,7 +18,7 @@ export interface ToScoreScreenProps {
 
 export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProps) {
   const byId = new Map(records.points.map((p) => [p.data_point_id, p]));
-  const queue = buildToScoreQueue(records.points);
+  const queue = orderToScoreQueue(buildToScoreQueue(records.points), lk);
 
   return (
     <div className="to-score">

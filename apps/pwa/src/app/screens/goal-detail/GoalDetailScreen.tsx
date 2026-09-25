@@ -11,7 +11,7 @@
 import {
   type AutoStatement,
   buildGoalDetail,
-  compareCodePoints,
+  compareArcNewestFirst,
   computeAutoStatement,
   type GoalDetail,
   type IndeterminateReason,
@@ -354,15 +354,9 @@ function HistoryTable({
   readonly probeLabel: string;
   readonly onEditPoint: (point: ProgressDataPoint) => void;
 }) {
-  // Newest-first, like the prototype; a stable id tiebreak for same-date points.
-  const rows = points
-    .filter((p) => p.goal_id === goal.goal_id)
-    .slice()
-    .sort(
-      (a, b) =>
-        compareCodePoints(b.admin_date, a.admin_date) ||
-        compareCodePoints(b.data_point_id, a.data_point_id),
-    );
+  // Newest-first, like the prototype: admin date, then entry time, then the point
+  // id (TEACH-25) — the chart plots the exact reverse, so same-day points match.
+  const rows = points.filter((p) => p.goal_id === goal.goal_id).sort(compareArcNewestFirst);
   return (
     <div className="card">
       <div className="cardhead">

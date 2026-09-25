@@ -5,12 +5,15 @@
 // reachable here by construction (the key boundary, not a filter). Every capture lands
 // ⏳ pending in this doc for the teacher to validate.
 
+import { compareCodePoints } from "@teacher-assistant/domain-core";
+import type { OpaqueId } from "@teacher-assistant/schema";
 import { useState } from "react";
 import type { ParaDocRecords } from "../../../data/repository.js";
 import type { DocMutator } from "../../../data/session.js";
 import { Avatar } from "../../../design/Avatar.js";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { STATUS_CHIPS } from "../../../design/glyphs.js";
+import { compareDisplayText, compareNumberAware } from "../../display-order.js";
 import { ParaCaptureSheet, type ParaCaptureTarget } from "./ParaCaptureSheet.js";
 
 export interface ParaScreenProps {
@@ -31,6 +34,18 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
   }
 
   const initialsById = new Map(paraRecords.roster.map((r) => [r.studentId, r.initials]));
+  const initialsOf = (studentId: OpaqueId) => initialsById.get(studentId) ?? "??";
+  // Display order (TEACH-25): the projection orders by opaque studentId; show
+  // students by initials, then studentId, then the administer label number-aware
+  // ("Probe 2" before "Probe 10"), with the opaque ids only for true duplicates.
+  const administer = [...paraRecords.administer].sort(
+    (a, b) =>
+      compareDisplayText(initialsOf(a.studentId), initialsOf(b.studentId)) ||
+      compareCodePoints(a.studentId, b.studentId) ||
+      compareNumberAware(a.administerLabel, b.administerLabel) ||
+      compareCodePoints(a.goalId, b.goalId) ||
+      compareCodePoints(a.probeDefinitionId, b.probeDefinitionId),
+  );
   // A goal already has a para entry awaiting validation (⏳) — its Score is a pending
   // tag instead. Derived from THIS doc: a pending point not yet consumed by a tombstone.
   const consumed = new Set(paraRecords.tombstones.map((t) => t.dataPointId));
@@ -52,11 +67,11 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
       <h1>Your students today</h1>
       <div className="sub">Enter scores; the teacher confirms each one before it counts.</div>
 
-      {paraRecords.administer.length === 0 ? (
+      {administer.length === 0 ? (
         <div className="card">No probes to administer for this class right now.</div>
       ) : (
-        paraRecords.administer.map((row) => {
-          const initials = initialsById.get(row.studentId) ?? "??";
+        administer.map((row) => {
+          const initials = initialsOf(row.studentId);
           const pending = pendingGoalIds.has(row.goalId);
           return (
             <div

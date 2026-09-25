@@ -4,13 +4,25 @@
 // @teacher-assistant/store (buildWeeklyDashboard / groupDashboard). This module
 // only resolves opaque ids → display attributes (initials, goal text, period
 // label, scored %), marks the pending-para rows (from the para-doc queue), and
-// orders the GROUPS for display (student cards owes-first then by initials;
-// period groups by label) — presentation sequencing of engine-grouped data.
+// orders rows and GROUPS for display with the shared display-order comparators
+// (TEACH-25) — presentation sequencing of engine-grouped data.
 
 import { compareCodePoints } from "@teacher-assistant/domain-core";
-import type { NoDataReason, OpaqueId } from "@teacher-assistant/schema";
-import type { DashboardGroup, DashboardRow, DashboardState } from "@teacher-assistant/store";
+import type { NoDataReason, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
+import type {
+  DashboardGroup,
+  DashboardRow,
+  DashboardState,
+  QueueEntry,
+} from "@teacher-assistant/store";
 import type { DecryptedRecords } from "../../../data/repository.js";
+import {
+  compareNumberAware,
+  compareOptionalText,
+  compareStudentGoal,
+  compareDisplayText,
+  type StudentGoalSortKey,
+} from "../../display-order.js";
 
 /** Goal-definition display fields shown in the owes-row meta (from the goal entity). */
 interface GoalMeta {
@@ -145,12 +157,66 @@ export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {
 
 /**
  * Order a group's rows for display: a student's goals stay ADJACENT and
- * alphabetized (design D1 / §E) — sort by initials, then a stable goal-id
- * tiebreak. Presentation sequencing only; the store's grouping is untouched.
+ * alphabetized (design D1 / §E; TEACH-25) — initials, period label, studentId,
+ * goal text, with goalId only for true duplicates. Presentation sequencing only;
+ * the store's grouping is untouched.
  */
 export function orderRowsByStudent(rows: readonly RowVM[]): RowVM[] {
   return [...rows].sort(
-    (a, b) => compareCodePoints(a.initials, b.initials) || compareCodePoints(a.goalId, b.goalId),
+    (a, b) => compareStudentGoal(a, b) || compareCodePoints(a.goalId, b.goalId),
+  );
+}
+
+/** The on-screen sort key of a student's goal, resolved from the lookups (as toRowVM shows it). */
+export function studentGoalKey(
+  studentId: OpaqueId,
+  goalId: OpaqueId,
+  lk: Lookups,
+): StudentGoalSortKey {
+  const periodId = lk.periodByStudent(studentId);
+  return {
+    initials: lk.initialsById.get(studentId) ?? "??",
+    periodLabel: periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null,
+    studentId,
+    goalText: lk.goalTextById.get(goalId) ?? "(goal)",
+  };
+}
+
+/**
+ * The To-Score queue in display order: the dashboard's student-goal order, then
+ * the collected admin date (oldest first), then the point id for true duplicates.
+ * The store's buildToScoreQueue keeps record order, which is not stable.
+ */
+export function orderToScoreQueue(queue: readonly QueueEntry[], lk: Lookups): QueueEntry[] {
+  return [...queue].sort(
+    (a, b) =>
+      compareStudentGoal(
+        studentGoalKey(a.studentId, a.goalId, lk),
+        studentGoalKey(b.studentId, b.goalId, lk),
+      ) ||
+      compareCodePoints(a.adminDate, b.adminDate) ||
+      compareCodePoints(a.dataPointId, b.dataPointId),
+  );
+}
+
+/**
+ * The para-validation queue in display order: admin date first (the confirm
+ * batch stays chronological, as orderPendingForValidation), then the
+ * student-goal order, then entry time, then the point id for true duplicates.
+ */
+export function orderValidationQueue(
+  queue: readonly ProgressDataPoint[],
+  lk: Lookups,
+): ProgressDataPoint[] {
+  return [...queue].sort(
+    (a, b) =>
+      compareCodePoints(a.admin_date, b.admin_date) ||
+      compareStudentGoal(
+        studentGoalKey(a.student_id, a.goal_id, lk),
+        studentGoalKey(b.student_id, b.goal_id, lk),
+      ) ||
+      a.entry_ts - b.entry_ts ||
+      compareCodePoints(a.data_point_id, b.data_point_id),
   );
 }
 
@@ -179,21 +245,26 @@ export function periodLabelOfGroup(group: DashboardGroup, lk: Lookups): string {
   return lk.periodLabelById.get(group.key) ?? "Unassigned";
 }
 
-/** Order by-period groups by their period label (presentation ordering). */
+/**
+ * Order by-period groups by their period label, number-aware ("Period 2" before
+ * "Period 10"), then the group key (periodId) for equal labels.
+ */
 export function orderPeriodGroups(
   groups: readonly DashboardGroup[],
   lk: Lookups,
 ): DashboardGroup[] {
-  return [...groups].sort((a, b) =>
-    compareCodePoints(periodLabelOfGroup(a, lk), periodLabelOfGroup(b, lk)),
+  return [...groups].sort(
+    (a, b) =>
+      compareNumberAware(periodLabelOfGroup(a, lk), periodLabelOfGroup(b, lk)) ||
+      compareCodePoints(a.key, b.key),
   );
 }
 
 /**
  * Build by-student cards from the store's by-student groups. Card order is
- * presentation: students who owe a point first, then by initials (design §E.4).
- * Rows within a card are ordered by initials → goal-id (orderRowsByStudent) so a
- * student's goals stay adjacent (§E); the store's grouping is untouched.
+ * presentation: students who owe a point first, then initials, then the card's
+ * first period label (none last), then studentId (design §E.4; TEACH-25). Rows
+ * within a card follow orderRowsByStudent, so a student's goals read A–Z.
  */
 export function buildStudentCards(groups: readonly DashboardGroup[], lk: Lookups): StudentCardVM[] {
   const cards: StudentCardVM[] = groups.map((group) => {
@@ -210,6 +281,11 @@ export function buildStudentCards(groups: readonly DashboardGroup[], lk: Lookups
   return cards.sort((a, b) => {
     const aTodo = a.todo > 0 ? 0 : 1;
     const bTodo = b.todo > 0 ? 0 : 1;
-    return aTodo - bTodo || compareCodePoints(a.initials, b.initials);
+    return (
+      aTodo - bTodo ||
+      compareDisplayText(a.initials, b.initials) ||
+      compareOptionalText(a.periodLabels[0] ?? null, b.periodLabels[0] ?? null) ||
+      compareCodePoints(a.studentId, b.studentId)
+    );
   });
 }

@@ -27,6 +27,26 @@ import {
 } from "./quarterly.js";
 import { computeValue } from "./value.js";
 
+type ArcOrdered = Pick<ProgressDataPoint, "admin_date" | "entry_ts" | "data_point_id">;
+
+/**
+ * The ARC-history order (TEACH-25): admin date newest first, then entry time
+ * newest first, then the point id. The chart plots in the exact reverse
+ * (`arcChronological`), so same-day points read in matching order in both.
+ */
+export function compareArcNewestFirst(a: ArcOrdered, b: ArcOrdered): number {
+  return (
+    compareCodePoints(b.admin_date, a.admin_date) ||
+    b.entry_ts - a.entry_ts ||
+    compareCodePoints(a.data_point_id, b.data_point_id)
+  );
+}
+
+/** Oldest-first plot order: the exact reverse of compareArcNewestFirst. */
+function arcChronological(a: ArcOrdered, b: ArcOrdered): number {
+  return compareArcNewestFirst(b, a);
+}
+
 export interface TrendPoint {
   /** The source point's opaque id — a stable identity for rendering (unique React key). */
   readonly dataPointId: OpaqueId;
@@ -101,13 +121,13 @@ interface NoDataTally {
   readonly markers: NoDataMarker[];
 }
 
-/** Tally the ⊘ points by reason and collect the chart's gap markers (admin-date order). */
+/** Tally the ⊘ points by reason and collect the chart's gap markers (plot order). */
 function tallyNoData(points: readonly ProgressDataPoint[]): NoDataTally {
   let noTimeCount = 0;
   let excusedCount = 0;
   let behaviorCount = 0;
   const markers: NoDataMarker[] = [];
-  for (const p of points) {
+  for (const p of [...points].sort(arcChronological)) {
     if (p.state !== "no_data" || p.no_data_reason === undefined) {
       continue;
     }
@@ -121,7 +141,6 @@ function tallyNoData(points: readonly ProgressDataPoint[]): NoDataTally {
     }
     markers.push({ adminDate: p.admin_date, reason });
   }
-  markers.sort((a, b) => compareCodePoints(a.adminDate, b.adminDate));
   return { noTimeCount, excusedCount, behaviorCount, markers };
 }
 
@@ -132,7 +151,7 @@ function buildTrend(goal: IEPGoal, points: readonly ProgressDataPoint[]): TrendP
       // Plot the points that participate: non-mismatched, or teacher-counted. An
       // excluded/pending mismatched point is never plotted (it stays in history).
       .filter((p) => p.state === "scored" && inComputedMath(p))
-      .sort((a, b) => compareCodePoints(a.admin_date, b.admin_date))
+      .sort(arcChronological)
       .map((p) => {
         const computed = computeValue(
           goal.denominator_model,
