@@ -12,8 +12,10 @@
 //
 // Not covered here: videos and stills (pixels). Their guard is the origin stamp
 // (checkRunOrigin in ingest.mjs); the gating run's own traces back it at network level.
-// The walkthrough records no trace, so its videos rest on the stamp and on the gating
-// run tracing the same journeys.
+// The walkthrough records a trace too (never published, not even copied into the page):
+// its network log is the same proof for the walkthrough videos. This scan checks every
+// request that is logged; it cannot tell a trace that logged none because snapshots were
+// off (Playwright then writes empty *.network entries) from a test that made no request.
 //
 // Deliberately NOT scanned: a name blocklist (student initials are the only identity
 // the app holds) and bare digit runs as student IDs (they collide with timestamps,
@@ -57,7 +59,7 @@ const INITIALS_JS_KEY = /(?<![\w$"'\\])initials\s*:\s*(["'`])(.*?)\1/g;
 // Trace entries that are always text: a NUL byte in one makes it unreadable, not binary.
 const TEXT_ENTRY = /(?:\.(?:trace|network|stacks)$|^src\/)/;
 
-/** @typedef {"email"|"ssn"|"phone"|"initials"|"network-host"|"unreadable"} FindingKind */
+/** @typedef {"email"|"ssn"|"phone"|"initials"|"network-host"|"origin"|"unreadable"} FindingKind */
 /** @typedef {{file: string, kind: FindingKind, location: string}} Finding */
 
 function isUnresolvableHost(hostname) {
@@ -205,8 +207,9 @@ export function scanTraceZip(buf, file, allowedHost) {
 }
 
 /**
- * Scan everything the dashboard is built from and the page itself.
- * @param {{files: string[], traceZips: string[], html: {file: string, text: string},
+ * Scan everything the dashboard is built from and the page itself (`html`, absent when
+ * scanning an artifact before upload).
+ * @param {{files: string[], traceZips: string[], html?: {file: string, text: string},
  *   allowedHost: string}} args every listed file must exist (the caller drops absent ones)
  * @returns {Finding[]}
  */
@@ -216,7 +219,7 @@ export function scanBuild({ files, traceZips, html, allowedHost }) {
   for (const file of traceZips) {
     findings.push(...scanTraceZip(readFileSync(file), file, allowedHost));
   }
-  findings.push(...scanText(html.text, html.file));
+  if (html) findings.push(...scanText(html.text, html.file));
   return findings;
 }
 

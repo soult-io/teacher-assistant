@@ -241,6 +241,18 @@ Hosting). Inputs are synthetic by construction; these checks refuse the whole bu
 A finding logs the file, the pattern type and the location — never the matched value:
 the Actions logs are public too.
 
+**Before upload.** The dashboard build runs these checks after `e2e.yml` has already
+published its artifacts, so `e2e.yml` also runs them first:
+`node tools/verify-dashboard/src/scan-artifacts.mjs <dir>` (`engine/artifact-scan.mjs`)
+runs before each upload (`e2e/test-results/`, `e2e/test-results-walkthrough/`), pass or
+fail, and the upload runs only when it exits 0. It walks the whole directory, fail-closed:
+every `*.zip` gets the trace checks, videos and stills (`.webm .mp4 .png .jpg .jpeg .webp
+.gif`) are skipped as pixels, every other file is text-scanned (a file with a NUL byte, or
+a symlink, is a finding), and each `*-evidence.json` must carry the local origin stamp.
+The CI run writes no Playwright HTML report: it was an unscanned public copy of every
+trace. The walkthrough records a trace (snapshots on — without them Playwright logs no
+network) so its videos get the network check too; it is never copied into the page.
+
 ## Phase status
 
 Phase 3a: CI wiring + ingest engine + engine/config split + provenance/UNVERIFIED + a

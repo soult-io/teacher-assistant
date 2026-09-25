@@ -81,7 +81,13 @@ const walkthroughConfig = defineConfig<StepStillsOptions>({
   ],
   use: {
     baseURL: LOCAL_URL,
-    trace: "off",
+    // A trace for its network log: it proves each video shows the local synthetic build
+    // (e2e.yml and the dashboard build check every request's host). Snapshots MUST stay
+    // on — with `snapshots: false` Playwright writes the *.network entries empty and the
+    // host check passes on nothing. No screencast or sources (~2 MB a journey; no
+    // measurable cost to the recording's pace). Never copied into the dashboard: only the
+    // video is.
+    trace: { mode: "on", snapshots: true, screenshots: false, sources: false },
     screenshot: "off",
     // Recorded at the phone viewport the journeys run in, 1:1, so the text in the
     // video is the size a teacher sees it — not a phone screen shrunk into a
@@ -114,9 +120,12 @@ const gatingConfig = defineConfig<StepStillsOptions>({
   // journey-evidence.json (our custom reporter) is the step+assertion evidence the
   // verification dashboard renders — the built-in JSON reporter prunes green runs to
   // bare test.step titles, so it cannot supply assertion text. results.json stays for
-  // stats/tooling; github + html are the human-facing views. All land under
-  // test-results/ (outputFile paths + the default outputDir) so one artifact upload
-  // captures the evidence alongside the per-test videos and traces.
+  // stats/tooling; github is the human-facing view. All land under test-results/
+  // (outputFile paths + the default outputDir) so one artifact upload captures the
+  // evidence alongside the per-test videos and traces. No html reporter on CI: the
+  // artifact is PUBLIC and the report is an unscannable second copy of every trace
+  // (e2e.yml scans test-results/ before upload). For the HTML view, download the
+  // artifact and run `playwright show-trace <trace.zip>` locally.
   reporter: process.env.CI
     ? [
         ["github"],
@@ -130,7 +139,6 @@ const gatingConfig = defineConfig<StepStillsOptions>({
           },
         ],
         ["json", { outputFile: "test-results/results.json" }],
-        ["html", { open: "never" }],
       ]
     : [["list"]],
   use: {
