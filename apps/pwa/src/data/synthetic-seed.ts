@@ -28,10 +28,56 @@ import type { CatalogEntry, DecryptedRecords } from "./repository.js";
 import { isoDateOf } from "./date.js";
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 
 /** ISO admin date `k` weeks before `now` — the trend/history spans prior weeks. */
 function weeksBefore(now: Date, k: number): IsoDate {
   return isoDateOf(new Date(now.getTime() - k * 7 * DAY_MS));
+}
+
+/** A seeded record before its audit entry time is stamped (see stampEntryTimes). */
+type Unstamped<T extends { readonly entry_ts: Timestamp }> = Omit<T, "entry_ts">;
+
+/**
+ * Seeded probes are keyed in mid-afternoon: an offset from UTC midnight (UTC is the
+ * zone Goal Detail's `isoDay` renders `entry_ts` in).
+ */
+const ENTRY_TIME_OF_DAY_MS = 15 * HOUR_MS;
+/** Same-day points of one goal are keyed a few minutes apart, in seed order. */
+const ENTRY_STEP_MS = 7 * 60_000;
+
+/**
+ * Stamp each record's `entry_ts` from its admin date: that day's ENTRY_TIME_OF_DAY_MS plus
+ * ENTRY_STEP_MS per earlier same-day record of the same goal (array order), so a
+ * goal's same-day points read in a distinct, increasing order (the TEACH-25 ARC
+ * tiebreak). A record administered today is clamped to at most `now`: the i-th of
+ * n same-day records is capped at `now − (n−1−i)` ms, and the min of two strictly
+ * increasing sequences stays strictly increasing — so the result never lands in the
+ * future and depends on `now` alone.
+ *
+ * Seed-only: "never before its admin date" holds because the seed's admin dates are
+ * at most isoDateOf(now), a goal has only a handful of same-day records (so the
+ * 7-min steps stay inside the day), and `now` is at least n−1 ms past midnight.
+ * Not for imported or user-entered records.
+ */
+export function stampEntryTimes<
+  T extends { readonly goal_id: OpaqueId; readonly admin_date: IsoDate },
+>(records: readonly T[], now: Date): (T & { readonly entry_ts: Timestamp })[] {
+  const dayKey = (r: T) => `${r.goal_id}|${r.admin_date}`;
+  const dayTotal = new Map<string, number>();
+  for (const r of records) {
+    dayTotal.set(dayKey(r), (dayTotal.get(dayKey(r)) ?? 0) + 1);
+  }
+  const daySeen = new Map<string, number>();
+  return records.map((r) => {
+    const key = dayKey(r);
+    const i = daySeen.get(key) ?? 0;
+    daySeen.set(key, i + 1);
+    const n = dayTotal.get(key) ?? 1;
+    const planned = Date.parse(r.admin_date) + ENTRY_TIME_OF_DAY_MS + i * ENTRY_STEP_MS;
+    const cap = now.getTime() - (n - 1 - i);
+    return { ...r, entry_ts: asTimestamp(Math.min(planned, cap)) };
+  });
 }
 
 interface StudentSeed {
@@ -71,13 +117,16 @@ function baseGoal(
   };
 }
 
-function scoredPoint(goal: IEPGoal, adminDate: IsoDate, numerator: number): ProgressDataPoint {
+function scoredPoint(
+  goal: IEPGoal,
+  adminDate: IsoDate,
+  numerator: number,
+): Unstamped<ProgressDataPoint> {
   return {
     data_point_id: newOpaqueId(),
     goal_id: goal.goal_id,
     student_id: goal.student_id,
     admin_date: adminDate,
-    entry_ts: asTimestamp(0),
     state: "scored",
     numerator,
     denominator_used: 5,
@@ -96,13 +145,12 @@ function noDataPoint(
   goal: IEPGoal,
   adminDate: IsoDate,
   reason: NoDataReason = "absent", // excused — pauses the run, no fidelity ding
-): ProgressDataPoint {
+): Unstamped<ProgressDataPoint> {
   return {
     data_point_id: newOpaqueId(),
     goal_id: goal.goal_id,
     student_id: goal.student_id,
     admin_date: adminDate,
-    entry_ts: asTimestamp(0),
     state: "no_data",
     no_data_reason: reason,
     setting: "math_resource",
@@ -122,13 +170,12 @@ function countedOffBasisPoint(
   adminDate: IsoDate,
   numerator: number,
   denominatorUsed: number,
-): ProgressDataPoint {
+): Unstamped<ProgressDataPoint> {
   return {
     data_point_id: newOpaqueId(),
     goal_id: goal.goal_id,
     student_id: goal.student_id,
     admin_date: adminDate,
-    entry_ts: asTimestamp(0),
     state: "scored",
     numerator,
     denominator_used: denominatorUsed,
@@ -159,7 +206,7 @@ function pendingParaPoint(
     readonly observations?: readonly ParaObservation[];
     readonly accommodationSubtypes?: readonly AccommodationSubtype[];
   } = {},
-): ProgressDataPoint {
+): Unstamped<ProgressDataPoint> {
   const denominatorUsed = opts.denominatorUsed ?? 5;
   const mismatch = denominatorUsed !== 5;
   return {
@@ -167,7 +214,6 @@ function pendingParaPoint(
     goal_id: goal.goal_id,
     student_id: goal.student_id,
     admin_date: adminDate,
-    entry_ts: asTimestamp(0),
     state: "pending",
     numerator,
     denominator_used: denominatorUsed,
@@ -195,13 +241,12 @@ function baselinePoint(
   conditionId: OpaqueId,
   adminDate: IsoDate,
   numerator: number,
-): BaselinePoint {
+): Unstamped<BaselinePoint> {
   return {
     baseline_point_id: newOpaqueId(),
     goal_id: goal.goal_id,
     student_id: goal.student_id,
     admin_date: adminDate,
-    entry_ts: asTimestamp(0),
     numerator,
     denominator_used: 5,
     computed_value: numerator / 5,
@@ -250,7 +295,9 @@ export interface SyntheticSeed {
  */
 export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   const adminDate = isoDateOf(now);
-  const createdTs = asTimestamp(now.getTime());
+  // The goals were written mid-morning a week before the earliest seeded history
+  // week — so no goal post-dates its own points.
+  const createdTs = asTimestamp(Date.parse(weeksBefore(now, 8)) + 10 * HOUR_MS);
 
   // Two periods so the by-period lens has real buckets; P2 has the para.
   const p2 = classPeriod("P2", true);
@@ -341,7 +388,7 @@ export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   // Prior-week HISTORY points (weeksBefore) build the Goal Detail trend/consistency/
   // quarterly/auto-statement WITHOUT touching the current-week projection (the
   // dashboard filters points to the asOf ISO week). Each goal exercises one scenario:
-  const points: ProgressDataPoint[] = [
+  const unstampedPoints: Unstamped<ProgressDataPoint>[] = [
     // ── abIntegers (AB): ≥8 CLEAN scored points, rising → a real ON-TREND draft
     //    statement (clears the ≥8-point / ≥4-week gate). Trailing run < 4 (a wk-1
     //    dip), so the consistency window is "not yet" — not a mastery candidate.
@@ -391,7 +438,7 @@ export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   //    unchanged: a clean one (with witnessed observation chips) and a denominator-
   //    MISMATCH one (the para entered the real total; it routes to the queue flagged for
   //    the teacher to resolve). The ⊘ path is exercised through the para capture flow.
-  const paraPending: ProgressDataPoint[] = [
+  const unstampedParaPending: Unstamped<ProgressDataPoint>[] = [
     pendingParaPoint(abTwoStep, adminDate, 3, { observations: ["Independent"] }),
     pendingParaPoint(cdFractions, adminDate, 5, {
       denominatorUsed: 6, // ≠ assigned 5 → off-basis, teacher resolves on validation
@@ -435,11 +482,18 @@ export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
 
   // ghProposed's segregated baseline set (M7): 3 comparable points → a usable
   // estimate exercising mean (33%) vs median-of-3 (40%). Never fed to IC.
-  const baselinePoints: BaselinePoint[] = [
+  const unstampedBaselinePoints: Unstamped<BaselinePoint>[] = [
     baselinePoint(ghProposed, ghProbeConditionId, weeksBefore(now, 3), 1), // 20%
     baselinePoint(ghProposed, ghProbeConditionId, weeksBefore(now, 2), 2), // 40%
     baselinePoint(ghProposed, ghProbeConditionId, weeksBefore(now, 1), 2), // 40%
   ];
+
+  // Master and para points are stamped as ONE sequence so a goal's same-day points
+  // stay in distinct entry order across both docs (master first, then the para's).
+  const stampedPoints = stampEntryTimes([...unstampedPoints, ...unstampedParaPending], now);
+  const points = stampedPoints.slice(0, unstampedPoints.length);
+  const paraPending = stampedPoints.slice(unstampedPoints.length);
+  const baselinePoints = stampEntryTimes(unstampedBaselinePoints, now);
 
   // No mastery observation seeded — a mastery-eligible run (cdFractions) surfaces
   // the teacher's Acknowledge action on Goal Detail; acknowledging writes one.
