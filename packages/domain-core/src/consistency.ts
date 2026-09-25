@@ -3,12 +3,13 @@
 // oldest-first order (admin date, then entry time — compareArcOldestFirst), never
 // weeks. Same-day probes are one group (TEACH-27): a day adds its whole count only
 // when EVERY probe that day meets criterion; one below-criterion probe that day
-// resets the run, whichever was entered first. A ⊘ (no-data) PAUSES the run (it is simply not a scored probe, so
-// it neither counts nor resets); a denominator-mismatched point is EXCLUDED from
-// the window unless the teacher elects it "counted" (F-2, flagged off-basis), and
-// a criterion/denominator-model change CLAMPS the run first (hard, non-electable).
-// Mastery is only OBSERVED here — the window being met
-// flags a candidate for the ARC; the app never closes/retires the goal.
+// resets the run, whichever was entered first. A ⊘ (no-data) PAUSES the run (it
+// is simply not a scored probe, so it neither counts nor resets); a
+// denominator-mismatched point is EXCLUDED from the window unless the teacher
+// elects it "counted" (F-2, flagged off-basis), and a criterion/denominator-model
+// change CLAMPS the run first (hard, non-electable). Mastery is only OBSERVED
+// here — the window being met flags a candidate for the ARC; the app never
+// closes/retires the goal.
 
 import type {
   IEPGoal,
