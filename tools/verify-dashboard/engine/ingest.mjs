@@ -216,6 +216,7 @@ const sameLabels = (a, b) => a.length === b.length && a.every((s, i) => s.label 
  * @param {object} provenance the gating run's provenance
  * @param {{evidence: object, run: {ci_run_id: string|null, ci_run_url: string|null},
  *   resolveAsset: Function, provesLocal: (rawTracePath: string) => boolean}|null} walkthrough
+ *   `provesLocal` is given the trace attachment's EVIDENCE path (the caller remaps it)
  * @returns {{video: object|null, offsets: (number|null)[]|null, note: string|null}}
  */
 function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
@@ -232,10 +233,12 @@ function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
     return none(walkStatus === JOURNEY_STATUS.FAILED ? MEDIA_NOTE.FAILED : MEDIA_NOTE.DIFFERS);
   }
   if (!sameLabels(record.steps, canonical.steps)) return none(MEDIA_NOTE.DIFFERS);
+  const att = findAttachment(record, "video");
+  if (!att) return none(MEDIA_NOTE.NONE);
+  // Proof before the copy: an unproven video is never served.
   const trace = findAttachment(record, "trace");
   if (!trace || !walkthrough.provesLocal(trace.path)) return none(MEDIA_NOTE.UNPROVEN);
-  const att = findAttachment(record, "video");
-  const src = att ? walkthrough.resolveAsset(att.path, "video", entry.id, record.project) : null;
+  const src = walkthrough.resolveAsset(att.path, "video", entry.id, record.project);
   if (!src) return none(MEDIA_NOTE.NONE);
   return {
     video: {
@@ -368,10 +371,11 @@ function buildJourney(entry, records, product, provenance, resolveAsset, walkthr
  * logs none) passes the output scan's host check on nothing — so a publish refuses these
  * rather than pass them.
  * @param {object[]} journeys Journey[] from buildJourneys
- * @param {(traceUrl: string) => boolean} provesLocal
+ * @param {(traceUrl: string) => boolean} provesLocal given the trace's SERVED url (relative
+ *   to the dashboard output directory)
  * @returns {string[]} their ids
  */
-export function journeysWithUntracedMedia(journeys, provesLocal) {
+export function journeysWithUnprovenMedia(journeys, provesLocal) {
   const publishesMedia = (j) => j.raw_video_url || j.steps.some((s) => s.screenshot);
   return journeys
     .filter((j) => publishesMedia(j) && !(j.trace_url && provesLocal(j.trace_url)))

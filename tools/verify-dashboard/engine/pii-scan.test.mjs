@@ -287,7 +287,7 @@ describe("scanText — base64 data: URLs", () => {
     const inner = `data:text/plain;charset=utf-8;base64,${b64(SSN)}`;
     expect(kinds(scanText(`url(data:text/css;base64,${b64(inner)})`, "a.css"))).toEqual(["ssn"]);
   });
-  it("passes an inline image or font, refuses binary it cannot identify", () => {
+  it("passes an inline image or (in a trace) font, refuses binary it cannot identify", () => {
     const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
     const woff2 = Buffer.from([...Buffer.from("wOF2"), 0]);
     const text = [
@@ -295,7 +295,25 @@ describe("scanText — base64 data: URLs", () => {
       `data:font/woff2;base64,${woff2.toString("base64")}`,
       `data:application/octet-stream;base64,${Buffer.from([0x1f, 0x8b, 0]).toString("base64")}`,
     ].join("\n");
-    expect(scanText(text, "t")).toEqual([{ file: "t", kind: "unreadable", location: "3:1" }]);
+    expect(scanText(text, "t", "", { glyphs: true })).toEqual([
+      { file: "t", kind: "unreadable", location: "3:1" },
+    ]);
+  });
+  it("matches in linear time on a hostile near-miss (no catastrophic backtracking)", () => {
+    const hostile = `data:${"a".repeat(100)}${`;${"b".repeat(64)}`.repeat(5)};x`.repeat(200);
+    const start = performance.now();
+    expect(scanText(hostile, "t")).toEqual([]);
+    expect(performance.now() - start).toBeLessThan(500);
+  });
+  it("reads a payload cut mid-character (a shortened trace value) as text", () => {
+    const cut = Buffer.from(`${EMAIL} é`).subarray(0, -1).toString("base64");
+    expect(kinds(scanText(`data:text/plain;base64,${cut}`, "t"))).toEqual(["email"]);
+  });
+  it("accepts an inline font or icon only inside a trace entry", () => {
+    const ico = Buffer.from([0x00, 0x00, 0x01, 0x00, 0x01, 0xff]).toString("base64");
+    const text = `url(data:image/x-icon;base64,${ico})`;
+    expect(kinds(scanText(text, "a.md"))).toEqual(["unreadable"]);
+    expect(scanText(text, "t", "", { glyphs: true })).toEqual([]);
   });
   it("never logs the decoded value", () => {
     const log = formatFindings(scanText(`data:text/plain;base64,${b64(EMAIL)}`, "t"));
