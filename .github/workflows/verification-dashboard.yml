@@ -185,7 +185,7 @@ jobs:
       - name: Download e2e artifacts
         if: steps.e2e.outputs.run_id
         continue-on-error: ${{ env.PUBLISH != 'true' }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: playwright-test-results
           path: e2e-artifacts
@@ -224,7 +224,7 @@ jobs:
       - name: Download walkthrough recordings
         if: steps.walkthrough.outputs.job_url
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: playwright-walkthrough
           path: walkthrough-artifacts
@@ -308,7 +308,7 @@ jobs:
             core.setOutput("move_latest", String(latest));
 
       - name: Download dashboard artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: dashboard
           path: dist-dashboard
