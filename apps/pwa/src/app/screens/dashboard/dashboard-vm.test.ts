@@ -176,6 +176,8 @@ describe("dashboard view-models", () => {
     const shown = displayed(fixture());
     expect(shown.owes).toEqual(["AB Two-step equations", "CD Multiply fractions"]);
     expect(shown.done).toEqual(["AB Add integers", "CD Number line", "EF Scientific notation"]);
+    // Newest point wins: this week's 80%, not the week-7 40% (record order is irrelevant).
+    expect(shown.values).toContain("AB Add integers 80%");
     expect(shown.cards).toEqual([
       "AB: Add integers | Two-step equations",
       "CD: Multiply fractions | Number line",
