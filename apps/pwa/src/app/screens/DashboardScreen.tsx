@@ -41,6 +41,7 @@ import {
   buildStudentCards,
   type Lookups,
   orderPeriodGroups,
+  oldestFirst,
   orderRowsByStudent,
   periodLabelOfGroup,
   type RowVM,
@@ -249,11 +250,13 @@ export function DashboardScreen(props: DashboardScreenProps) {
   // Score-later state is now the DATA (M5 queued points), not local UI state.
   const queue = buildToScoreQueue(records.points);
   const queuedGoalIds = new Set(queue.map((e) => e.goalId));
+  // Newest point per goal wins, whatever the record order (TEACH-25).
+  const byAge = oldestFirst(records.points);
   const queuedPointByGoal = new Map(
-    records.points.filter((p) => p.state === "queued").map((p) => [p.goal_id, p]),
+    byAge.filter((p) => p.state === "queued").map((p) => [p.goal_id, p]),
   );
   const scoredPointByGoal = new Map(
-    records.points.filter((p) => p.state === "scored").map((p) => [p.goal_id, p]),
+    byAge.filter((p) => p.state === "scored").map((p) => [p.goal_id, p]),
   );
   const pendingCount = paraPendingCount;
   const groups = groupDashboard(dashboard.rows, lens);

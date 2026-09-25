@@ -7,7 +7,7 @@
 // orders rows and GROUPS for display with the shared display-order comparators
 // (TEACH-25) — presentation sequencing of engine-grouped data.
 
-import { compareCodePoints } from "@teacher-assistant/domain-core";
+import { compareArcNewestFirst, compareCodePoints } from "@teacher-assistant/domain-core";
 import type { NoDataReason, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
 import type {
   DashboardGroup,
@@ -106,7 +106,7 @@ export function buildLookups(
   );
 
   const valueByGoal = new Map<string, number>();
-  for (const p of records.points) {
+  for (const p of oldestFirst(records.points)) {
     if (p.state === "scored" && p.computed_value !== undefined) {
       valueByGoal.set(p.goal_id, p.computed_value);
     }
@@ -133,6 +133,15 @@ export function buildLookups(
     pendingGoalIds,
     periodByStudent: (studentId) => membershipByStudent.get(studentId) ?? null,
   };
+}
+
+/**
+ * Points oldest first (the reverse of the ARC history order), so a per-goal
+ * "last one wins" Map keeps the NEWEST point rather than whichever came last in
+ * record order (TEACH-25).
+ */
+export function oldestFirst(points: readonly ProgressDataPoint[]): ProgressDataPoint[] {
+  return [...points].sort((a, b) => compareArcNewestFirst(b, a));
 }
 
 export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {

@@ -13,6 +13,7 @@ import {
   orderValidationQueue,
   periodLabelOfGroup,
   type RowVM,
+  rowValueText,
   toRowVM,
 } from "./dashboard-vm.js";
 
@@ -200,6 +201,8 @@ function displayed({ full, lk, dash }: ReturnType<typeof fixture>) {
   const goalTextOf = (goalId: string) => lk.goalTextById.get(goalId) ?? "?";
   const initialsOf = (studentId: string) => lk.initialsById.get(studentId) ?? "?";
   return {
+    // The value each row shows (scored % / ⊘ reason) — must not follow record order either.
+    values: orderRowsByStudent(rows).map((r) => `${text(r)} ${rowValueText(r) ?? "owes"}`),
     owes: orderRowsByStudent(rows.filter((r) => r.state === "owes")).map(text),
     done: orderRowsByStudent(rows.filter((r) => r.state !== "owes")).map(text),
     cards: cards.map((c) => `${c.initials}: ${c.rows.map((r) => r.goalText).join(" | ")}`),
