@@ -7,7 +7,7 @@ export const productSlug = "teacher-assistant";
 
 // The only origin a run may have tested for the dashboard to be built from it: the
 // local vite preview of the synthetic-seed build (e2e/playwright.config.ts LOCAL_URL).
-export const evidenceBaseUrl = "http://127.0.0.1:4173";
+export const evidenceBaseURL = "http://127.0.0.1:4173";
 
 // The tested workspaces, in a stable display order (bars re-sort by pass count at
 // render). content-api and diff-orchestrator are scaffolds with no tests.

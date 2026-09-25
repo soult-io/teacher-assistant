@@ -99,6 +99,15 @@ describe("scanText", () => {
     ].join("\n");
     expect(scanText(text, "f")).toEqual([]);
   });
+  it("catches an address on .zip, a real TLD that is also a file extension", () => {
+    expect(kinds(scanText("kid@school.zip", "f"))).toEqual(["email"]);
+  });
+  it("stays linear on a long backslash run before an initials key", () => {
+    const text = `${"\\".repeat(50_000)}"initials"`;
+    const start = Date.now();
+    scanText(text, "f");
+    expect(Date.now() - start).toBeLessThan(1000);
+  });
   it("passes timestamps, durations and ISO dates", () => {
     const text = `{"startTime":"2026-09-25T19:30:43.933Z","durationMs":1790364655841,"n":8595550142}`;
     expect(scanText(text, "f")).toEqual([]);
@@ -127,7 +136,7 @@ describe("scanTraceZip", () => {
       ].join("\n"),
       "resources/abc.js": `const s=[{initials:"AB"}];`,
     });
-    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1")).toEqual([]);
+    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([]);
   });
   it("refuses a request to any other host", () => {
     const zip = makeZip({
@@ -136,7 +145,7 @@ describe("scanTraceZip", () => {
         request("https://qa.stabpablo.com/"),
       ].join("\n"),
     });
-    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1")).toEqual([
+    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([
       { file: "trace.zip", kind: "network-host", location: "0-trace.network:2" },
     ]);
   });
@@ -146,20 +155,52 @@ describe("scanTraceZip", () => {
         "\n",
       ),
     });
-    expect(kinds(scanTraceZip(zip, "trace.zip", "127.0.0.1"))).toEqual([
+    expect(kinds(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173"))).toEqual([
       "network-host",
       "network-host",
     ]);
   });
-  it("refuses a network line it cannot read, and a binary network entry", () => {
-    const zip = makeZip({ "0-trace.network": "{not json", "1-trace.network": "a\0b" });
-    expect(kinds(scanTraceZip(zip, "trace.zip", "127.0.0.1"))).toEqual([
+  it("refuses the right host on another port, and a protocol it does not know", () => {
+    const zip = makeZip({
+      "0-trace.network": [request("http://127.0.0.1:8080/"), request("file:///etc/passwd")].join(
+        "\n",
+      ),
+    });
+    expect(kinds(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173"))).toEqual([
+      "network-host",
+      "network-host",
+    ]);
+  });
+  it("refuses a network line it cannot read, and a trace log holding a NUL byte", () => {
+    const zip = makeZip({
+      "0-trace.network": "{not json",
+      "1-trace.network": "a\0b",
+      "test.trace": "x\0y",
+    });
+    expect(kinds(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173"))).toEqual([
+      "unreadable",
       "unreadable",
       "unreadable",
     ]);
+  });
+  it("refuses an archive with an unsupported method, an encrypted entry, or a bomb", () => {
+    const withHeader = (zip, offset, write) => {
+      const copy = Buffer.from(zip);
+      write(copy, copy.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])) + offset);
+      return copy;
+    };
+    const base = makeZip({ "test.trace": "{}" });
+    const method = withHeader(base, 10, (b, at) => b.writeUInt16LE(12, at));
+    const encrypted = withHeader(base, 8, (b, at) => b.writeUInt16LE(1, at));
+    const bomb = withHeader(base, 24, (b, at) => b.writeUInt32LE(0xfffffff0, at));
+    for (const zip of [method, encrypted, bomb]) {
+      expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([
+        { file: "trace.zip", kind: "unreadable", location: "archive" },
+      ]);
+    }
   });
   it("refuses an archive it cannot read", () => {
-    expect(scanTraceZip(Buffer.from("not a zip"), "trace.zip", "127.0.0.1")).toEqual([
+    expect(scanTraceZip(Buffer.from("not a zip"), "trace.zip", "127.0.0.1:4173")).toEqual([
       { file: "trace.zip", kind: "unreadable", location: "archive" },
     ]);
   });
@@ -169,7 +210,7 @@ describe("scanTraceZip", () => {
       "test.trace": `{"x":"${SSN}"}\n{"initials":"ABCD"}`,
       "screencast/a.jpeg": Buffer.from([0xff, 0xd8, 0x00, 0x40]),
     });
-    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1")).toEqual([
+    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([
       { file: "trace.zip", kind: "email", location: "resources/snap.html:1:4" },
       { file: "trace.zip", kind: "ssn", location: "test.trace:1:7" },
       { file: "trace.zip", kind: "initials", location: "test.trace:2:2" },
@@ -189,18 +230,30 @@ describe("scanBuild", () => {
 
   const clean = { schema: "ta/journey-evidence/4", tests: [{ title: "AB owes a probe" }] };
 
-  it("passes a clean build and skips absent files", () => {
+  it("passes a clean build", () => {
     const at = fixture({
       "journey-evidence.json": JSON.stringify(clean),
       "trace.zip": makeZip({ "0-trace.network": request("http://127.0.0.1:4173/") }),
     });
     const findings = scanBuild({
-      files: [at("journey-evidence.json"), at("results.json")],
+      files: [at("journey-evidence.json")],
       traceZips: [at("trace.zip")],
       html: { file: "index.html", text: "<h1>TRACK</h1>" },
-      allowedHost: "127.0.0.1",
+      allowedHost: "127.0.0.1:4173",
     });
     expect(findings).toEqual([]);
+  });
+
+  it("throws on a listed file that is absent (the caller decides what may be absent)", () => {
+    const at = fixture({});
+    const scan = () =>
+      scanBuild({
+        files: [at("results.json")],
+        traceZips: [],
+        html: { file: "index.html", text: "" },
+        allowedHost: "127.0.0.1:4173",
+      });
+    expect(scan).toThrow(/ENOENT/);
   });
 
   it("finds a planted email, SSN and long initials across files, and logs none of them", () => {
@@ -213,7 +266,7 @@ describe("scanBuild", () => {
       files: [at("journey-evidence.json"), at("results.json")],
       traceZips: [at("trace.zip")],
       html: { file: "index.html", text: `<td>${PHONE}</td>` },
-      allowedHost: "127.0.0.1",
+      allowedHost: "127.0.0.1:4173",
     });
     expect(kinds(findings)).toEqual(["email", "ssn", "initials", "phone"]);
     const log = `${formatFindings(findings)}\n${JSON.stringify(findings)}`;

@@ -13,7 +13,7 @@ const EOCD_MIN = 22;
 const MAX_COMMENT = 0xffff;
 
 /** Bound on one inflated entry: a trace entry is at most a few MB; this catches a bomb. */
-export const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
+const MAX_ENTRY_BYTES = 64 * 1024 * 1024;
 
 function findEocd(buf) {
   const floor = Math.max(0, buf.length - EOCD_MIN - MAX_COMMENT);

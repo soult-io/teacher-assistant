@@ -10,6 +10,11 @@
 // The logs of a public Actions run are public too: a finding records the file, the
 // pattern type and the location — NEVER the matched value.
 //
+// Not covered here: videos and stills (pixels). Their guard is the origin stamp
+// (checkRunOrigin in ingest.mjs); the gating run's own traces back it at network level.
+// The walkthrough records no trace, so its videos rest on the stamp and on the gating
+// run tracing the same journeys.
+//
 // Deliberately NOT scanned: a name blocklist (student initials are the only identity
 // the app holds) and bare digit runs as student IDs (they collide with timestamps,
 // durations and sizes).
@@ -17,13 +22,16 @@
 import { readFileSync } from "node:fs";
 import { readZipEntries } from "./zip.mjs";
 
-/** RFC 2606 / RFC 6761 reserved names never count as a real address. */
-const RESERVED_TLDS = [".test", ".example", ".invalid", ".localhost"];
+/** RFC 2606 / RFC 6761 names that can never resolve to a real server. */
+const UNRESOLVABLE_TLDS = [".test", ".example", ".invalid"];
+/** Reserved names never counted as a real address (`.localhost` resolves, locally). */
+const RESERVED_TLDS = [...UNRESOLVABLE_TLDS, ".localhost"];
 const RESERVED_DOMAINS = ["example.com", "example.net", "example.org"];
 // A match whose "TLD" is a file extension is a file name, not an address — Playwright
 // names every screencast frame `page@<id>-<time>.jpeg`, and assets go `icon@2x.png`.
+// Never a real TLD (`.zip` is one, so it is not listed).
 const FILE_EXTENSIONS = new Set(
-  "jpeg jpg png webp gif svg ico webm mp4 js mjs cjs ts tsx css map json html zip woff woff2 ttf".split(
+  "jpeg jpg png webp gif svg ico webm mp4 js mjs cjs ts tsx css map json html woff woff2 ttf".split(
     " ",
   ),
 );
@@ -38,18 +46,21 @@ const PHONE_RE = /(?:\+?1[-.\s]?)?\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/g;
 // (a blank form's default) holds no student data.
 const INITIALS_OK = /^(?:[A-Z]{2,3})?$/;
 // A quoted `initials` key (JSON, or JSON escaped inside a JSON string: group 1 is the
-// escape run). Its value must be a string of the same escape level, or it is a finding.
-const INITIALS_JSON_KEY = /(\\*)"initials\1"\s*:\s*/g;
+// escape run, bounded so a long backslash run stays linear). Its value must be a string
+// of the same escape level, or it is a finding.
+const INITIALS_JSON_KEY = /(\\{0,15})"initials\1"\s*:\s*/g;
 // A bare key with a string literal (a JS bundle or test source): `initials: "AB"`.
 const INITIALS_JS_KEY = /(?<![\w$"'\\])initials\s*:\s*(["'`])(.*?)\1/g;
+
+// Trace entries that are always text: a NUL byte in one makes it unreadable, not binary.
+const TEXT_ENTRY = /(?:\.(?:trace|network|stacks)$|^src\/)/;
 
 /** @typedef {"email"|"ssn"|"phone"|"initials"|"network-host"|"unreadable"} FindingKind */
 /** @typedef {{file: string, kind: FindingKind, location: string}} Finding */
 
-/** A reserved name that can never resolve to a real server (not `.localhost`). */
-function isUnresolvableHost(host) {
-  const h = host.toLowerCase();
-  return [".test", ".example", ".invalid"].some((tld) => h.endsWith(tld));
+function isUnresolvableHost(hostname) {
+  const h = hostname.toLowerCase();
+  return UNRESOLVABLE_TLDS.some((tld) => h.endsWith(tld));
 }
 
 function isReservedDomain(domain) {
@@ -112,22 +123,21 @@ export function scanText(text, file, where = "") {
 }
 
 /**
- * The entry as text, or null for a binary entry (an image, a font: any NUL byte).
- * Decoded lossily, so a text resource in another encoding is still scanned.
+ * The entry as text, or null for a binary entry (an image, a font: any NUL byte, which
+ * also rules out UTF-16 text). Decoded lossily, so a Latin-1 resource is still scanned.
  */
 function asText(data) {
   return data.includes(0) ? null : data.toString("utf8");
 }
 
-/** The host a network-log URL reaches, or null for one with no host (data:, about:). */
-function urlHost(raw) {
+/** Does a network-log URL stay local: the allowed host:port, an unresolvable name, or
+ * no host at all (data:, about:)? A protocol it does not know is not local. */
+function isLocalRequest(raw, allowedHost) {
   const url = new URL(raw);
-  if (url.protocol === "blob:") return urlHost(url.pathname);
-  if (url.protocol === "data:" || url.protocol === "about:") return null;
-  if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) {
-    throw new Error(`unexpected protocol ${url.protocol}`);
-  }
-  return url.hostname;
+  if (url.protocol === "blob:") return isLocalRequest(url.pathname, allowedHost);
+  if (url.protocol === "data:" || url.protocol === "about:") return true;
+  if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) return false;
+  return url.host === allowedHost || isUnresolvableHost(url.hostname);
 }
 
 /**
@@ -140,17 +150,17 @@ function scanNetwork(text, file, entry, allowedHost) {
   text.split("\n").forEach((line, i) => {
     if (line.trim() === "") return;
     const location = `${entry}:${i + 1}`;
+    let url;
     try {
-      const url = JSON.parse(line)?.snapshot?.request?.url;
+      url = JSON.parse(line)?.snapshot?.request?.url;
       if (typeof url !== "string") throw new Error("no request url");
-      const host = urlHost(url);
-      if (host !== null && host !== allowedHost && !isUnresolvableHost(host)) {
-        findings.push({ file, kind: "network-host", location });
-      }
+      new URL(url);
     } catch {
       // A line we cannot read cannot be shown to be local.
       findings.push({ file, kind: "unreadable", location });
+      return;
     }
+    if (!isLocalRequest(url, allowedHost)) findings.push({ file, kind: "network-host", location });
   });
   return findings;
 }
@@ -160,7 +170,7 @@ function scanNetwork(text, file, entry, allowedHost) {
  * over every `*.network` entry.
  * @param {Buffer} buf
  * @param {string} file
- * @param {string} allowedHost the only host the run may have reached
+ * @param {string} allowedHost the only host:port the run may have reached
  * @returns {Finding[]}
  */
 export function scanTraceZip(buf, file, allowedHost) {
@@ -173,15 +183,13 @@ export function scanTraceZip(buf, file, allowedHost) {
   const findings = [];
   for (const { name, data } of entries) {
     const text = asText(data);
-    if (name.endsWith(".network")) {
-      // Never skipped as binary: an unreadable network log cannot be shown to be local.
-      findings.push(
-        ...(text === null
-          ? [{ file, kind: "unreadable", location: name }]
-          : scanNetwork(text, file, name, allowedHost)),
-      );
+    if (text === null) {
+      // A trace's own logs are never skipped as binary: unreadable, not clean.
+      if (TEXT_ENTRY.test(name)) findings.push({ file, kind: "unreadable", location: name });
+      continue;
     }
-    if (text !== null) findings.push(...scanText(text, file, `${name}:`));
+    if (name.endsWith(".network")) findings.push(...scanNetwork(text, file, name, allowedHost));
+    findings.push(...scanText(text, file, `${name}:`));
   }
   return findings;
 }
@@ -189,21 +197,12 @@ export function scanTraceZip(buf, file, allowedHost) {
 /**
  * Scan everything the dashboard is built from and the page itself.
  * @param {{files: string[], traceZips: string[], html: {file: string, text: string},
- *   allowedHost: string}} args files = evidence/results JSON paths (absent ones skipped)
+ *   allowedHost: string}} args every listed file must exist (the caller drops absent ones)
  * @returns {Finding[]}
  */
 export function scanBuild({ files, traceZips, html, allowedHost }) {
   const findings = [];
-  for (const file of files) {
-    let text;
-    try {
-      text = readFileSync(file, "utf8");
-    } catch (err) {
-      if (err.code === "ENOENT") continue;
-      throw err;
-    }
-    findings.push(...scanText(text, file));
-  }
+  for (const file of files) findings.push(...scanText(readFileSync(file, "utf8"), file));
   for (const file of traceZips) {
     findings.push(...scanTraceZip(readFileSync(file), file, allowedHost));
   }

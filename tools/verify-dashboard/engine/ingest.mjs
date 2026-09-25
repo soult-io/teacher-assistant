@@ -45,7 +45,8 @@ export function parseEvidence(text) {
   try {
     data = JSON.parse(text);
   } catch (err) {
-    throw new Error(`journey-evidence is not valid JSON: ${err.message}`);
+    // Not err.message: Node quotes part of the input, and the Actions log is public.
+    throw new Error(`journey-evidence is not valid JSON (${err.name})`);
   }
   const schema = data?.schema;
   if (!READABLE_SCHEMAS.includes(schema)) {

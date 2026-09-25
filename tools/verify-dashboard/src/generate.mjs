@@ -112,6 +112,32 @@ function readEvidenceBytes(evidenceFile, absentMeans = "every journey renders UN
   }
 }
 
+const publishing = () => process.env.PUBLISH === "true";
+
+/** The walkthrough evidence path, or null when none was given — ingest and the output
+ * scan both read it here, so they can never pick different files. */
+function walkthroughEvidenceFile() {
+  const file = process.env.WALKTHROUGH_EVIDENCE_FILE;
+  return file ? resolve(file) : null;
+}
+
+/**
+ * When publishing, every gating test that ran must carry a trace: the traces' network
+ * logs are the proof its videos and stills show the local build, and a missing trace
+ * would pass the scan by having nothing to scan.
+ */
+function assertTracedForPublish(evidence) {
+  if (!publishing()) return;
+  const untraced = evidence.tests.filter(
+    (t) => t.status !== "skipped" && !t.attachments.some((a) => a.name === "trace" && a.path),
+  );
+  if (untraced.length > 0) {
+    throw new Error(
+      `${untraced.length} gating test(s) have no trace — no network proof, refusing to publish`,
+    );
+  }
+}
+
 /**
  * Is this evidence of the local synthetic build? A stamped file naming another origin
  * throws (checkRunOrigin). A file from before the stamp (v1–v3) is refused when
@@ -120,8 +146,8 @@ function readEvidenceBytes(evidenceFile, absentMeans = "every journey renders UN
  * still builds.
  */
 function admitEvidence(evidence, what) {
-  if (checkRunOrigin(evidence, config.evidenceBaseUrl)) return true;
-  if (process.env.PUBLISH === "true") {
+  if (checkRunOrigin(evidence, config.evidenceBaseURL)) return true;
+  if (publishing()) {
     throw new Error(`${what} (${evidence.schema}) has no origin stamp — refusing to publish`);
   }
   console.warn(`  ${what} (${evidence.schema}) has no origin stamp — not ingested`);
@@ -132,12 +158,11 @@ function admitEvidence(evidence, what) {
 // walkthrough recorded for this commit"; its videos are never replaced by the gating
 // run's. Its assets count against the same published-bytes budget as the gating run's.
 function loadWalkthrough(outDir, budget) {
-  const file = process.env.WALKTHROUGH_EVIDENCE_FILE;
-  if (!file) {
+  const path = walkthroughEvidenceFile();
+  if (!path) {
     console.warn("  no walkthrough evidence given — cards show no video");
     return null;
   }
-  const path = resolve(file);
   const bytes = readEvidenceBytes(path, "no walkthrough: cards show no video");
   if (!bytes) return null;
   const evidence = parseWalkthroughEvidence(bytes.toString("utf8"));
@@ -158,12 +183,12 @@ function loadWalkthrough(outDir, budget) {
 }
 
 function ingestJourneys(evidenceFile, outDir) {
-  let bytes = readEvidenceBytes(evidenceFile);
-  let evidence = bytes ? parseEvidence(bytes.toString("utf8")) : { tests: [] };
-  if (bytes && !admitEvidence(evidence, "journey evidence")) {
-    bytes = null;
-    evidence = { tests: [] };
-  }
+  const raw = readEvidenceBytes(evidenceFile);
+  const parsed = raw ? parseEvidence(raw.toString("utf8")) : null;
+  const admitted = parsed !== null && admitEvidence(parsed, "journey evidence");
+  const bytes = admitted ? raw : null;
+  const evidence = admitted ? parsed : { tests: [] };
+  if (admitted) assertTracedForPublish(evidence);
   const provenance = buildRunProvenance(process.env, {
     artifactDigest: bytes ? sha256Hex(bytes) : null,
   });
@@ -216,22 +241,24 @@ function traceZipsUnder(dir) {
 }
 
 /**
- * The output scan over the evidence, results.json, every trace.zip of both runs and the
- * rendered page. A hit refuses the build (main's catch removes the partly written
+ * The output scan over the evidence, results.json, every trace.zip of both runs, every
+ * trace copied into the page (whatever its source name) and the rendered page. A hit refuses the build (main's catch removes the partly written
  * output); the error lists file + pattern type + location only (the Actions log is public).
  */
 function assertOutputClean(evidenceFile, html) {
-  const walkthroughFile = process.env.WALKTHROUGH_EVIDENCE_FILE
-    ? resolve(process.env.WALKTHROUGH_EVIDENCE_FILE)
-    : null;
+  const walkthroughFile = walkthroughEvidenceFile();
   const dirs = [dirname(evidenceFile), walkthroughFile && dirname(walkthroughFile)];
+  const published = join(OUT_DIR, "traces");
+  const publishedZips = existsSync(published)
+    ? readdirSync(published).map((name) => join(published, name))
+    : [];
   const findings = scanBuild({
-    files: [evidenceFile, join(dirname(evidenceFile), "results.json"), walkthroughFile].filter(
-      Boolean,
-    ),
-    traceZips: [...new Set(dirs.filter(Boolean))].flatMap(traceZipsUnder),
+    files: [evidenceFile, join(dirname(evidenceFile), "results.json"), walkthroughFile]
+      .filter(Boolean)
+      .filter(existsSync),
+    traceZips: [...[...new Set(dirs.filter(Boolean))].flatMap(traceZipsUnder), ...publishedZips],
     html: { file: "index.html (rendered)", text: html },
-    allowedHost: new URL(config.evidenceBaseUrl).hostname,
+    allowedHost: new URL(config.evidenceBaseURL).host,
   });
   if (findings.length === 0) {
     console.log("verify-dashboard: output scan clean");
@@ -252,10 +279,9 @@ function renderFooterLinks(links) {
 }
 
 async function main() {
-  const outDir = OUT_DIR;
   const evidenceFile = resolve(process.env.EVIDENCE_FILE ?? DEFAULT_EVIDENCE);
-  rmSync(outDir, { recursive: true, force: true });
-  mkdirSync(outDir, { recursive: true });
+  rmSync(OUT_DIR, { recursive: true, force: true });
+  mkdirSync(OUT_DIR, { recursive: true });
 
   console.log(`verify-dashboard: running ${config.packages.length} test suites for live counts`);
   const tmpDir = mkdtempSync(join(tmpdir(), "verify-dashboard-"));
@@ -266,7 +292,7 @@ async function main() {
   // ingested evidence the journey cards render from, so the count can never contradict
   // the cards — and the generator needs no browser/Playwright at generate time.
   console.log(`verify-dashboard: ingesting journeys from ${evidenceFile}`);
-  const { journeys, provenance } = ingestJourneys(evidenceFile, outDir);
+  const { journeys, provenance } = ingestJourneys(evidenceFile, OUT_DIR);
 
   // The tile figure and the "N verified" log line both come from this one engine
   // result — a single source of truth for "what counts as a verified journey" (null
@@ -310,9 +336,9 @@ async function main() {
     FOOTER_NOTE: config.branding.footerNote,
   });
   assertOutputClean(evidenceFile, html);
-  writeFileSync(join(outDir, "index.html"), html);
+  writeFileSync(join(OUT_DIR, "index.html"), html);
   rmSync(tmpDir, { recursive: true, force: true });
-  console.log(`verify-dashboard: wrote ${join(outDir, "index.html")}`);
+  console.log(`verify-dashboard: wrote ${join(OUT_DIR, "index.html")}`);
 }
 
 main().catch((err) => {
