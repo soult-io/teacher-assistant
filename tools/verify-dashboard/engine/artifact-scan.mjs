@@ -10,7 +10,10 @@
 //   network check (pii-scan.mjs header)
 // - every other file: the text scan; a file that is not UTF-8 text is a finding
 // - every *.json: base64 bodies inside it (the JSON reporter's inline attachments and
-//   non-text stdout) are decoded and scanned too
+//   non-text stdout) are decoded and scanned too. (This is deliberately wider than the
+//   dashboard build's scan: results.json is never copied into the page, and these same
+//   bytes were scanned here before they were uploaded.) Not decoded: base64 inside
+//   data: URLs in trace snapshots or page text.
 // - an evidence file (*-evidence.json): must carry the local origin stamp. This run wrote
 //   it, so an unstamped (pre-v4) file is a finding too
 // - a symlink or special file: a finding (upload-artifact would follow a link out)
@@ -54,13 +57,20 @@ function isBase64Field(node, key) {
   return (key === "body" && "contentType" in node) || key === "buffer";
 }
 
-/** Decoded text is scanned; decoded binary must be an image or font. */
+/** Decoded text is scanned; decoded binary must be an image. */
 function decodedFindings(value, file, at) {
   const data = Buffer.from(value, "base64");
   const text = decodeText(data);
   if (text !== null) return scanText(text, file, `${at}:`);
   return isKnownMedia(data) ? [] : [{ file, kind: "unreadable", location: at }];
 }
+
+/** The JSON reporter's own keys. Any other key on a path may come from data, so the
+ * logged location shows `?` in its place. */
+const SCHEMA_KEYS = new Set(
+  "suites specs tests results attachments stdout stderr errors steps body buffer".split(" "),
+);
+const pathKey = (key) => (SCHEMA_KEYS.has(key) ? key : "?");
 
 /**
  * Findings in the base64 bodies of a JSON document (the JSON reporter's inline
@@ -73,8 +83,8 @@ function base64Findings(node, file, path = "$") {
   if (node === null || typeof node !== "object") return [];
   return Object.keys(node).flatMap((key) =>
     isBase64Field(node, key)
-      ? decodedFindings(node[key], file, `${path}.${key}`)
-      : base64Findings(node[key], file, `${path}.${key}`),
+      ? decodedFindings(node[key], file, `${path}.${pathKey(key)}`)
+      : base64Findings(node[key], file, `${path}.${pathKey(key)}`),
   );
 }
 

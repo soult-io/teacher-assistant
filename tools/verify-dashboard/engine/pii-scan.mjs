@@ -145,25 +145,39 @@ export function decodeText(data) {
   }
 }
 
-/** Leading bytes of the image, video and font formats a run legitimately holds. */
-const MEDIA_MAGIC = [
-  { at: 0, bytes: [0xff, 0xd8, 0xff] }, // JPEG
-  { at: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] }, // PNG
-  { at: 0, bytes: [...Buffer.from("GIF8")] },
-  { at: 8, bytes: [...Buffer.from("WEBP")] }, // RIFF container
-  { at: 0, bytes: [0x1a, 0x45, 0xdf, 0xa3] }, // WebM / Matroska
-  { at: 4, bytes: [...Buffer.from("ftyp")] }, // MP4
-  { at: 0, bytes: [...Buffer.from("wOFF")] },
-  { at: 0, bytes: [...Buffer.from("wOF2")] },
-  { at: 0, bytes: [0x00, 0x01, 0x00, 0x00] }, // TrueType
-  { at: 0, bytes: [...Buffer.from("OTTO")] }, // OpenType
-  { at: 0, bytes: [0x00, 0x00, 0x01, 0x00] }, // ICO
+/** Leading bytes (`[offset, bytes]` pairs, all must match) of the image and video formats
+ * a run legitimately holds. */
+const PIXEL_MAGIC = [
+  [[0, [0xff, 0xd8, 0xff]]], // JPEG
+  [[0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]]], // PNG
+  [[0, [...Buffer.from("GIF8")]]],
+  [
+    [0, [...Buffer.from("RIFF")]],
+    [8, [...Buffer.from("WEBP")]],
+  ],
+  [[0, [0x1a, 0x45, 0xdf, 0xa3]]], // WebM / Matroska
+  [[4, [...Buffer.from("ftyp")]]], // MP4
+];
+/** Fonts and icons: only ever a page resource inside a trace. Their short signatures
+ * (TrueType, ICO) are why they are not accepted anywhere else. */
+const GLYPH_MAGIC = [
+  [[0, [...Buffer.from("wOFF")]]],
+  [[0, [...Buffer.from("wOF2")]]],
+  [[0, [0x00, 0x01, 0x00, 0x00]]], // TrueType
+  [[0, [...Buffer.from("OTTO")]]], // OpenType
+  [[0, [0x00, 0x00, 0x01, 0x00]]], // ICO
 ];
 
-/** Is this an image, video or font by its leading bytes (never by its name)? Pixels and
- * glyphs are the only binary a scan may pass unread. */
-export function isKnownMedia(data) {
-  return MEDIA_MAGIC.some(({ at, bytes }) => bytes.every((b, i) => data[at + i] === b));
+const matches = (data, signature) =>
+  signature.every(([at, bytes]) => bytes.every((b, i) => data[at + i] === b));
+
+/** Is this an image or a video by its leading bytes (never by its name)? With `glyphs`, a
+ * font or icon also counts. Pixels and glyphs are the only binary a scan may pass unread.
+ * @param {Uint8Array} data
+ * @param {{glyphs?: boolean}} [opts] */
+export function isKnownMedia(data, { glyphs = false } = {}) {
+  const known = glyphs ? [...PIXEL_MAGIC, ...GLYPH_MAGIC] : PIXEL_MAGIC;
+  return known.some((signature) => matches(data, signature));
 }
 
 /** Does a network-log URL stay local: the allowed host:port, an unresolvable name, or
@@ -229,7 +243,7 @@ export function scanTraceZip(buf, file, allowedHost) {
     if (text === null) {
       // A trace's own logs are never skipped as binary, and binary other than an image or
       // font cannot be read: unreadable, not clean.
-      if (TEXT_ENTRY.test(name) || !isKnownMedia(data)) {
+      if (TEXT_ENTRY.test(name) || !isKnownMedia(data, { glyphs: true })) {
         findings.push({ file, kind: "unreadable", location: name });
       }
       continue;
@@ -260,7 +274,13 @@ export function scanBuild({ files, traceZips, html, allowedHost }) {
   return findings;
 }
 
+// Control characters in a logged name could start a new line that GitHub reads as a
+// workflow command (`::stop-commands::`).
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const CONTROL = /[\u0000-\u001f\u007f]/g;
+
 /** A log line per finding: file, pattern type, location — never the matched value. */
 export function formatFindings(findings) {
-  return findings.map((f) => `  ${f.file} [${f.kind}] at ${f.location}`).join("\n");
+  const clean = (s) => String(s).replace(CONTROL, "?");
+  return findings.map((f) => `  ${clean(f.file)} [${f.kind}] at ${clean(f.location)}`).join("\n");
 }

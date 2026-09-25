@@ -72,6 +72,22 @@ describe("scanArtifactDir", () => {
     expect(summary(scan().findings)).toEqual(["j4-chromium/fake.png unreadable"]);
   });
 
+  it("accepts no font or icon signature under a media name, and WEBP needs RIFF", () => {
+    put("a.png", Buffer.from([0x00, 0x00, 0x01, 0x00, 0x41]));
+    put("b.webp", Buffer.from([...Buffer.from("XXXXxxxxWEBP")]));
+    put("c.webp", Buffer.from([...Buffer.from("RIFFxxxxWEBP")]));
+    expect(summary(scan().findings).sort()).toEqual(["a.png unreadable", "b.webp unreadable"]);
+  });
+
+  it("logs a data-derived JSON key as ? and strips control characters", () => {
+    const body = Buffer.from(EMAIL).toString("base64");
+    put("x.json", JSON.stringify({ "Janet\n::stop-commands::x": { buffer: body } }));
+    const log = formatFindings(scan().findings);
+    expect(log).toContain("$.?.buffer");
+    expect(log).not.toContain("Janet");
+    expect(log).not.toContain("\n::");
+  });
+
   it("scans base64 attachment bodies and stdout buffers inside results.json", () => {
     const b64 = (text) => Buffer.from(text).toString("base64");
     put(
