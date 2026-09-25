@@ -12,8 +12,10 @@
 //
 // Not covered here: videos and stills (pixels). Their guard is the origin stamp
 // (checkRunOrigin in ingest.mjs); the gating run's own traces back it at network level.
-// The walkthrough records no trace, so its videos rest on the stamp and on the gating
-// run tracing the same journeys.
+// The walkthrough records a trace too (in its artifact, never copied into the page):
+// its network log is the same proof for the walkthrough videos. This scan checks every
+// request that is logged; it cannot tell a trace that logged none because snapshots were
+// off (Playwright then writes empty *.network entries) from a test that made no request.
 //
 // Deliberately NOT scanned: a name blocklist (student initials are the only identity
 // the app holds) and bare digit runs as student IDs (they collide with timestamps,
@@ -57,7 +59,7 @@ const INITIALS_JS_KEY = /(?<![\w$"'\\])initials\s*:\s*(["'`])(.*?)\1/g;
 // Trace entries that are always text: a NUL byte in one makes it unreadable, not binary.
 const TEXT_ENTRY = /(?:\.(?:trace|network|stacks)$|^src\/)/;
 
-/** @typedef {"email"|"ssn"|"phone"|"initials"|"network-host"|"unreadable"} FindingKind */
+/** @typedef {"email"|"ssn"|"phone"|"initials"|"network-host"|"origin"|"unreadable"} FindingKind */
 /** @typedef {{file: string, kind: FindingKind, location: string}} Finding */
 
 function isUnresolvableHost(hostname) {
@@ -125,12 +127,57 @@ export function scanText(text, file, where = "") {
   }));
 }
 
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+
 /**
- * The entry as text, or null for a binary entry (an image, a font: any NUL byte, which
- * also rules out UTF-16 text). Decoded lossily, so a Latin-1 resource is still scanned.
+ * The bytes as text, or null when they are not text: any NUL byte (which also rules out
+ * UTF-16) or any invalid UTF-8. Never decoded lossily — a compressed or encoded blob
+ * with no NUL byte would otherwise be scanned as mojibake and pass.
+ * @param {Uint8Array} data
+ * @returns {string|null}
  */
-function asText(data) {
-  return data.includes(0) ? null : data.toString("utf8");
+export function decodeText(data) {
+  if (data.includes(0)) return null;
+  try {
+    return UTF8.decode(data);
+  } catch {
+    return null;
+  }
+}
+
+/** Leading bytes (`[offset, bytes]` pairs, all must match) of the image and video formats
+ * a run legitimately holds. */
+const PIXEL_MAGIC = [
+  [[0, [0xff, 0xd8, 0xff]]], // JPEG
+  [[0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]]], // PNG
+  [[0, [...Buffer.from("GIF8")]]],
+  [
+    [0, [...Buffer.from("RIFF")]],
+    [8, [...Buffer.from("WEBP")]],
+  ],
+  [[0, [0x1a, 0x45, 0xdf, 0xa3]]], // WebM / Matroska
+  [[4, [...Buffer.from("ftyp")]]], // MP4
+];
+/** Fonts and icons: only ever a page resource inside a trace. Their short signatures
+ * (TrueType, ICO) are why they are not accepted anywhere else. */
+const GLYPH_MAGIC = [
+  [[0, [...Buffer.from("wOFF")]]],
+  [[0, [...Buffer.from("wOF2")]]],
+  [[0, [0x00, 0x01, 0x00, 0x00]]], // TrueType
+  [[0, [...Buffer.from("OTTO")]]], // OpenType
+  [[0, [0x00, 0x00, 0x01, 0x00]]], // ICO
+];
+
+const matches = (data, signature) =>
+  signature.every(([at, bytes]) => bytes.every((b, i) => data[at + i] === b));
+
+/** Is this an image or a video by its leading bytes (never by its name)? With `glyphs`, a
+ * font or icon also counts. Pixels and glyphs are the only binary a scan may pass unread.
+ * @param {Uint8Array} data
+ * @param {{glyphs?: boolean}} [opts] */
+export function isKnownMedia(data, { glyphs = false } = {}) {
+  const known = glyphs ? [...PIXEL_MAGIC, ...GLYPH_MAGIC] : PIXEL_MAGIC;
+  return known.some((signature) => matches(data, signature));
 }
 
 /** Does a network-log URL stay local: the allowed host:port, an unresolvable name, or
@@ -192,10 +239,13 @@ export function scanTraceZip(buf, file, allowedHost) {
   }
   const findings = [];
   for (const { name, data } of entries) {
-    const text = asText(data);
+    const text = decodeText(data);
     if (text === null) {
-      // A trace's own logs are never skipped as binary: unreadable, not clean.
-      if (TEXT_ENTRY.test(name)) findings.push({ file, kind: "unreadable", location: name });
+      // A trace's own logs are never skipped as binary, and binary other than an image or
+      // font cannot be read: unreadable, not clean.
+      if (TEXT_ENTRY.test(name) || !isKnownMedia(data, { glyphs: true })) {
+        findings.push({ file, kind: "unreadable", location: name });
+      }
       continue;
     }
     if (name.endsWith(".network")) findings.push(...scanNetwork(text, file, name, allowedHost));
@@ -212,7 +262,11 @@ export function scanTraceZip(buf, file, allowedHost) {
  */
 export function scanBuild({ files, traceZips, html, allowedHost }) {
   const findings = [];
-  for (const file of files) findings.push(...scanText(readFileSync(file, "utf8"), file));
+  for (const file of files) {
+    const text = decodeText(readFileSync(file));
+    if (text === null) findings.push({ file, kind: "unreadable", location: "not UTF-8 text" });
+    else findings.push(...scanText(text, file));
+  }
   for (const file of traceZips) {
     findings.push(...scanTraceZip(readFileSync(file), file, allowedHost));
   }
@@ -220,7 +274,13 @@ export function scanBuild({ files, traceZips, html, allowedHost }) {
   return findings;
 }
 
+// Control characters in a logged name could start a new line that GitHub reads as a
+// workflow command (`::stop-commands::`).
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const CONTROL = /[\u0000-\u001f\u007f]/g;
+
 /** A log line per finding: file, pattern type, location — never the matched value. */
 export function formatFindings(findings) {
-  return findings.map((f) => `  ${f.file} [${f.kind}] at ${f.location}`).join("\n");
+  const clean = (s) => String(s).replace(CONTROL, "?");
+  return findings.map((f) => `  ${clean(f.file)} [${f.kind}] at ${clean(f.location)}`).join("\n");
 }

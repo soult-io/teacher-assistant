@@ -58,22 +58,25 @@ jobs:
           HOME: /root
         run: pnpm --filter @teacher-assistant/e2e e2e
 
-      # Always upload, pass or fail: on green these artifacts ARE the journey
+      # The artifact is PUBLIC: scan it before it is uploaded (pass or fail — a failed
+      # run's page snapshots are scanned too). Any finding fails this step and the upload
+      # below does not run. Videos and stills are pixels no text scan can read: their
+      # guard is that CI only ever tests the local synthetic build (playwright.config.ts
+      # refuses E2E_BASE_URL on CI and a walkthrough against a live URL — never weaken
+      # either). No HTML report is written on CI: it duplicated every trace, unscanned.
+      - name: Scan test-results before upload (student-data check)
+        id: scan-results
+        if: ${{ always() }}
+        run: node tools/verify-dashboard/src/scan-artifacts.mjs e2e/test-results
+
+      # Uploaded pass or fail, once scanned clean: on green these artifacts ARE the journey
       # evidence (videos, traces, results.json) the verification dashboard renders.
       - name: Upload Playwright test-results (videos, traces, results.json)
-        if: ${{ always() }}
+        if: ${{ always() && steps.scan-results.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: playwright-test-results
           path: e2e/test-results/
-          retention-days: 14
-
-      - name: Upload Playwright HTML report
-        if: ${{ always() }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: playwright-report
-          path: e2e/playwright-report/
           retention-days: 14
 
   # Human-pace walkthrough recording (TEACH-16). NON-GATING: it re-runs J1–J6 on
@@ -120,10 +123,18 @@ jobs:
           E2E_WALKTHROUGH: "1"
         run: pnpm --filter @teacher-assistant/e2e e2e
 
-      # Always upload: a partial recording set is still reported per journey (a failed
-      # walkthrough is shown as failed on its card, never as a video).
-      - name: Upload walkthrough recordings (videos + walkthrough-evidence.json)
+      # Same pre-upload scan as the gating job (see there). The walkthrough traces are
+      # scanned here and again by the dashboard build; they are never published.
+      - name: Scan walkthrough recordings before upload (student-data check)
+        id: scan-walkthrough
         if: ${{ always() }}
+        run: node tools/verify-dashboard/src/scan-artifacts.mjs e2e/test-results-walkthrough
+
+      # Uploaded pass or fail, once scanned clean: a partial recording set is still
+      # reported per journey (a failed walkthrough is shown as failed on its card, never
+      # as a video).
+      - name: Upload walkthrough recordings (videos, traces, walkthrough-evidence.json)
+        if: ${{ always() && steps.scan-walkthrough.outcome == 'success' }}
         uses: actions/upload-artifact@v7
         with:
           name: playwright-walkthrough
