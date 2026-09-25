@@ -323,17 +323,42 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Validates the Dockerfile on every PR; pushes sha-<tested commit> (+ latest while
-      # it is main's tip) only when publishing (the stack repo pins by sha/tag + digest,
-      # mirroring the app images). An empty tags line is dropped.
-      - name: Build (and push when publishing) the static dashboard image
+      # Build and scan BEFORE any push: an image that fails the scan must never reach
+      # GHCR, where the stack's pin bump would pick up its sha-* tag. Runs on every PR
+      # too, so a vulnerable base fails the PR check. pull: true re-resolves the base
+      # tag each run, so a patched base is used as soon as it is published.
+      - name: Build the static dashboard image (local, for the scan)
         uses: docker/build-push-action@v7
         with:
           context: .
           file: tools/verify-dashboard/Dockerfile
-          push: ${{ env.PUBLISH == 'true' }}
-          tags: |
-            ${{ env.IMAGE }}:sha-${{ env.COMMIT_SHA }}
-            ${{ steps.tip.outputs.move_latest == 'true' && format('{0}:latest', env.IMAGE) || '' }}
+          pull: true
+          load: true
+          push: false
+          tags: teacher-assistant-verify:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: teacher-assistant-verify:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      # Push the exact image Trivy scanned (a rebuild could re-resolve the base tag to a
+      # digest that was never scanned): sha-<tested commit>, + latest while it is main's
+      # tip. The stack repo pins by sha tag + digest, mirroring the app images.
+      - name: Push the scanned image (publish only)
+        if: env.PUBLISH == 'true'
+        env:
+          MOVE_LATEST: ${{ steps.tip.outputs.move_latest }}
+        run: |
+          docker tag teacher-assistant-verify:scan "$IMAGE:sha-$COMMIT_SHA"
+          docker push "$IMAGE:sha-$COMMIT_SHA"
+          if [ "$MOVE_LATEST" = "true" ]; then
+            docker tag teacher-assistant-verify:scan "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi
