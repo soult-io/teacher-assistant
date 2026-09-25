@@ -28,6 +28,7 @@ import type { CatalogEntry, DecryptedRecords } from "./repository.js";
 import { isoDateOf } from "./date.js";
 
 const DAY_MS = 86_400_000;
+const HOUR_MS = 3_600_000;
 
 /** ISO admin date `k` weeks before `now` — the trend/history spans prior weeks. */
 function weeksBefore(now: Date, k: number): IsoDate {
@@ -37,20 +38,27 @@ function weeksBefore(now: Date, k: number): IsoDate {
 /** A seeded record before its audit entry time is stamped (see stampEntryTimes). */
 type Unstamped<T extends { readonly entry_ts: Timestamp }> = Omit<T, "entry_ts">;
 
-/** Seeded probes are keyed in mid-afternoon (UTC, the zone isoDay renders in). */
-const ENTRY_HOUR_MS = 15 * 3_600_000;
+/**
+ * Seeded probes are keyed in mid-afternoon: an offset from UTC midnight (UTC is the
+ * zone Goal Detail's `isoDay` renders `entry_ts` in).
+ */
+const ENTRY_TIME_OF_DAY_MS = 15 * HOUR_MS;
 /** Same-day points of one goal are keyed a few minutes apart, in seed order. */
 const ENTRY_STEP_MS = 7 * 60_000;
 
 /**
- * Stamp each record's `entry_ts` from its admin date: that day's ENTRY_HOUR_MS plus
+ * Stamp each record's `entry_ts` from its admin date: that day's ENTRY_TIME_OF_DAY_MS plus
  * ENTRY_STEP_MS per earlier same-day record of the same goal (array order), so a
  * goal's same-day points read in a distinct, increasing order (the TEACH-25 ARC
  * tiebreak). A record administered today is clamped to at most `now`: the i-th of
  * n same-day records is capped at `now − (n−1−i)` ms, and the min of two strictly
  * increasing sequences stays strictly increasing — so the result never lands in the
- * future, never before its admin date (today's date is isoDateOf(now), and n−1 ms
- * after midnight is the only floor), and depends on `now` alone.
+ * future and depends on `now` alone.
+ *
+ * Seed-only: "never before its admin date" holds because the seed's admin dates are
+ * at most isoDateOf(now), a goal has only a handful of same-day records (so the
+ * 7-min steps stay inside the day), and `now` is at least n−1 ms past midnight.
+ * Not for imported or user-entered records.
  */
 export function stampEntryTimes<
   T extends { readonly goal_id: OpaqueId; readonly admin_date: IsoDate },
@@ -62,10 +70,11 @@ export function stampEntryTimes<
   }
   const daySeen = new Map<string, number>();
   return records.map((r) => {
-    const i = daySeen.get(dayKey(r)) ?? 0;
-    daySeen.set(dayKey(r), i + 1);
-    const n = dayTotal.get(dayKey(r)) ?? 1;
-    const planned = Date.parse(r.admin_date) + ENTRY_HOUR_MS + i * ENTRY_STEP_MS;
+    const key = dayKey(r);
+    const i = daySeen.get(key) ?? 0;
+    daySeen.set(key, i + 1);
+    const n = dayTotal.get(key) ?? 1;
+    const planned = Date.parse(r.admin_date) + ENTRY_TIME_OF_DAY_MS + i * ENTRY_STEP_MS;
     const cap = now.getTime() - (n - 1 - i);
     return { ...r, entry_ts: asTimestamp(Math.min(planned, cap)) };
   });
@@ -286,9 +295,9 @@ export interface SyntheticSeed {
  */
 export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   const adminDate = isoDateOf(now);
-  // The goals were written a week before their first probe (weeksBefore(now, 7)),
-  // mid-morning — so no goal post-dates its own history.
-  const createdTs = asTimestamp(Date.parse(weeksBefore(now, 8)) + 10 * 3_600_000);
+  // The goals were written mid-morning a week before the earliest seeded history
+  // week — so no goal post-dates its own points.
+  const createdTs = asTimestamp(Date.parse(weeksBefore(now, 8)) + 10 * HOUR_MS);
 
   // Two periods so the by-period lens has real buckets; P2 has the para.
   const p2 = classPeriod("P2", true);

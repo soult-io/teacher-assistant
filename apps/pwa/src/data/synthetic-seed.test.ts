@@ -63,6 +63,8 @@ describe.each(NOWS)("buildSyntheticSeed(%s) timestamps", (now) => {
     }
   });
 
+  // Today's seed has one point per goal per day, so this guards a future seed edit;
+  // the stampEntryTimes cases below exercise multi-point days directly.
   it("orders a goal's same-day points by strictly increasing entry_ts", () => {
     const byDay = new Map<string, number[]>();
     for (const p of entered) {
