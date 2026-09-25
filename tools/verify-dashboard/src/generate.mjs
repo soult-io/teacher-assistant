@@ -41,11 +41,11 @@ import { collectPackageCounts, deriveE2eCount } from "../engine/counts.mjs";
 import {
   buildJourneys,
   checkRunOrigin,
-  journeysWithUntracedMedia,
+  journeysWithUnprovenMedia,
   parseEvidence,
   parseWalkthroughEvidence,
 } from "../engine/ingest.mjs";
-import { formatFindings, localRequestCount, scanBuild } from "../engine/pii-scan.mjs";
+import { formatFindings, localRequestCount, scanBuild, scanTraceZip } from "../engine/pii-scan.mjs";
 import { buildRunProvenance, sha256Hex } from "../engine/provenance.mjs";
 import {
   aggregate,
@@ -115,11 +115,21 @@ function readEvidenceBytes(evidenceFile, absentMeans = "every journey renders UN
 
 const publishing = () => process.env.PUBLISH === "true";
 
-/** Did the trace at this path log at least one request to the local build? A missing or
- * unreadable file is no proof. */
+/** The only host:port a run may have reached (the local vite preview). */
+const ALLOWED_HOST = new URL(config.evidenceBaseURL).host;
+
+/** The walkthrough project's outputDir in e2e/playwright.config.ts. */
+const WALKTHROUGH_OUTPUT_DIR = "test-results-walkthrough";
+
+/** Did the trace at this path log at least one request to the local build — and pass the
+ * whole trace scan itself (the proof must be a file the scan checked, whatever its name)?
+ * A missing or unreadable file is no proof. */
 function traceProvesLocal(path) {
   if (!path || !existsSync(path)) return false;
-  return localRequestCount(readFileSync(path), new URL(config.evidenceBaseURL).host) > 0;
+  const buf = readFileSync(path);
+  return (
+    scanTraceZip(buf, path, ALLOWED_HOST).length === 0 && localRequestCount(buf, ALLOWED_HOST) > 0
+  );
 }
 
 /** The walkthrough evidence path, or null when none was given — ingest and the output
@@ -159,20 +169,16 @@ function loadWalkthrough(outDir, budget) {
   const evidence = parseWalkthroughEvidence(bytes.toString("utf8"));
   if (!admitEvidence(evidence, "walkthrough evidence")) return null;
   console.log(`  walkthrough evidence for commit ${evidence.commitSha ?? "(none)"}`);
+  const locate = makeSourceLocator(path, { outputDir: WALKTHROUGH_OUTPUT_DIR });
   return {
     evidence,
     run: {
       ci_run_id: process.env.WALKTHROUGH_RUN_ID || null,
       ci_run_url: process.env.WALKTHROUGH_RUN_URL || null,
     },
-    // Matches the walkthrough project's outputDir in e2e/playwright.config.ts.
-    resolveAsset: makeAssetResolver(path, outDir, {
-      budget,
-      outputDir: "test-results-walkthrough",
-    }),
+    resolveAsset: makeAssetResolver(path, outDir, { budget, outputDir: WALKTHROUGH_OUTPUT_DIR }),
     // Its trace is read for the network proof, never served.
-    provesLocal: (rawPath) =>
-      traceProvesLocal(makeSourceLocator(path, { outputDir: "test-results-walkthrough" })(rawPath)),
+    provesLocal: (rawPath) => traceProvesLocal(locate(rawPath)),
   };
 }
 
@@ -194,12 +200,12 @@ function ingestJourneys(evidenceFile, outDir) {
     resolveAsset: makeAssetResolver(evidenceFile, outDir, { budget }),
     walkthrough: loadWalkthrough(outDir, budget),
   });
-  const untraced = journeysWithUntracedMedia(journeys, (url) =>
+  const unproven = journeysWithUnprovenMedia(journeys, (url) =>
     traceProvesLocal(join(outDir, url)),
   );
-  if (publishing() && untraced.length > 0) {
+  if (publishing() && unproven.length > 0) {
     throw new Error(
-      `journeys ${untraced.join(", ")} publish media with no trace showing a local request — no network proof, refusing to publish`,
+      `journeys ${unproven.join(", ")} publish media with no trace showing a local request — no network proof, refusing to publish`,
     );
   }
   const withVideo = journeys.filter((j) => j.video).length;
@@ -259,7 +265,7 @@ function assertOutputClean(evidenceFile, html) {
       .filter(existsSync),
     traceZips: [...[...new Set(dirs.filter(Boolean))].flatMap(traceZipsUnder), ...publishedZips],
     html: { file: "index.html (rendered)", text: html },
-    allowedHost: new URL(config.evidenceBaseURL).host,
+    allowedHost: ALLOWED_HOST,
   });
   if (findings.length === 0) {
     console.log("verify-dashboard: output scan clean");

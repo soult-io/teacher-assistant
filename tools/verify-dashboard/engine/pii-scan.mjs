@@ -86,16 +86,35 @@ function jsonStringAt(text, at, esc) {
 }
 
 // A base64 `data:` URL (a DOM snapshot's inline image or font, or text a page embedded):
-// group 1 is the payload. Bounded parameters, one character class for the payload, so
-// matching stays linear.
+// group 1 is the payload. Every part has exactly one parse (no two adjacent runs of the
+// same class), so a failed match costs O(n) — never a product of splits.
 const DATA_URL_RE =
-  /data:[\w.+-]{0,100}\/?[\w.+-]{0,100}(?:;[\w.+-]{1,64}=?[\w.+-]{0,64}){0,5};base64,([A-Za-z0-9+/]{4,}={0,2})/g;
+  /data:[\w.+-]{0,100}(?:\/[\w.+-]{0,100})?(?:;[\w.+-]{1,64}(?:=[\w.+-]{0,64})?){0,5};base64,([A-Za-z0-9+/]{4,}={0,2})/g;
 /** A payload inside a payload is decoded too, to this depth; deeper is a finding. */
 const MAX_DATA_URL_DEPTH = 2;
 
+/** Bytes a UTF-8 sequence takes, from its lead byte (0 for a continuation byte). */
+const utf8Length = (byte) => (byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 0);
+
+/** A payload as text. Playwright shortens long values in a trace, which can cut a
+ * multi-byte character: only an incomplete final UTF-8 sequence is dropped, so binary
+ * never passes as text by trimming. */
+function decodePayloadText(data) {
+  const text = decodeText(data);
+  if (text !== null) return text;
+  for (let back = 1; back <= 3 && back <= data.length; back++) {
+    const need = utf8Length(data[data.length - back]);
+    if (need === 0) continue;
+    // The last lead byte: its sequence must run past the end (cut), or it is not a cut.
+    return need > back ? decodeText(data.subarray(0, data.length - back)) : null;
+  }
+  return null;
+}
+
 /** Findings inside a base64 `data:` URL payload, at the URL's offset: its decoded text
- * is matched like any text; decoded binary must be an image or font. */
-function dataUrlHits(text, depth) {
+ * is matched like any text; decoded binary must be an image (or, inside a trace, a
+ * font or icon). */
+function dataUrlHits(text, depth, glyphs) {
   const hits = [];
   for (const m of text.matchAll(DATA_URL_RE)) {
     if (depth >= MAX_DATA_URL_DEPTH) {
@@ -103,10 +122,12 @@ function dataUrlHits(text, depth) {
       continue;
     }
     const data = Buffer.from(m[1], "base64");
-    const decoded = decodeText(data);
+    const decoded = decodePayloadText(data);
     if (decoded !== null) {
-      for (const h of matchOffsets(decoded, depth + 1)) hits.push({ kind: h.kind, index: m.index });
-    } else if (!isKnownMedia(data, { glyphs: true })) {
+      for (const h of matchOffsets(decoded, { depth: depth + 1, glyphs })) {
+        hits.push({ kind: h.kind, index: m.index });
+      }
+    } else if (!isKnownMedia(data, { glyphs })) {
       hits.push({ kind: "unreadable", index: m.index });
     }
   }
@@ -114,9 +135,10 @@ function dataUrlHits(text, depth) {
 }
 
 /** Offsets of every PII-shaped value in the text, by kind (a value inside a base64
- * `data:` URL is reported at the URL). */
-function matchOffsets(text, depth = 0) {
-  const hits = dataUrlHits(text, depth);
+ * `data:` URL is reported at the URL). `glyphs`: a font/icon payload is expected (a
+ * trace entry). */
+function matchOffsets(text, { depth = 0, glyphs = false } = {}) {
+  const hits = dataUrlHits(text, depth, glyphs);
   for (const m of text.matchAll(EMAIL_RE)) {
     if (!isReservedDomain(m[1])) hits.push({ kind: "email", index: m.index });
   }
@@ -146,10 +168,12 @@ function lineCol(text, index) {
 
 /**
  * Findings for one text. `where` prefixes the location (a zip entry name).
+ * @param {{glyphs?: boolean}} [opts] `glyphs`: accept an inline font or icon (trace
+ *   entries only — their short signatures are not trusted anywhere else)
  * @returns {Finding[]}
  */
-export function scanText(text, file, where = "") {
-  return matchOffsets(text).map((h) => ({
+export function scanText(text, file, where = "", { glyphs = false } = {}) {
+  return matchOffsets(text, { glyphs }).map((h) => ({
     file,
     kind: h.kind,
     location: `${where}${lineCol(text, h.index)}`,
@@ -209,13 +233,21 @@ export function isKnownMedia(data, { glyphs = false } = {}) {
   return known.some((signature) => matches(data, signature));
 }
 
+/** Protocols whose URL names a host to check. */
+const HOST_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
+
+/** Is this URL a request to the allowed host itself? The positive proof: the strict
+ * subset of "local" that excludes data:/blob: and unresolvable test names. */
+const isAllowedHost = (url, allowedHost) =>
+  HOST_PROTOCOLS.has(url.protocol) && url.host === allowedHost;
+
 /** Does a network-log URL stay local: the allowed host:port, an unresolvable name, or
  * no host at all (data:, about:)? A protocol it does not know is not local. */
 function isLocalRequest(raw, allowedHost) {
   const url = new URL(raw);
   if (url.protocol === "blob:") return isLocalRequest(url.pathname, allowedHost);
   if (url.protocol === "data:" || url.protocol === "about:") return true;
-  if (!["http:", "https:", "ws:", "wss:"].includes(url.protocol)) return false;
+  if (!HOST_PROTOCOLS.has(url.protocol)) return false;
   return url.host === allowedHost || isUnresolvableHost(url.hostname);
 }
 
@@ -246,10 +278,7 @@ export function localRequestCount(buf, allowedHost) {
     if (!name.endsWith(".network")) continue;
     for (const line of (decodeText(data) ?? "").split("\n")) {
       try {
-        const url = new URL(requestUrl(line));
-        if (["http:", "https:", "ws:", "wss:"].includes(url.protocol) && url.host === allowedHost) {
-          count++;
-        }
+        if (isAllowedHost(new URL(requestUrl(line)), allowedHost)) count++;
       } catch {
         // not a request line: no proof from it
       }
@@ -315,7 +344,7 @@ export function scanTraceZip(buf, file, allowedHost) {
       continue;
     }
     if (name.endsWith(".network")) findings.push(...scanNetwork(text, file, name, allowedHost));
-    findings.push(...scanText(text, file, `${name}:`));
+    findings.push(...scanText(text, file, `${name}:`, { glyphs: true }));
   }
   return findings;
 }
