@@ -49,6 +49,8 @@ const INITIALS_OK = /^(?:[A-Z]{2,3})?$/;
 // escape run, bounded so a long backslash run stays linear). Its value must be a string
 // of the same escape level, or it is a finding.
 const INITIALS_JSON_KEY = /(\\{0,15})"initials\1"\s*:\s*/g;
+// Deeper than that bound (5+ levels of JSON-in-JSON) the key is not read: a finding.
+const INITIALS_TOO_DEEP = /\\{16}"initials/g;
 // A bare key with a string literal (a JS bundle or test source): `initials: "AB"`.
 const INITIALS_JS_KEY = /(?<![\w$"'\\])initials\s*:\s*(["'`])(.*?)\1/g;
 
@@ -93,6 +95,7 @@ function matchOffsets(text) {
     const value = jsonStringAt(text, m.index + m[0].length, m[1]);
     if (value === null || !INITIALS_OK.test(value)) hits.push({ kind: "initials", index: m.index });
   }
+  for (const m of text.matchAll(INITIALS_TOO_DEEP)) hits.push({ kind: "initials", index: m.index });
   for (const m of text.matchAll(INITIALS_JS_KEY)) {
     if (!INITIALS_OK.test(m[2])) hits.push({ kind: "initials", index: m.index });
   }
@@ -160,7 +163,14 @@ function scanNetwork(text, file, entry, allowedHost) {
       findings.push({ file, kind: "unreadable", location });
       return;
     }
-    if (!isLocalRequest(url, allowedHost)) findings.push({ file, kind: "network-host", location });
+    let local;
+    try {
+      local = isLocalRequest(url, allowedHost);
+    } catch {
+      // e.g. `blob:null/<id>`: no origin to check. Caught so the URL never reaches a log.
+      local = false;
+    }
+    if (!local) findings.push({ file, kind: "network-host", location });
   });
   return findings;
 }

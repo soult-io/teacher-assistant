@@ -41,6 +41,7 @@ import { collectPackageCounts, deriveE2eCount } from "../engine/counts.mjs";
 import {
   buildJourneys,
   checkRunOrigin,
+  journeysWithUntracedMedia,
   parseEvidence,
   parseWalkthroughEvidence,
 } from "../engine/ingest.mjs";
@@ -122,23 +123,6 @@ function walkthroughEvidenceFile() {
 }
 
 /**
- * When publishing, every gating test that ran must carry a trace: the traces' network
- * logs are the proof its videos and stills show the local build, and a missing trace
- * would pass the scan by having nothing to scan.
- */
-function assertTracedForPublish(evidence) {
-  if (!publishing()) return;
-  const untraced = evidence.tests.filter(
-    (t) => t.status !== "skipped" && !t.attachments.some((a) => a.name === "trace" && a.path),
-  );
-  if (untraced.length > 0) {
-    throw new Error(
-      `${untraced.length} gating test(s) have no trace — no network proof, refusing to publish`,
-    );
-  }
-}
-
-/**
  * Is this evidence of the local synthetic build? A stamped file naming another origin
  * throws (checkRunOrigin). A file from before the stamp (v1–v3) is refused when
  * publishing; on a PR/dispatch build it is not ingested (its journeys render
@@ -188,7 +172,6 @@ function ingestJourneys(evidenceFile, outDir) {
   const admitted = parsed !== null && admitEvidence(parsed, "journey evidence");
   const bytes = admitted ? raw : null;
   const evidence = admitted ? parsed : { tests: [] };
-  if (admitted) assertTracedForPublish(evidence);
   const provenance = buildRunProvenance(process.env, {
     artifactDigest: bytes ? sha256Hex(bytes) : null,
   });
@@ -201,6 +184,12 @@ function ingestJourneys(evidenceFile, outDir) {
     resolveAsset: makeAssetResolver(evidenceFile, outDir, { budget }),
     walkthrough: loadWalkthrough(outDir, budget),
   });
+  const untraced = journeysWithUntracedMedia(journeys);
+  if (publishing() && untraced.length > 0) {
+    throw new Error(
+      `journeys ${untraced.join(", ")} publish media with no trace — no network proof, refusing to publish`,
+    );
+  }
   const withVideo = journeys.filter((j) => j.video).length;
   console.log(`  ${withVideo}/${journeys.length} journeys play a walkthrough recording`);
   console.log(`  published assets: ${budget.used} / ${budget.limit} bytes`);

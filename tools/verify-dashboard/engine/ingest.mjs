@@ -358,6 +358,20 @@ function buildJourney(entry, records, product, provenance, resolveAsset, walkthr
 }
 
 /**
+ * Journeys that publish gating media (the raw video or a still) with no trace copied
+ * beside it. The trace's network log is the proof that media shows the local build; a
+ * trace that was not recorded, or whose file could not be served, leaves the output
+ * scan nothing to check — so a publish refuses these rather than pass them.
+ * @param {object[]} journeys Journey[] from buildJourneys
+ * @returns {string[]} their ids
+ */
+export function journeysWithUntracedMedia(journeys) {
+  return journeys
+    .filter((j) => (j.raw_video_url || j.steps.some((s) => s.screenshot)) && !j.trace_url)
+    .map((j) => j.id);
+}
+
+/**
  * Map the manifest (in order) onto the evidence records → Journey[]. A manifest
  * entry with no matching record renders UNVERIFIED. `resolveAsset` maps a raw CI
  * attachment path to a served path (injected so ingest stays I/O-free + testable).

@@ -102,6 +102,11 @@ describe("scanText", () => {
   it("catches an address on .zip, a real TLD that is also a file extension", () => {
     expect(kinds(scanText("kid@school.zip", "f"))).toEqual(["email"]);
   });
+  it("catches an initials key nested deeper than it reads", () => {
+    expect(kinds(scanText(`${"\\".repeat(31)}"initials${"\\".repeat(31)}"`, "f"))).toEqual([
+      "initials",
+    ]);
+  });
   it("stays linear on a long backslash run before an initials key", () => {
     const text = `${"\\".repeat(50_000)}"initials"`;
     const start = Date.now();
@@ -158,6 +163,21 @@ describe("scanTraceZip", () => {
     expect(kinds(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173"))).toEqual([
       "network-host",
       "network-host",
+    ]);
+  });
+  it("refuses a blob or websocket URL on another origin, and an opaque blob", () => {
+    const zip = makeZip({
+      "0-trace.network": [
+        request("blob:https://evil.example.com/x"),
+        request("ws://127.0.0.1:4173/hmr"),
+        request("wss://relay.stabpablo.com/"),
+        request("blob:null/5d1c"),
+      ].join("\n"),
+    });
+    expect(scanTraceZip(zip, "trace.zip", "127.0.0.1:4173")).toEqual([
+      { file: "trace.zip", kind: "network-host", location: "0-trace.network:1" },
+      { file: "trace.zip", kind: "network-host", location: "0-trace.network:3" },
+      { file: "trace.zip", kind: "network-host", location: "0-trace.network:4" },
     ]);
   });
   it("refuses the right host on another port, and a protocol it does not know", () => {

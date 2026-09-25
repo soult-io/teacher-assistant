@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildJourneys,
   checkRunOrigin,
+  journeysWithUntracedMedia,
   parseEvidence,
   parseWalkthroughEvidence,
 } from "./ingest.mjs";
@@ -774,5 +775,52 @@ describe("checkRunOrigin (the dashboard is built only from the local synthetic b
     expect(() =>
       parseEvidence(JSON.stringify({ schema: "journey-evidence/4", tests: [] })),
     ).toThrow(/schema mismatch/);
+  });
+});
+
+describe("journeysWithUntracedMedia (a publish needs network proof for gating media)", () => {
+  const manifest = [{ id: "j1", name: "J1", match: { file: "j1-score-probe.spec.ts" } }];
+  const build = (rec) =>
+    buildJourneys({
+      evidence: { tests: [rec] },
+      manifest,
+      product: "ta",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+  const withStill = (over) =>
+    record({
+      steps: [{ label: "Open", assertions: [], screenshot: still(0) }],
+      ...over,
+    });
+
+  it("passes a journey whose trace was copied", () => {
+    expect(journeysWithUntracedMedia(build(withStill()))).toEqual([]);
+  });
+  it("flags a journey with a video and stills but no trace attachment", () => {
+    const rec = withStill();
+    rec.attachments = rec.attachments.filter((a) => a.name !== "trace");
+    expect(journeysWithUntracedMedia(build(rec))).toEqual(["j1"]);
+  });
+  it("flags a journey whose trace could not be served", () => {
+    const journeys = buildJourneys({
+      evidence: { tests: [withStill()] },
+      manifest,
+      product: "ta",
+      provenance: PROVENANCE,
+      resolveAsset: (raw, kind, id, engine, index) =>
+        kind === "trace" ? null : echoResolver(raw, kind, id, engine, index),
+    });
+    expect(journeysWithUntracedMedia(journeys)).toEqual(["j1"]);
+  });
+  it("passes an UNVERIFIED journey (nothing published)", () => {
+    const journeys = buildJourneys({
+      evidence: { tests: [] },
+      manifest,
+      product: "ta",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(journeysWithUntracedMedia(journeys)).toEqual([]);
   });
 });
