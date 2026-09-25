@@ -207,14 +207,15 @@ const sameLabels = (a, b) => a.length === b.length && a.every((s, i) => s.label 
  * Bind the journey to its human-pace walkthrough recording, or say why not. The
  * walkthrough is only shown when it is provably of the same commit as the gating run,
  * agrees with the card's verdict, and walked the same steps — so its step offsets
- * line up with the list beside it. Anything else → no video and a note; the fast
- * gating recording is never substituted.
+ * line up with the list beside it — and its own trace logged at least one request to the
+ * local build (`provesLocal`), the network proof the video shows synthetic data.
+ * Anything else → no video and a note; the fast gating recording is never substituted.
  * @param {object} entry manifest entry
  * @param {object} canonical the gating record the card's steps come from
  * @param {string} status the journey's derived status
  * @param {object} provenance the gating run's provenance
  * @param {{evidence: object, run: {ci_run_id: string|null, ci_run_url: string|null},
- *   resolveAsset: Function}|null} walkthrough
+ *   resolveAsset: Function, provesLocal: (rawTracePath: string) => boolean}|null} walkthrough
  * @returns {{video: object|null, offsets: (number|null)[]|null, note: string|null}}
  */
 function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
@@ -231,6 +232,8 @@ function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
     return none(walkStatus === JOURNEY_STATUS.FAILED ? MEDIA_NOTE.FAILED : MEDIA_NOTE.DIFFERS);
   }
   if (!sameLabels(record.steps, canonical.steps)) return none(MEDIA_NOTE.DIFFERS);
+  const trace = findAttachment(record, "trace");
+  if (!trace || !walkthrough.provesLocal(trace.path)) return none(MEDIA_NOTE.UNPROVEN);
   const att = findAttachment(record, "video");
   const src = att ? walkthrough.resolveAsset(att.path, "video", entry.id, record.project) : null;
   if (!src) return none(MEDIA_NOTE.NONE);
@@ -358,16 +361,20 @@ function buildJourney(entry, records, product, provenance, resolveAsset, walkthr
 }
 
 /**
- * Journeys that publish gating media (the raw video or a still) with no trace copied
- * beside it. The trace's network log is the proof that media shows the local build; a
- * trace that was not recorded, or whose file could not be served, leaves the output
- * scan nothing to check — so a publish refuses these rather than pass them.
+ * Journeys that publish gating media (the raw video or a still) with no network proof
+ * beside it: no trace copied, or a copied trace that logged no request to the local
+ * build (`provesLocal`, given its served path). The trace's network log is the proof
+ * that media shows the local build; an empty one (a trace recorded without snapshots
+ * logs none) passes the output scan's host check on nothing — so a publish refuses these
+ * rather than pass them.
  * @param {object[]} journeys Journey[] from buildJourneys
+ * @param {(traceUrl: string) => boolean} provesLocal
  * @returns {string[]} their ids
  */
-export function journeysWithUntracedMedia(journeys) {
+export function journeysWithUntracedMedia(journeys, provesLocal) {
+  const publishesMedia = (j) => j.raw_video_url || j.steps.some((s) => s.screenshot);
   return journeys
-    .filter((j) => (j.raw_video_url || j.steps.some((s) => s.screenshot)) && !j.trace_url)
+    .filter((j) => publishesMedia(j) && !(j.trace_url && provesLocal(j.trace_url)))
     .map((j) => j.id);
 }
 

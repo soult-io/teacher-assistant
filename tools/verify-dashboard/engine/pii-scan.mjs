@@ -85,9 +85,38 @@ function jsonStringAt(text, at, esc) {
   return end < 0 ? null : text.slice(at + quote.length, end);
 }
 
-/** Offsets of every PII-shaped value in the text, by kind. */
-function matchOffsets(text) {
+// A base64 `data:` URL (a DOM snapshot's inline image or font, or text a page embedded):
+// group 1 is the payload. Bounded parameters, one character class for the payload, so
+// matching stays linear.
+const DATA_URL_RE =
+  /data:[\w.+-]{0,100}\/?[\w.+-]{0,100}(?:;[\w.+-]{1,64}=?[\w.+-]{0,64}){0,5};base64,([A-Za-z0-9+/]{4,}={0,2})/g;
+/** A payload inside a payload is decoded too, to this depth; deeper is a finding. */
+const MAX_DATA_URL_DEPTH = 2;
+
+/** Findings inside a base64 `data:` URL payload, at the URL's offset: its decoded text
+ * is matched like any text; decoded binary must be an image or font. */
+function dataUrlHits(text, depth) {
   const hits = [];
+  for (const m of text.matchAll(DATA_URL_RE)) {
+    if (depth >= MAX_DATA_URL_DEPTH) {
+      hits.push({ kind: "unreadable", index: m.index });
+      continue;
+    }
+    const data = Buffer.from(m[1], "base64");
+    const decoded = decodeText(data);
+    if (decoded !== null) {
+      for (const h of matchOffsets(decoded, depth + 1)) hits.push({ kind: h.kind, index: m.index });
+    } else if (!isKnownMedia(data, { glyphs: true })) {
+      hits.push({ kind: "unreadable", index: m.index });
+    }
+  }
+  return hits;
+}
+
+/** Offsets of every PII-shaped value in the text, by kind (a value inside a base64
+ * `data:` URL is reported at the URL). */
+function matchOffsets(text, depth = 0) {
+  const hits = dataUrlHits(text, depth);
   for (const m of text.matchAll(EMAIL_RE)) {
     if (!isReservedDomain(m[1])) hits.push({ kind: "email", index: m.index });
   }
@@ -190,6 +219,45 @@ function isLocalRequest(raw, allowedHost) {
   return url.host === allowedHost || isUnresolvableHost(url.hostname);
 }
 
+/** The request URL of one `*.network` line; throws when there is none. */
+function requestUrl(line) {
+  const url = JSON.parse(line)?.snapshot?.request?.url;
+  if (typeof url !== "string") throw new Error("no request url");
+  new URL(url);
+  return url;
+}
+
+/**
+ * How many requests in the trace's `*.network` entries went to the allowed host itself
+ * (not a data:/blob:/reserved name): the positive proof a recording shows the local
+ * build. 0 for an archive or line it cannot read — no proof, never an error.
+ * @param {Buffer} buf a trace.zip
+ * @param {string} allowedHost
+ */
+export function localRequestCount(buf, allowedHost) {
+  let entries;
+  try {
+    entries = readZipEntries(buf);
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const { name, data } of entries) {
+    if (!name.endsWith(".network")) continue;
+    for (const line of (decodeText(data) ?? "").split("\n")) {
+      try {
+        const url = new URL(requestUrl(line));
+        if (["http:", "https:", "ws:", "wss:"].includes(url.protocol) && url.host === allowedHost) {
+          count++;
+        }
+      } catch {
+        // not a request line: no proof from it
+      }
+    }
+  }
+  return count;
+}
+
 /**
  * Every request in a `*.network` entry must go to the allowed host — or to a reserved
  * name that cannot resolve (a test fulfils synthetic pages on `http://overlay.test`
@@ -202,9 +270,7 @@ function scanNetwork(text, file, entry, allowedHost) {
     const location = `${entry}:${i + 1}`;
     let url;
     try {
-      url = JSON.parse(line)?.snapshot?.request?.url;
-      if (typeof url !== "string") throw new Error("no request url");
-      new URL(url);
+      url = requestUrl(line);
     } catch {
       // A line we cannot read cannot be shown to be local.
       findings.push({ file, kind: "unreadable", location });

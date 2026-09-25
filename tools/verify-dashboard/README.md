@@ -232,8 +232,14 @@ Hosting). Inputs are synthetic by construction; these checks refuse the whole bu
 - **Network.** Every request in every trace.zip `*.network` log must go to `127.0.0.1`
   (or an RFC 2606 name that cannot resolve, e.g. `overlay.test`, which a test fulfils
   through a route).
+  An empty log proves nothing (a trace recorded without snapshots logs no network), so
+  media also needs positive proof. Every published gating video or still needs its
+  trace to hold at least one request to `127.0.0.1:4173`; without one, a publish is
+  refused. A walkthrough video is only bound when its own trace does; otherwise the card
+  shows no video and says why.
 - **Text scan.** `journey-evidence.json`, `walkthrough-evidence.json`, `results.json`,
-  the rendered `index.html` and every text entry of every trace.zip are scanned for an
+  the rendered `index.html` and every text entry of every trace.zip (including the
+  decoded payload of every base64 `data:` URL) are scanned for an
   email (RFC 2606 domains allowed), an SSN, a US phone number, and an `initials` value
   that is not 2–3 capital letters. There is no name blocklist and no bare-digit
   student-ID pattern (both collide with normal output).

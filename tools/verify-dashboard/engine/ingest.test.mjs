@@ -624,6 +624,11 @@ describe("buildJourneys — walkthrough recording", () => {
           contentType: "video/webm",
           path: "/ci/test-results-walkthrough/j1-walkthrough/video.webm",
         },
+        {
+          name: "trace",
+          contentType: "application/zip",
+          path: "/ci/test-results-walkthrough/j1-walkthrough/trace.zip",
+        },
       ],
       steps: [
         { label: "Open the dashboard", status: "passed", startOffsetMs: 1200, assertions: [] },
@@ -635,6 +640,7 @@ describe("buildJourneys — walkthrough recording", () => {
     evidence: { mode: "walkthrough", commitSha: "deadbeef", tests, ...over },
     run: { ci_run_id: "999", ci_run_url: "https://github.com/o/r/actions/runs/999" },
     resolveAsset: (_raw, kind, id, engine) => `${kind}s/${id}-${engine}.webm`,
+    provesLocal: () => true,
   });
   const build = (wt, evidence = gating) =>
     buildJourneys({
@@ -683,6 +689,29 @@ describe("buildJourneys — walkthrough recording", () => {
     const wt = { ...walkthrough(), resolveAsset: () => null };
     expect(build(wt).video).toBeNull();
     expect(build(walkthrough({}, [walkRecord({ attachments: [] })])).video).toBeNull();
+  });
+
+  it("shows no video when the walkthrough's trace shows no local request — says so", () => {
+    const seen = [];
+    const wt = {
+      ...walkthrough(),
+      provesLocal: (raw) => {
+        seen.push(raw);
+        return false;
+      },
+    };
+    const j1 = build(wt);
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.UNPROVEN);
+    expect(seen).toEqual(["/ci/test-results-walkthrough/j1-walkthrough/trace.zip"]);
+  });
+
+  it("shows no video when the walkthrough recorded no trace", () => {
+    const noTrace = walkRecord();
+    noTrace.attachments = noTrace.attachments.filter((a) => a.name !== "trace");
+    const j1 = build(walkthrough({}, [noTrace]));
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.UNPROVEN);
   });
 
   it("does not show a failed walkthrough under a passing card — says so", () => {
@@ -794,13 +823,23 @@ describe("journeysWithUntracedMedia (a publish needs network proof for gating me
       ...over,
     });
 
-  it("passes a journey whose trace was copied", () => {
-    expect(journeysWithUntracedMedia(build(withStill()))).toEqual([]);
+  const proven = () => true;
+  it("passes a journey whose copied trace shows a local request", () => {
+    expect(journeysWithUntracedMedia(build(withStill()), proven)).toEqual([]);
+  });
+  it("flags a journey whose copied trace shows no local request", () => {
+    const seen = [];
+    const unproven = (url) => {
+      seen.push(url);
+      return false;
+    };
+    expect(journeysWithUntracedMedia(build(withStill()), unproven)).toEqual(["j1"]);
+    expect(seen).toEqual(["trace/J1-chromium.bin".replace("J1", "j1")]);
   });
   it("flags a journey with a video and stills but no trace attachment", () => {
     const rec = withStill();
     rec.attachments = rec.attachments.filter((a) => a.name !== "trace");
-    expect(journeysWithUntracedMedia(build(rec))).toEqual(["j1"]);
+    expect(journeysWithUntracedMedia(build(rec), proven)).toEqual(["j1"]);
   });
   it("flags a journey whose trace could not be served", () => {
     const journeys = buildJourneys({
@@ -811,7 +850,7 @@ describe("journeysWithUntracedMedia (a publish needs network proof for gating me
       resolveAsset: (raw, kind, id, engine, index) =>
         kind === "trace" ? null : echoResolver(raw, kind, id, engine, index),
     });
-    expect(journeysWithUntracedMedia(journeys)).toEqual(["j1"]);
+    expect(journeysWithUntracedMedia(journeys, proven)).toEqual(["j1"]);
   });
   it("passes an UNVERIFIED journey (nothing published)", () => {
     const journeys = buildJourneys({
@@ -821,6 +860,6 @@ describe("journeysWithUntracedMedia (a publish needs network proof for gating me
       provenance: PROVENANCE,
       resolveAsset: echoResolver,
     });
-    expect(journeysWithUntracedMedia(journeys)).toEqual([]);
+    expect(journeysWithUntracedMedia(journeys, proven)).toEqual([]);
   });
 });
