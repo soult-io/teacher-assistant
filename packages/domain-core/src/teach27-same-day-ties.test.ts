@@ -100,6 +100,25 @@ describe("shared oldest-first order", () => {
     const sorted = [later, earlyDay, sameDayFirst].sort(compareArcOldestFirst);
     expect(sorted.map((p) => p.data_point_id)).toEqual([id(2), id(3), id(1)]);
   });
+
+  it("a full date + entry-time tie falls to the id, identically at every site", () => {
+    const g = makeGoal();
+    // Two points share date AND entry time; oldest-first puts the HIGHER id first,
+    // so the lower id (7) is the later one — the last-5 window and the IC week keep it.
+    const low = scored(g, "2026-09-01", 50, 100, id(7));
+    const high = scored(g, "2026-09-01", 0, 100, id(9));
+    const tail = ["2026-09-02", "2026-09-03", "2026-09-04", "2026-09-05"].map((d, i) =>
+      scored(g, d, 100, 200 + i),
+    );
+    expect([low, high].sort(compareArcOldestFirst).map((p) => p.data_point_id)).toEqual([
+      id(9),
+      id(7),
+    ]);
+    // (50 + 100×4) / 5 = 90 — the id-7 point is the 5th-from-last.
+    expect(computeQuarterlySummary(g, [low, high, ...tail]).average).toBe(90);
+    const [card] = buildIcExport([g], [high, low]);
+    expect(card?.weekly[0]?.percent).toBe(50);
+  });
 });
 
 describe("consistency window — same-day grouping", () => {
@@ -165,6 +184,21 @@ describe("consistency window — same-day grouping", () => {
     ]);
     expect(r.run).toBe(4);
     expect(r.met).toBe(true);
+    expect(r.windowMetDate).toBe("2026-09-04");
+  });
+
+  it("a mixed day after the window was met resets run/met but keeps windowMetDate", () => {
+    const g = makeGoal(4);
+    const r = consistencyWindow(g, [
+      scored(g, "2026-09-01", 90, 1),
+      scored(g, "2026-09-02", 90, 2),
+      scored(g, "2026-09-03", 90, 3),
+      scored(g, "2026-09-04", 90, 4),
+      scored(g, "2026-09-05", 90, 5),
+      scored(g, "2026-09-05", 60, 6),
+    ]);
+    expect(r.run).toBe(0);
+    expect(r.met).toBe(false);
     expect(r.windowMetDate).toBe("2026-09-04");
   });
 
