@@ -28,6 +28,13 @@ if (walkthrough && liveBaseUrl) {
   throw new Error("E2E_WALKTHROUGH records the local synthetic build only — unset E2E_BASE_URL");
 }
 
+// On CI every run's evidence (videos, traces, stills) is uploaded to PUBLIC Actions
+// artifacts and may be built into the public dashboard image, so CI only ever tests the
+// local synthetic build. A live URL is for a person running the suite by hand.
+if (process.env.CI && liveBaseUrl) {
+  throw new Error("E2E_BASE_URL is refused on CI — CI tests the local synthetic build only");
+}
+
 /** Walkthrough: pause Playwright adds before every browser action (ms). */
 const WALKTHROUGH_SLOWMO_MS = 300;
 
@@ -68,6 +75,7 @@ const walkthroughConfig = defineConfig<StepStillsOptions>({
         outputFile: "test-results-walkthrough/walkthrough-evidence.json",
         mode: "walkthrough",
         commitSha,
+        baseURL: LOCAL_URL,
       },
     ],
   ],
@@ -94,6 +102,9 @@ const walkthroughConfig = defineConfig<StepStillsOptions>({
   webServer: localServer,
 });
 
+/** The origin the gating run tests; stamped into its evidence. */
+const baseURL = liveBaseUrl ?? LOCAL_URL;
+
 const gatingConfig = defineConfig<StepStillsOptions>({
   testDir: "./tests",
   timeout: 60_000,
@@ -111,14 +122,19 @@ const gatingConfig = defineConfig<StepStillsOptions>({
         ["github"],
         [
           "./reporters/evidence-reporter.ts",
-          { outputFile: "test-results/journey-evidence.json", mode: "gating", commitSha },
+          {
+            outputFile: "test-results/journey-evidence.json",
+            mode: "gating",
+            commitSha,
+            baseURL,
+          },
         ],
         ["json", { outputFile: "test-results/results.json" }],
         ["html", { open: "never" }],
       ]
     : [["list"]],
   use: {
-    baseURL: liveBaseUrl ?? LOCAL_URL,
+    baseURL,
     // Full trace + video on every test: these ARE the journey evidence the
     // dashboard renders, not just failure diagnostics. Screenshots stay
     // failure-only here — the per-step stills come from the journey `step` fixture.

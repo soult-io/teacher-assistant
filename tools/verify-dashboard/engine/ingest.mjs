@@ -3,7 +3,12 @@
 // the manifest decides which tests are journeys, their order, and their display names.
 
 import { basename } from "node:path";
-import { EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V1, EVIDENCE_SCHEMA_V2 } from "./evidence-schema.mjs";
+import {
+  EVIDENCE_SCHEMA,
+  EVIDENCE_SCHEMA_V1,
+  EVIDENCE_SCHEMA_V2,
+  EVIDENCE_SCHEMA_V3,
+} from "./evidence-schema.mjs";
 import {
   assertJourney,
   deriveJourneyStatus,
@@ -16,7 +21,15 @@ import {
 
 // Every schema tag ingest reads: the current one first, then the older ones it still
 // accepts (see evidence-schema.mjs).
-const READABLE_SCHEMAS = [EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V2, EVIDENCE_SCHEMA_V1];
+const READABLE_SCHEMAS = [
+  EVIDENCE_SCHEMA,
+  EVIDENCE_SCHEMA_V3,
+  EVIDENCE_SCHEMA_V2,
+  EVIDENCE_SCHEMA_V1,
+];
+
+// The schemas whose stills carry width/height/truncated.
+const SIZED_SCHEMAS = [EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V3];
 
 // Which browser's step tree + video stand in for the journey. Both browsers run the
 // same steps, so a stable preference keeps the canonical view deterministic.
@@ -49,12 +62,35 @@ export function parseEvidence(text) {
         step.screenshot = null;
         continue;
       }
-      assertStillField(step, test, schema === EVIDENCE_SCHEMA);
+      assertStillField(step, test, SIZED_SCHEMAS.includes(schema));
       // v2 recorded no truncation flag: unknown, never read as "complete".
       if (schema === EVIDENCE_SCHEMA_V2 && step.screenshot) step.screenshot.truncated = null;
     }
   }
   return data;
+}
+
+/**
+ * Was this run of the local synthetic build? The published image and the Actions
+ * artifacts are public, so the dashboard is only built from a run against
+ * `expectedBaseURL`: a run pointed at a live URL could have recorded real student data
+ * into its videos, stills and traces, which no text scan can see.
+ * @param {object} evidence a parsed evidence file
+ * @param {string} expectedBaseURL
+ * @returns {boolean} true when stamped with `expectedBaseURL`; false when the file
+ *   predates the stamp (v1–v3) — the caller decides whether that is fatal
+ * @throws when a stamped file names any other origin, or a v4 file has no stamp
+ */
+export function checkRunOrigin(evidence, expectedBaseURL) {
+  if (evidence.schema !== EVIDENCE_SCHEMA) return false;
+  if (evidence.baseURL !== expectedBaseURL) {
+    // The value is a URL we chose, not student data, but a live origin still never
+    // reaches a public log: say only that it is not the local build.
+    throw new Error(
+      `journey-evidence (${evidence.mode ?? "gating"}) was not recorded against ${expectedBaseURL} — refusing to build the dashboard from it`,
+    );
+  }
+  return true;
 }
 
 /**

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { buildJourneys, parseEvidence, parseWalkthroughEvidence } from "./ingest.mjs";
+import {
+  buildJourneys,
+  checkRunOrigin,
+  parseEvidence,
+  parseWalkthroughEvidence,
+} from "./ingest.mjs";
 import { MEDIA_NOTE } from "./model.mjs";
 
 const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", job: "e2e" };
@@ -728,5 +733,46 @@ describe("buildJourneys — walkthrough recording", () => {
     });
     expect(j1.status).toBe("unverified");
     expect(j1.video).toBeNull();
+  });
+});
+
+describe("checkRunOrigin (the dashboard is built only from the local synthetic build)", () => {
+  const LOCAL = "http://127.0.0.1:4173";
+  const v4 = (over = {}) =>
+    parseEvidence(
+      JSON.stringify({
+        schema: "ta/journey-evidence/4",
+        mode: "gating",
+        baseURL: LOCAL,
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] })],
+        ...over,
+      }),
+    );
+
+  it("parses v4 with sized stills and admits a run of the local build", () => {
+    const ev = v4();
+    expect(ev.tests[0].steps[0].screenshot.truncated).toBe(false);
+    expect(checkRunOrigin(ev, LOCAL)).toBe(true);
+  });
+  it("refuses a v4 run of any other origin, without naming it", () => {
+    const run = () => checkRunOrigin(v4({ baseURL: "https://qa.stabpablo.com" }), LOCAL);
+    expect(run).toThrow(/not recorded against http:\/\/127\.0\.0\.1:4173/);
+    expect(run).not.toThrow(/stabpablo/);
+  });
+  it("refuses a v4 file with no stamp, or a null one (projects disagreed)", () => {
+    expect(() => checkRunOrigin(v4({ baseURL: undefined }), LOCAL)).toThrow(/refusing/);
+    expect(() => checkRunOrigin(v4({ baseURL: null }), LOCAL)).toThrow(/refusing/);
+  });
+  it("reports pre-stamp (v1–v3) evidence as unstamped, for the caller to decide", () => {
+    for (const schema of ["journey-evidence/1", "journey-evidence/2", "journey-evidence/3"]) {
+      expect(checkRunOrigin(parseEvidence(JSON.stringify({ schema, tests: [] })), LOCAL)).toBe(
+        false,
+      );
+    }
+  });
+  it("does not read payroll-app's bare-named tag as ours", () => {
+    expect(() =>
+      parseEvidence(JSON.stringify({ schema: "journey-evidence/4", tests: [] })),
+    ).toThrow(/schema mismatch/);
   });
 });

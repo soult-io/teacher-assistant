@@ -6,9 +6,12 @@ name: verification-dashboard
 # main push's e2e run completes green: the image is built from THAT run's commit and
 # THAT run's evidence and pushed as sha-<that commit> (+ latest while it is main's
 # tip). The deploy stack (nsoult-agentic/stack-lexington-teacher-assistant) pins the
-# image by tag + digest and serves it PRIVATELY on Lexington behind the NPM (Neil's
-# access gate) — replacing the previous public GitHub Pages target. PII-free/
-# synthetic, same as the app images.
+# image by tag + digest and serves the PAGE on Lexington behind the NPM (Neil's
+# access gate) — replacing the previous public GitHub Pages target. The IMAGE is
+# PUBLIC on GHCR (as are this repo and its Actions artifacts): anyone can pull it
+# and read every video, still and trace in it. So the generator refuses to build
+# unless the evidence is from a run of the local synthetic build and the output
+# passes the PII scan (tools/verify-dashboard/engine/pii-scan.mjs).
 
 on:
   pull_request:
