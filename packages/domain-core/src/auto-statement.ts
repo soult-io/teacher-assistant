@@ -313,10 +313,11 @@ export function computeAutoStatement(
       (p.denominator_mismatch === true || isConditionMismatch(p)),
   ).length;
 
-  // Prior reporting period = the QUARTERLY_WINDOW comparable points BEFORE the F4 window.
-  const priorWindow = trendPoints
-    .slice(0, Math.max(0, trendPoints.length - quarterly.n))
-    .slice(-QUARTERLY_WINDOW);
+  // Prior reporting period = the QUARTERLY_WINDOW comparable points before the last
+  // QUARTERLY_WINDOW of trendPoints. Sliced structurally, not derived from quarterly.n:
+  // the F4 window is the tail of the same hard-excluded set, so the two always align
+  // (TEACH-30). Empty when trendPoints has ≤ QUARTERLY_WINDOW points.
+  const priorWindow = trendPoints.slice(-2 * QUARTERLY_WINDOW, -QUARTERLY_WINDOW);
   const priorPeriodAvg =
     priorWindow.length === 0 ? null : round(mean(priorWindow.map((p) => pointValue(goal, p))));
 
