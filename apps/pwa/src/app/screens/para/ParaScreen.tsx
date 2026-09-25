@@ -5,6 +5,7 @@
 // reachable here by construction (the key boundary, not a filter). Every capture lands
 // ⏳ pending in this doc for the teacher to validate.
 
+import type { OpaqueId } from "@teacher-assistant/schema";
 import { useState } from "react";
 import type { ParaDocRecords } from "../../../data/repository.js";
 import type { DocMutator } from "../../../data/session.js";
@@ -12,6 +13,7 @@ import { Avatar } from "../../../design/Avatar.js";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { STATUS_CHIPS } from "../../../design/glyphs.js";
 import { ParaCaptureSheet, type ParaCaptureTarget } from "./ParaCaptureSheet.js";
+import { orderAdministerRows } from "./para-order.js";
 
 export interface ParaScreenProps {
   readonly paraRecords: ParaDocRecords;
@@ -31,6 +33,8 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
   }
 
   const initialsById = new Map(paraRecords.roster.map((r) => [r.studentId, r.initials]));
+  const initialsOf = (studentId: OpaqueId) => initialsById.get(studentId) ?? "??";
+  const administer = orderAdministerRows(paraRecords.administer, initialsOf);
   // A goal already has a para entry awaiting validation (⏳) — its Score is a pending
   // tag instead. Derived from THIS doc: a pending point not yet consumed by a tombstone.
   const consumed = new Set(paraRecords.tombstones.map((t) => t.dataPointId));
@@ -52,11 +56,11 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
       <h1>Your students today</h1>
       <div className="sub">Enter scores; the teacher confirms each one before it counts.</div>
 
-      {paraRecords.administer.length === 0 ? (
+      {administer.length === 0 ? (
         <div className="card">No probes to administer for this class right now.</div>
       ) : (
-        paraRecords.administer.map((row) => {
-          const initials = initialsById.get(row.studentId) ?? "??";
+        administer.map((row) => {
+          const initials = initialsOf(row.studentId);
           const pending = pendingGoalIds.has(row.goalId);
           return (
             <div

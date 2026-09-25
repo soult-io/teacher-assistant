@@ -16,6 +16,7 @@ import type { BaselinePoint, IEPGoal, OpaqueId } from "@teacher-assistant/schema
 import { useState } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import type { DecryptedRecords } from "../../../data/repository.js";
+import { baselinePointsOldestFirst, orderProposedGoals } from "./baseline-order.js";
 
 export interface BaselineScreenProps {
   readonly records: DecryptedRecords;
@@ -223,9 +224,16 @@ export function BaselineScreen(props: BaselineScreenProps) {
     props;
   const [useMedian, setUseMedian] = useState(false);
 
-  const proposed = records.goals.filter((g) => g.status === "proposed");
+  // Display order (TEACH-25): record order is not stable across reseeds.
+  const proposed = orderProposedGoals(
+    records.goals.filter((g) => g.status === "proposed"),
+    {
+      initialsOf: (sid) => initialsById.get(sid) ?? "??",
+      periodLabelOf: periodLabelByStudent,
+    },
+  );
   const pointsByGoal = new Map<string, BaselinePoint[]>();
-  for (const p of records.baselinePoints) {
+  for (const p of baselinePointsOldestFirst(records.baselinePoints)) {
     const bucket = pointsByGoal.get(p.goal_id) ?? [];
     bucket.push(p);
     pointsByGoal.set(p.goal_id, bucket);

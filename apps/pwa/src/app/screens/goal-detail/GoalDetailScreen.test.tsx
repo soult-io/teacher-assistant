@@ -1,4 +1,9 @@
-import { asTimestamp, type IEPGoal, newOpaqueId } from "@teacher-assistant/schema";
+import {
+  asTimestamp,
+  type IEPGoal,
+  newOpaqueId,
+  type ProgressDataPoint,
+} from "@teacher-assistant/schema";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { buildSyntheticSeed } from "../../../data/synthetic-seed.js";
@@ -119,6 +124,56 @@ describe("GoalDetailScreen (U4)", () => {
     renderDetail("Scientific notation");
     const glance = screen.getByTestId("consistency-window");
     expect(glance.querySelector(".win-off")).not.toBeNull();
+  });
+
+  it("TEACH-25: ARC history lists same-day points by entry time, independent of record order", () => {
+    const records = buildSyntheticSeed(NOW).master;
+    const goal = records.goals.find((g) => g.goal_text === "Add integers");
+    const base = records.points.find((p) => p.goal_id === goal?.goal_id && p.state === "scored");
+    if (goal === undefined || base === undefined) {
+      throw new Error("expected a scored Add integers point");
+    }
+    // Three same-day points with random ids: the ruled order shows the newest entry
+    // (3/10) first whatever the ids or the record order.
+    const sameDay = [1, 2, 3].map(
+      (n): ProgressDataPoint => ({
+        ...base,
+        data_point_id: newOpaqueId(),
+        admin_date: "2099-01-01" as typeof base.admin_date,
+        entry_ts: asTimestamp(n * 86_400_000),
+        numerator: n,
+        denominator_used: 10,
+      }),
+    );
+    const firstRows = (points: typeof records.points) => {
+      const view = render(
+        <GoalDetailScreen
+          goal={goal}
+          points={points}
+          observations={[]}
+          initials="AB"
+          periodLabel="P2"
+          probeLabel="5-item probe"
+          isNonInstructional={() => false}
+          onBack={vi.fn()}
+          onAddPoint={vi.fn()}
+          onEditPoint={vi.fn()}
+          onAckMastery={vi.fn()}
+        />,
+      );
+      const rows = within(view.container.querySelector("tbody") as HTMLElement)
+        .getAllByRole("row")
+        .slice(0, 3)
+        .map((r) => r.querySelectorAll("td")[2]?.textContent);
+      view.unmount();
+      return rows;
+    };
+    expect(firstRows([...records.points, ...sameDay])).toEqual(["3/10", "2/10", "1/10"]);
+    expect(firstRows([...sameDay].reverse().concat(records.points))).toEqual([
+      "3/10",
+      "2/10",
+      "1/10",
+    ]);
   });
 
   it("DF-2: the ARC history table carries the Setting column", () => {

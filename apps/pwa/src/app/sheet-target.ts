@@ -4,7 +4,7 @@
 // the To-Score queue, keeping the collected admin date + the existing point).
 
 import type { IEPGoal, IsoDate, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
-import type { Lookups, RowVM } from "./screens/dashboard/dashboard-vm.js";
+import { type Lookups, periodLabelOf, type RowVM } from "./screens/dashboard/dashboard-vm.js";
 
 export interface SheetTarget {
   readonly goalId: OpaqueId;
@@ -28,11 +28,6 @@ export interface SheetTarget {
 
 function probeOf(goalId: OpaqueId, lk: Lookups): { label: string; expectedDenominator: number } {
   return lk.probeByGoal.get(goalId) ?? { label: "probe", expectedDenominator: 5 };
-}
-
-function periodLabelOf(studentId: OpaqueId, lk: Lookups): string | null {
-  const periodId = lk.periodByStudent(studentId);
-  return periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
 }
 
 /** Sheet target for scoring a dashboard row directly, dated to `adminDate` (today). */
