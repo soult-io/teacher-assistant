@@ -12,7 +12,7 @@ import type {
   ProgressDataPoint,
   Revision,
 } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcOldestFirst } from "./comparators.js";
 import {
   type ConsistencyResult,
   consistencyWindow,
@@ -26,29 +26,6 @@ import {
   type QuarterlySummary,
 } from "./quarterly.js";
 import { computeValue } from "./value.js";
-
-type ArcOrdered = Pick<ProgressDataPoint, "admin_date" | "entry_ts" | "data_point_id">;
-
-/**
- * The ARC-history order (TEACH-25): admin date newest first, then entry time
- * newest first, then the point id. The chart plots in the exact reverse
- * (`compareArcOldestFirst`), so same-day points read in matching order in both.
- */
-export function compareArcNewestFirst(a: ArcOrdered, b: ArcOrdered): number {
-  return (
-    compareCodePoints(b.admin_date, a.admin_date) ||
-    b.entry_ts - a.entry_ts ||
-    compareCodePoints(a.data_point_id, b.data_point_id)
-  );
-}
-
-/**
- * Oldest-first plot order: the exact reverse of compareArcNewestFirst (so a full
- * date + entry-time tie comes out with the point id DESCENDING).
- */
-export function compareArcOldestFirst(a: ArcOrdered, b: ArcOrdered): number {
-  return compareArcNewestFirst(b, a);
-}
 
 export interface TrendPoint {
   /** The source point's opaque id — a stable identity for rendering (unique React key). */

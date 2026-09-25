@@ -17,7 +17,7 @@
 // and on-track is a defensible PROJECTION, not a guarantee.
 
 import type { IEPGoal, IsoDate, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcOldestFirst } from "./comparators.js";
 import { isIcExportable } from "./ic-export.js";
 import { instructionalWeekCount } from "./instructional-weeks.js";
 import { clampAfterFromRevisions, computeQuarterlySummary, QUARTERLY_WINDOW } from "./quarterly.js";
@@ -266,9 +266,6 @@ export function computeAutoStatement(
   const clampAfter = clampAfterFromRevisions(goal);
   const inClamp = (p: ProgressDataPoint): boolean =>
     clampAfter === undefined || p.admin_date >= clampAfter;
-  const order = (a: ProgressDataPoint, b: ProgressDataPoint): number =>
-    compareCodePoints(a.admin_date, b.admin_date) ||
-    compareCodePoints(a.data_point_id, b.data_point_id);
 
   const isConditionMismatch = (p: ProgressDataPoint): boolean =>
     options.expectedConditionId !== undefined &&
@@ -300,11 +297,12 @@ export function computeAutoStatement(
       : `${quarterly.dateRange.start} to ${quarterly.dateRange.end}`;
 
   // The trend/gate + prior-period dataset: the F4-comparable points (clamped, scored,
-  // denominator- and condition-comparable) in admin-date order — the same list F4 draws
-  // its most-recent window from, so the prior period is the window just before it.
+  // denominator- and condition-comparable) in the shared oldest-first order — the same
+  // order F4 draws its most-recent window from, so the prior period is the window just
+  // before it and the four-point tail ends on the last-entered point (TEACH-27).
   const trendPoints = conditionOk
     .filter((p) => p.state === "scored" && inClamp(p) && p.denominator_mismatch !== true)
-    .sort(order);
+    .sort(compareArcOldestFirst);
 
   // Mismatches (scored, in clamp) excluded for denominator OR condition — surfaced, not silently dropped.
   const excludedMismatches = points.filter(

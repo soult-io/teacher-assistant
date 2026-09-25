@@ -1,11 +1,15 @@
 // M5 — consistency window + mastery observation (design §A.3, §B "mastery
-// framing"). "Consecutive" means consecutive SCORED PROBES in admin-date order,
-// never weeks: a ⊘ (no-data) PAUSES the run (it is simply not a scored probe, so
-// it neither counts nor resets); a denominator-mismatched point is EXCLUDED from
-// the window unless the teacher elects it "counted" (F-2, flagged off-basis), and
-// a criterion/denominator-model change CLAMPS the run first (hard, non-electable).
-// Mastery is only OBSERVED here — the window being met
-// flags a candidate for the ARC; the app never closes/retires the goal.
+// framing"). "Consecutive" means consecutive SCORED PROBES in the shared
+// oldest-first order (admin date, then entry time — compareArcOldestFirst), never
+// weeks. Same-day probes are one group (TEACH-27): a day adds its whole count only
+// when EVERY probe that day meets criterion; one below-criterion probe that day
+// resets the run, whichever was entered first. A ⊘ (no-data) PAUSES the run (it
+// is simply not a scored probe, so it neither counts nor resets); a
+// denominator-mismatched point is EXCLUDED from the window unless the teacher
+// elects it "counted" (F-2, flagged off-basis), and a criterion/denominator-model
+// change CLAMPS the run first (hard, non-electable). Mastery is only OBSERVED
+// here — the window being met flags a candidate for the ARC; the app never
+// closes/retires the goal.
 
 import type {
   IEPGoal,
@@ -15,7 +19,7 @@ import type {
   ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { newOpaqueId } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcOldestFirst } from "./comparators.js";
 import { inComputedMath, isCountedOffBasis, isUnresolvedMismatch } from "./mismatch.js";
 import { clampAfterFromRevisions } from "./quarterly.js";
 import { percentCorrect } from "./value.js";
@@ -34,6 +38,11 @@ export interface ConsistencyGlyph {
   readonly meets: boolean;
   /** A teacher-counted off-basis (denominator-mismatch) probe — flagged like the chart ring. */
   readonly offBasis: boolean;
+  /**
+   * This probe's admin date has both a met and a not-met probe in the window (so
+   * the whole day reset the run). Data only — the UI does not render it yet.
+   */
+  readonly sameDayMixed: boolean;
 }
 
 export interface ConsistencyResult {
@@ -66,7 +75,8 @@ export interface ConsistencyResult {
 }
 
 /**
- * Scored points for a goal that participate in the window, in admin-date order:
+ * Scored points for a goal that participate in the window, in the shared
+ * oldest-first order (admin date, then entry time, then id):
  * CLAMPED FIRST at a criterion/denominator-model change (hard, non-electable),
  * then a mismatched point is kept only if the teacher elected it "counted"
  * (`inComputedMath`). A ⊘ never appears here (only scored probes).
@@ -84,7 +94,32 @@ function scoredProbesInOrder(
         (clampAfter === undefined || p.admin_date >= clampAfter) &&
         inComputedMath(p),
     )
-    .sort((a, b) => compareCodePoints(a.admin_date, b.admin_date));
+    .sort(compareArcOldestFirst);
+}
+
+/** One admin date's scored probes: how many there are and how many meet criterion. */
+interface ProbeDay {
+  readonly date: IsoDate;
+  readonly count: number;
+  readonly meets: number;
+}
+
+/** Collapse oldest-first probes into consecutive admin-date groups (the run's unit). */
+function groupByAdminDate(
+  probes: readonly ProgressDataPoint[],
+  meets: (p: ProgressDataPoint) => boolean,
+): ProbeDay[] {
+  const days: ProbeDay[] = [];
+  for (const p of probes) {
+    const last = days[days.length - 1];
+    const hit = meets(p) ? 1 : 0;
+    if (last !== undefined && last.date === p.admin_date) {
+      days[days.length - 1] = { date: last.date, count: last.count + 1, meets: last.meets + hit };
+    } else {
+      days.push({ date: p.admin_date, count: 1, meets: hit });
+    }
+  }
+  return days;
 }
 
 // MVP is %-only (design C1); the consistency window compares each probe's percent
@@ -95,9 +130,11 @@ function meetsCriterion(goal: IEPGoal, p: ProgressDataPoint): boolean {
 
 /**
  * The consistency window for a goal: the current consecutive run of scored probes
- * meeting the criterion level, in admin-date order. A ⊘ never appears here (only
- * scored probes), so it pauses rather than breaks; a below-criterion scored probe
- * resets the run; mismatched points are excluded (and counted).
+ * meeting the criterion level, grouped by admin date. A day whose probes ALL meet
+ * criterion adds its count; a day with ANY below-criterion probe resets the run to
+ * 0 (its passing probes do not start a new run). A ⊘ never appears here (only
+ * scored probes), so it pauses rather than breaks; mismatched points are excluded
+ * (and counted).
  */
 export function consistencyWindow(
   goal: IEPGoal,
@@ -121,6 +158,10 @@ export function consistencyWindow(
   // Clamp FIRST (hard, non-electable), then the disposition decides survivors.
   const clampAfter = clampAfterFromRevisions(goal);
   const probes = scoredProbesInOrder(goal, points, clampAfter);
+  const days = groupByAdminDate(probes, (p) => meetsCriterion(goal, p));
+  const mixedDays = new Set(
+    days.filter((d) => d.meets > 0 && d.meets < d.count).map((d) => d.date),
+  );
   // The glance: the trailing `required` probes of exactly this clamped window, each
   // engine-classified. The UI paints these — it never slices the raw trend or
   // re-tests the criterion (which would blend across the clamp boundary, R3 DM-1).
@@ -130,6 +171,7 @@ export function consistencyWindow(
       dataPointId: p.data_point_id,
       meets: meetsCriterion(goal, p),
       offBasis: isCountedOffBasis(p),
+      sameDayMixed: mixedDays.has(p.admin_date),
     }));
   // Mismatch counts are scoped to the clamped region (a mismatched point before
   // the model-change boundary is dropped by the clamp, not surfaced here).
@@ -147,10 +189,10 @@ export function consistencyWindow(
 
   let run = 0;
   let windowMetDate: ProgressDataPoint["admin_date"] | undefined;
-  for (const p of probes) {
-    run = meetsCriterion(goal, p) ? run + 1 : 0;
+  for (const day of days) {
+    run = day.meets === day.count ? run + day.count : 0;
     if (run >= required && windowMetDate === undefined) {
-      windowMetDate = p.admin_date; // first time the window was satisfied
+      windowMetDate = day.date; // first day the window was satisfied
     }
   }
 
