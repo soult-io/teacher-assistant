@@ -127,9 +127,15 @@ const WALKTHROUGH_OUTPUT_DIR = "test-results-walkthrough";
 function traceProvesLocal(path) {
   if (!path || !existsSync(path)) return false;
   const buf = readFileSync(path);
-  return (
-    scanTraceZip(buf, path, ALLOWED_HOST).length === 0 && localRequestCount(buf, ALLOWED_HOST) > 0
-  );
+  const findings = scanTraceZip(buf, path, ALLOWED_HOST);
+  if (findings.length > 0) {
+    // Why the card says UNPROVEN: the count only — never a value (the log is public).
+    console.warn(
+      `  trace ${basename(dirname(path))}/${basename(path)} has ${findings.length} scan finding(s) — no proof`,
+    );
+    return false;
+  }
+  return localRequestCount(buf, ALLOWED_HOST) > 0;
 }
 
 /** The walkthrough evidence path, or null when none was given — ingest and the output
