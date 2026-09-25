@@ -145,6 +145,21 @@ function locateSource(rawPath, artifactRoot, outputDir) {
 }
 
 /**
+ * Where an evidence attachment path is on disk, confined to the artifact tree like a
+ * served asset — for a file that is read but never served (the walkthrough trace).
+ * @param {string} evidenceFile the evidence file; its directory is the artifact root
+ * @param {{outputDir?: string}} [opts] see makeAssetResolver
+ * @returns {(rawPath: string) => (string|null)} null = outside the tree or missing
+ */
+export function makeSourceLocator(evidenceFile, { outputDir = "test-results" } = {}) {
+  const artifactRoot = resolve(dirname(evidenceFile));
+  return (rawPath) => {
+    const src = locateSource(rawPath, artifactRoot, outputDir);
+    return src && existsSync(src) ? src : null;
+  };
+}
+
+/**
  * @param {string} evidenceFile the journey-evidence.json path; its directory is the artifact root
  * @param {string} outDir the dashboard output directory
  * @param {{budget?: ReturnType<typeof createByteBudget>, outputDir?: string}} [opts]

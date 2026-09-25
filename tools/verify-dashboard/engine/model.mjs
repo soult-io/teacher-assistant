@@ -23,6 +23,7 @@ export const MEDIA_NOTE = Object.freeze({
   NONE: "no walkthrough recorded for this commit",
   FAILED: "the walkthrough recording failed for this commit — not shown",
   DIFFERS: "the walkthrough does not match this run's result or steps — not shown",
+  UNPROVEN: "the walkthrough's trace does not show it recorded the local test build — not shown",
 });
 
 // A journey can only render a green PASS badge from a REAL, verified run. UNVERIFIED

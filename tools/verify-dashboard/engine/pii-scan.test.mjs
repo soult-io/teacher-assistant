@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { formatFindings, scanBuild, scanText, scanTraceZip } from "./pii-scan.mjs";
+import {
+  formatFindings,
+  localRequestCount,
+  scanBuild,
+  scanText,
+  scanTraceZip,
+} from "./pii-scan.mjs";
 import { makeZip } from "./test-zip.mjs";
 import { readZipEntries } from "./zip.mjs";
 
@@ -98,7 +104,7 @@ describe("scanTraceZip", () => {
       "0-trace.network": [
         request("http://127.0.0.1:4173/"),
         request("http://127.0.0.1:4173/assets/index.js"),
-        request("data:image/png;base64,AAAA"),
+        request("data:image/png;base64,iVBORw0KGgoA"),
         request("blob:http://127.0.0.1:4173/5d1c"),
         request("http://overlay.test/a"),
       ].join("\n"),
@@ -266,5 +272,55 @@ describe("scanBuild", () => {
     for (const value of [EMAIL, SSN, "ABCD", PHONE, "jane.doe"]) {
       expect(log).not.toContain(value);
     }
+  });
+});
+
+describe("scanText — base64 data: URLs", () => {
+  const b64 = (v) => Buffer.from(v).toString("base64");
+  it("finds a value inside a base64 data: URL, at the URL", () => {
+    const text = `<img src="data:text/plain;base64,${b64(`mail ${EMAIL}`)}">`;
+    expect(scanText(text, "snap.html")).toEqual([
+      { file: "snap.html", kind: "email", location: "1:11" },
+    ]);
+  });
+  it("finds a value in a data: URL nested inside one", () => {
+    const inner = `data:text/plain;charset=utf-8;base64,${b64(SSN)}`;
+    expect(kinds(scanText(`url(data:text/css;base64,${b64(inner)})`, "a.css"))).toEqual(["ssn"]);
+  });
+  it("passes an inline image or font, refuses binary it cannot identify", () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0]);
+    const woff2 = Buffer.from([...Buffer.from("wOF2"), 0]);
+    const text = [
+      `data:image/png;base64,${png.toString("base64")}`,
+      `data:font/woff2;base64,${woff2.toString("base64")}`,
+      `data:application/octet-stream;base64,${Buffer.from([0x1f, 0x8b, 0]).toString("base64")}`,
+    ].join("\n");
+    expect(scanText(text, "t")).toEqual([{ file: "t", kind: "unreadable", location: "3:1" }]);
+  });
+  it("never logs the decoded value", () => {
+    const log = formatFindings(scanText(`data:text/plain;base64,${b64(EMAIL)}`, "t"));
+    expect(log).not.toContain(EMAIL);
+  });
+});
+
+describe("localRequestCount (positive network proof of the local build)", () => {
+  const HOST = "127.0.0.1:4173";
+  it("counts only requests to the allowed host itself", () => {
+    const zip = makeZip({
+      "0-trace.network": "",
+      "1-trace.network": [
+        request("http://127.0.0.1:4173/"),
+        request("http://127.0.0.1:4173/assets/index.js"),
+        request("data:image/png;base64,iVBORw0KGgoA"),
+        request("http://overlay.test/a"),
+        request("http://127.0.0.1:8080/"),
+      ].join("\n"),
+    });
+    expect(localRequestCount(zip, HOST)).toBe(2);
+  });
+  it("is 0 for empty logs (a trace recorded without snapshots) and unreadable input", () => {
+    expect(localRequestCount(makeZip({ "0-trace.network": "" }), HOST)).toBe(0);
+    expect(localRequestCount(makeZip({ "0-trace.network": "{not json" }), HOST)).toBe(0);
+    expect(localRequestCount(Buffer.from("not a zip"), HOST)).toBe(0);
   });
 });

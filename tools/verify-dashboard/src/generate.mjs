@@ -35,7 +35,7 @@ import {
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createByteBudget, makeAssetResolver } from "../engine/assets.mjs";
+import { createByteBudget, makeAssetResolver, makeSourceLocator } from "../engine/assets.mjs";
 import { collectCiPills } from "../engine/ci-status.mjs";
 import { collectPackageCounts, deriveE2eCount } from "../engine/counts.mjs";
 import {
@@ -45,7 +45,7 @@ import {
   parseEvidence,
   parseWalkthroughEvidence,
 } from "../engine/ingest.mjs";
-import { formatFindings, scanBuild } from "../engine/pii-scan.mjs";
+import { formatFindings, localRequestCount, scanBuild } from "../engine/pii-scan.mjs";
 import { buildRunProvenance, sha256Hex } from "../engine/provenance.mjs";
 import {
   aggregate,
@@ -115,6 +115,13 @@ function readEvidenceBytes(evidenceFile, absentMeans = "every journey renders UN
 
 const publishing = () => process.env.PUBLISH === "true";
 
+/** Did the trace at this path log at least one request to the local build? A missing or
+ * unreadable file is no proof. */
+function traceProvesLocal(path) {
+  if (!path || !existsSync(path)) return false;
+  return localRequestCount(readFileSync(path), new URL(config.evidenceBaseURL).host) > 0;
+}
+
 /** The walkthrough evidence path, or null when none was given — ingest and the output
  * scan both read it here, so they can never pick different files. */
 function walkthroughEvidenceFile() {
@@ -163,6 +170,9 @@ function loadWalkthrough(outDir, budget) {
       budget,
       outputDir: "test-results-walkthrough",
     }),
+    // Its trace is read for the network proof, never served.
+    provesLocal: (rawPath) =>
+      traceProvesLocal(makeSourceLocator(path, { outputDir: "test-results-walkthrough" })(rawPath)),
   };
 }
 
@@ -184,10 +194,12 @@ function ingestJourneys(evidenceFile, outDir) {
     resolveAsset: makeAssetResolver(evidenceFile, outDir, { budget }),
     walkthrough: loadWalkthrough(outDir, budget),
   });
-  const untraced = journeysWithUntracedMedia(journeys);
+  const untraced = journeysWithUntracedMedia(journeys, (url) =>
+    traceProvesLocal(join(outDir, url)),
+  );
   if (publishing() && untraced.length > 0) {
     throw new Error(
-      `journeys ${untraced.join(", ")} publish media with no trace — no network proof, refusing to publish`,
+      `journeys ${untraced.join(", ")} publish media with no trace showing a local request — no network proof, refusing to publish`,
     );
   }
   const withVideo = journeys.filter((j) => j.video).length;
