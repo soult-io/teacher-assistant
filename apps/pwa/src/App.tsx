@@ -40,7 +40,11 @@ import { ParaScreen } from "./app/screens/para/ParaScreen.js";
 import { ValidationQueueScreen } from "./app/screens/para/ValidationQueueScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
 import { ToScoreScreen } from "./app/screens/ToScoreScreen.js";
-import { buildLookups, orderValidationQueue } from "./app/screens/dashboard/dashboard-vm.js";
+import {
+  buildLookups,
+  orderValidationQueue,
+  periodLabelOf,
+} from "./app/screens/dashboard/dashboard-vm.js";
 import { type SheetTarget, targetForGoal, targetForQueued } from "./app/sheet-target.js";
 import { useOnline } from "./app/useOnline.js";
 import { useSessionRecords } from "./app/useSessionRecords.js";
@@ -388,10 +392,7 @@ function ReadyApp({
   // Period label for one student (baseline track needs it per-row); hoisted out of
   // the track cascade so each branch below is a flat return with no nested ternary.
   const periodLabelByStudent = useCallback(
-    (sid: OpaqueId): string | null => {
-      const pid = lk.periodByStudent(sid);
-      return pid !== null ? (lk.periodLabelById.get(pid) ?? null) : null;
-    },
+    (sid: OpaqueId): string | null => periodLabelOf(sid, lk),
     [lk],
   );
 

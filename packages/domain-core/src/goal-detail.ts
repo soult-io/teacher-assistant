@@ -32,7 +32,7 @@ type ArcOrdered = Pick<ProgressDataPoint, "admin_date" | "entry_ts" | "data_poin
 /**
  * The ARC-history order (TEACH-25): admin date newest first, then entry time
  * newest first, then the point id. The chart plots in the exact reverse
- * (`arcChronological`), so same-day points read in matching order in both.
+ * (`compareArcOldestFirst`), so same-day points read in matching order in both.
  */
 export function compareArcNewestFirst(a: ArcOrdered, b: ArcOrdered): number {
   return (
@@ -42,8 +42,11 @@ export function compareArcNewestFirst(a: ArcOrdered, b: ArcOrdered): number {
   );
 }
 
-/** Oldest-first plot order: the exact reverse of compareArcNewestFirst. */
-function arcChronological(a: ArcOrdered, b: ArcOrdered): number {
+/**
+ * Oldest-first plot order: the exact reverse of compareArcNewestFirst (so a full
+ * date + entry-time tie comes out with the point id DESCENDING).
+ */
+export function compareArcOldestFirst(a: ArcOrdered, b: ArcOrdered): number {
   return compareArcNewestFirst(b, a);
 }
 
@@ -127,7 +130,7 @@ function tallyNoData(points: readonly ProgressDataPoint[]): NoDataTally {
   let excusedCount = 0;
   let behaviorCount = 0;
   const markers: NoDataMarker[] = [];
-  for (const p of [...points].sort(arcChronological)) {
+  for (const p of [...points].sort(compareArcOldestFirst)) {
     if (p.state !== "no_data" || p.no_data_reason === undefined) {
       continue;
     }
@@ -151,7 +154,7 @@ function buildTrend(goal: IEPGoal, points: readonly ProgressDataPoint[]): TrendP
       // Plot the points that participate: non-mismatched, or teacher-counted. An
       // excluded/pending mismatched point is never plotted (it stays in history).
       .filter((p) => p.state === "scored" && inComputedMath(p))
-      .sort(arcChronological)
+      .sort(compareArcOldestFirst)
       .map((p) => {
         const computed = computeValue(
           goal.denominator_model,

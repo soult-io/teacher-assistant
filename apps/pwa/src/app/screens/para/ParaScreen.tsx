@@ -5,7 +5,6 @@
 // reachable here by construction (the key boundary, not a filter). Every capture lands
 // ⏳ pending in this doc for the teacher to validate.
 
-import { compareCodePoints } from "@teacher-assistant/domain-core";
 import type { OpaqueId } from "@teacher-assistant/schema";
 import { useState } from "react";
 import type { ParaDocRecords } from "../../../data/repository.js";
@@ -13,8 +12,8 @@ import type { DocMutator } from "../../../data/session.js";
 import { Avatar } from "../../../design/Avatar.js";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { STATUS_CHIPS } from "../../../design/glyphs.js";
-import { compareDisplayText, compareNumberAware } from "../../display-order.js";
 import { ParaCaptureSheet, type ParaCaptureTarget } from "./ParaCaptureSheet.js";
+import { orderAdministerRows } from "./para-order.js";
 
 export interface ParaScreenProps {
   readonly paraRecords: ParaDocRecords;
@@ -35,17 +34,7 @@ export function ParaScreen({ paraRecords, now, capturePara }: ParaScreenProps) {
 
   const initialsById = new Map(paraRecords.roster.map((r) => [r.studentId, r.initials]));
   const initialsOf = (studentId: OpaqueId) => initialsById.get(studentId) ?? "??";
-  // Display order (TEACH-25): the projection orders by opaque studentId; show
-  // students by initials, then studentId, then the administer label number-aware
-  // ("Probe 2" before "Probe 10"), with the opaque ids only for true duplicates.
-  const administer = [...paraRecords.administer].sort(
-    (a, b) =>
-      compareDisplayText(initialsOf(a.studentId), initialsOf(b.studentId)) ||
-      compareCodePoints(a.studentId, b.studentId) ||
-      compareNumberAware(a.administerLabel, b.administerLabel) ||
-      compareCodePoints(a.goalId, b.goalId) ||
-      compareCodePoints(a.probeDefinitionId, b.probeDefinitionId),
-  );
+  const administer = orderAdministerRows(paraRecords.administer, initialsOf);
   // A goal already has a para entry awaiting validation (⏳) — its Score is a pending
   // tag instead. Derived from THIS doc: a pending point not yet consumed by a tombstone.
   const consumed = new Set(paraRecords.tombstones.map((t) => t.dataPointId));

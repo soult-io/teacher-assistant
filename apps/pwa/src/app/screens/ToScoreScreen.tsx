@@ -7,7 +7,7 @@ import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { buildToScoreQueue } from "@teacher-assistant/store";
 import { Avatar } from "../../design/Avatar.js";
 import type { DecryptedRecords } from "../../data/repository.js";
-import { type Lookups, orderToScoreQueue } from "./dashboard/dashboard-vm.js";
+import { type Lookups, orderToScoreQueue, periodLabelOf } from "./dashboard/dashboard-vm.js";
 
 export interface ToScoreScreenProps {
   readonly records: DecryptedRecords;
@@ -45,8 +45,7 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
           const initials = lk.initialsById.get(entry.studentId) ?? "??";
           const goalText = lk.goalTextById.get(entry.goalId) ?? "(goal)";
           // §E.1: the period tag stays on the queue row (the Quick-Score header shows it too).
-          const periodId = lk.periodByStudent(entry.studentId);
-          const periodLabel = periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
+          const periodLabel = periodLabelOf(entry.studentId, lk);
           return (
             <button
               key={entry.dataPointId}

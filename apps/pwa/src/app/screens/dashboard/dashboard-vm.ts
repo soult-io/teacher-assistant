@@ -7,7 +7,7 @@
 // orders rows and GROUPS for display with the shared display-order comparators
 // (TEACH-25) — presentation sequencing of engine-grouped data.
 
-import { compareArcNewestFirst, compareCodePoints } from "@teacher-assistant/domain-core";
+import { compareArcOldestFirst, compareCodePoints } from "@teacher-assistant/domain-core";
 import type { NoDataReason, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
 import type {
   DashboardGroup,
@@ -21,7 +21,8 @@ import {
   compareOptionalText,
   compareStudentGoal,
   compareDisplayText,
-  type StudentGoalSortKey,
+  type StudentResolvers,
+  studentGoalKey,
 } from "../../display-order.js";
 
 /** Goal-definition display fields shown in the owes-row meta (from the goal entity). */
@@ -141,7 +142,7 @@ export function buildLookups(
  * record order (TEACH-25).
  */
 export function oldestFirst(points: readonly ProgressDataPoint[]): ProgressDataPoint[] {
-  return [...points].sort((a, b) => compareArcNewestFirst(b, a));
+  return [...points].sort(compareArcOldestFirst);
 }
 
 export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {
@@ -176,19 +177,29 @@ export function orderRowsByStudent(rows: readonly RowVM[]): RowVM[] {
   );
 }
 
-/** The on-screen sort key of a student's goal, resolved from the lookups (as toRowVM shows it). */
-export function studentGoalKey(
-  studentId: OpaqueId,
-  goalId: OpaqueId,
-  lk: Lookups,
-): StudentGoalSortKey {
+/** A student's period label (their first membership), or null when unassigned. */
+export function periodLabelOf(studentId: OpaqueId, lk: Lookups): string | null {
   const periodId = lk.periodByStudent(studentId);
+  return periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
+}
+
+/** The display resolvers for the shared student-goal key, off the lookups. */
+function resolversOf(lk: Lookups): StudentResolvers {
   return {
-    initials: lk.initialsById.get(studentId) ?? "??",
-    periodLabel: periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null,
-    studentId,
-    goalText: lk.goalTextById.get(goalId) ?? "(goal)",
+    initialsOf: (studentId) => lk.initialsById.get(studentId) ?? "??",
+    periodLabelOf: (studentId) => periodLabelOf(studentId, lk),
   };
+}
+
+/** Compare two {studentId, goalId} entries by the shared student-goal order. */
+function byStudentGoal(lk: Lookups) {
+  const r = resolversOf(lk);
+  const key = (studentId: OpaqueId, goalId: OpaqueId) =>
+    studentGoalKey(studentId, lk.goalTextById.get(goalId) ?? "(goal)", r);
+  return (
+    a: { readonly studentId: OpaqueId; readonly goalId: OpaqueId },
+    b: { readonly studentId: OpaqueId; readonly goalId: OpaqueId },
+  ) => compareStudentGoal(key(a.studentId, a.goalId), key(b.studentId, b.goalId));
 }
 
 /**
@@ -197,33 +208,30 @@ export function studentGoalKey(
  * The store's buildToScoreQueue keeps record order, which is not stable.
  */
 export function orderToScoreQueue(queue: readonly QueueEntry[], lk: Lookups): QueueEntry[] {
+  const studentGoal = byStudentGoal(lk);
   return [...queue].sort(
     (a, b) =>
-      compareStudentGoal(
-        studentGoalKey(a.studentId, a.goalId, lk),
-        studentGoalKey(b.studentId, b.goalId, lk),
-      ) ||
+      studentGoal(a, b) ||
       compareCodePoints(a.adminDate, b.adminDate) ||
       compareCodePoints(a.dataPointId, b.dataPointId),
   );
 }
 
 /**
- * The para-validation queue in display order: admin date first (the confirm
- * batch stays chronological, as orderPendingForValidation), then the
- * student-goal order, then entry time, then the point id for true duplicates.
+ * The para-validation queue in display order: admin date first (like
+ * orderPendingForValidation's batch order), then the student-goal order, then
+ * entry time, then the point id for true duplicates.
  */
 export function orderValidationQueue(
   queue: readonly ProgressDataPoint[],
   lk: Lookups,
 ): ProgressDataPoint[] {
+  const studentGoal = byStudentGoal(lk);
+  const ids = (p: ProgressDataPoint) => ({ studentId: p.student_id, goalId: p.goal_id });
   return [...queue].sort(
     (a, b) =>
       compareCodePoints(a.admin_date, b.admin_date) ||
-      compareStudentGoal(
-        studentGoalKey(a.student_id, a.goal_id, lk),
-        studentGoalKey(b.student_id, b.goal_id, lk),
-      ) ||
+      studentGoal(ids(a), ids(b)) ||
       a.entry_ts - b.entry_ts ||
       compareCodePoints(a.data_point_id, b.data_point_id),
   );

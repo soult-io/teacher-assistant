@@ -9,7 +9,6 @@ import {
   type ArcDateAlert,
   type BaselineMethod,
   canAdopt,
-  compareCodePoints,
   computeBaselineWindowStart,
   deriveBaseline,
 } from "@teacher-assistant/domain-core";
@@ -17,7 +16,7 @@ import type { BaselinePoint, IEPGoal, OpaqueId } from "@teacher-assistant/schema
 import { useState } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import type { DecryptedRecords } from "../../../data/repository.js";
-import { compareStudentGoal } from "../../display-order.js";
+import { baselinePointsOldestFirst, orderProposedGoals } from "./baseline-order.js";
 
 export interface BaselineScreenProps {
   readonly records: DecryptedRecords;
@@ -225,28 +224,16 @@ export function BaselineScreen(props: BaselineScreenProps) {
     props;
   const [useMedian, setUseMedian] = useState(false);
 
-  // Display order (TEACH-25): the shared student-goal order, goalId only for true
-  // duplicates; a card's point chips read oldest first. Record order is not stable.
-  const sortKey = (g: IEPGoal) => ({
-    initials: initialsById.get(g.student_id) ?? "??",
-    periodLabel: periodLabelByStudent(g.student_id),
-    studentId: g.student_id,
-    goalText: g.goal_text,
-  });
-  const proposed = records.goals
-    .filter((g) => g.status === "proposed")
-    .sort(
-      (a, b) =>
-        compareStudentGoal(sortKey(a), sortKey(b)) || compareCodePoints(a.goal_id, b.goal_id),
-    );
-  const pointsByGoal = new Map<string, BaselinePoint[]>();
-  const chronological = [...records.baselinePoints].sort(
-    (a, b) =>
-      compareCodePoints(a.admin_date, b.admin_date) ||
-      a.entry_ts - b.entry_ts ||
-      compareCodePoints(a.baseline_point_id, b.baseline_point_id),
+  // Display order (TEACH-25): record order is not stable across reseeds.
+  const proposed = orderProposedGoals(
+    records.goals.filter((g) => g.status === "proposed"),
+    {
+      initialsOf: (sid) => initialsById.get(sid) ?? "??",
+      periodLabelOf: periodLabelByStudent,
+    },
   );
-  for (const p of chronological) {
+  const pointsByGoal = new Map<string, BaselinePoint[]>();
+  for (const p of baselinePointsOldestFirst(records.baselinePoints)) {
     const bucket = pointsByGoal.get(p.goal_id) ?? [];
     bucket.push(p);
     pointsByGoal.set(p.goal_id, bucket);

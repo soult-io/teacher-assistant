@@ -7,6 +7,7 @@
 // case-only tie so the order is total.
 
 import { compareCodePoints } from "@teacher-assistant/domain-core";
+import type { OpaqueId } from "@teacher-assistant/schema";
 
 /** Case-insensitive display compare (trim + toLowerCase, code point), raw text breaks ties. */
 export function compareDisplayText(a: string, b: string): number {
@@ -30,6 +31,16 @@ function compareDigitRuns(a: string, b: string): number {
   return x.length - y.length || compareCodePoints(x, y);
 }
 
+/** Normalized text split into digit and non-digit runs. */
+function runsOf(s: string): string[] {
+  return (
+    s
+      .trim()
+      .toLowerCase()
+      .match(/\d+|\D+/g) ?? []
+  );
+}
+
 /**
  * Number-aware display compare for labels like "Period 2" / "Period 10": the
  * normalized text is split into digit and non-digit runs; digit runs compare
@@ -37,16 +48,8 @@ function compareDigitRuns(a: string, b: string): number {
  * ("P02" vs "P2", "p2" vs "P2") fall back to compareDisplayText, so it is total.
  */
 export function compareNumberAware(a: string, b: string): number {
-  const ra =
-    a
-      .trim()
-      .toLowerCase()
-      .match(/\d+|\D+/g) ?? [];
-  const rb =
-    b
-      .trim()
-      .toLowerCase()
-      .match(/\d+|\D+/g) ?? [];
+  const ra = runsOf(a);
+  const rb = runsOf(b);
   const n = Math.min(ra.length, rb.length);
   for (let i = 0; i < n; i += 1) {
     const x = ra[i] ?? "";
@@ -65,6 +68,26 @@ export interface StudentGoalSortKey {
   readonly periodLabel: string | null;
   readonly studentId: string;
   readonly goalText: string;
+}
+
+/** How a screen resolves a student's on-screen initials and period label. */
+export interface StudentResolvers {
+  readonly initialsOf: (studentId: OpaqueId) => string;
+  readonly periodLabelOf: (studentId: OpaqueId) => string | null;
+}
+
+/** The sort key of a student's goal as the screen shows it — the one key builder. */
+export function studentGoalKey(
+  studentId: OpaqueId,
+  goalText: string,
+  r: StudentResolvers,
+): StudentGoalSortKey {
+  return {
+    initials: r.initialsOf(studentId),
+    periodLabel: r.periodLabelOf(studentId),
+    studentId,
+    goalText,
+  };
 }
 
 /**

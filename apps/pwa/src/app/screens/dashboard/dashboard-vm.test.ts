@@ -94,7 +94,7 @@ describe("dashboard view-models", () => {
           goalId: `g-${key}` as RowVM["goalId"],
           studentId: key as RowVM["studentId"],
           state: "owes",
-          periodId: periodId as RowVM["goalId"] | null,
+          periodId: periodId as DashboardGroup["rows"][number]["periodId"],
         } as DashboardGroup["rows"][number],
       ],
     });
