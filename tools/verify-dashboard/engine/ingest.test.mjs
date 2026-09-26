@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildJourneys,
   checkRunOrigin,
-  journeysWithUntracedMedia,
+  journeysWithUnprovenMedia,
   parseEvidence,
   parseWalkthroughEvidence,
 } from "./ingest.mjs";
@@ -624,6 +624,11 @@ describe("buildJourneys — walkthrough recording", () => {
           contentType: "video/webm",
           path: "/ci/test-results-walkthrough/j1-walkthrough/video.webm",
         },
+        {
+          name: "trace",
+          contentType: "application/zip",
+          path: "/ci/test-results-walkthrough/j1-walkthrough/trace.zip",
+        },
       ],
       steps: [
         { label: "Open the dashboard", status: "passed", startOffsetMs: 1200, assertions: [] },
@@ -635,6 +640,7 @@ describe("buildJourneys — walkthrough recording", () => {
     evidence: { mode: "walkthrough", commitSha: "deadbeef", tests, ...over },
     run: { ci_run_id: "999", ci_run_url: "https://github.com/o/r/actions/runs/999" },
     resolveAsset: (_raw, kind, id, engine) => `${kind}s/${id}-${engine}.webm`,
+    provesLocal: () => true,
   });
   const build = (wt, evidence = gating) =>
     buildJourneys({
@@ -682,7 +688,32 @@ describe("buildJourneys — walkthrough recording", () => {
   it("shows no video when the walkthrough's video is missing or unservable", () => {
     const wt = { ...walkthrough(), resolveAsset: () => null };
     expect(build(wt).video).toBeNull();
-    expect(build(walkthrough({}, [walkRecord({ attachments: [] })])).video).toBeNull();
+    const bare = build(walkthrough({}, [walkRecord({ attachments: [] })]));
+    expect(bare.video).toBeNull();
+    expect(bare.media_note).toBe(MEDIA_NOTE.NONE);
+  });
+
+  it("shows no video when the walkthrough's trace shows no local request — says so", () => {
+    const seen = [];
+    const wt = {
+      ...walkthrough(),
+      provesLocal: (raw) => {
+        seen.push(raw);
+        return false;
+      },
+    };
+    const j1 = build(wt);
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.UNPROVEN);
+    expect(seen).toEqual(["/ci/test-results-walkthrough/j1-walkthrough/trace.zip"]);
+  });
+
+  it("shows no video when the walkthrough recorded no trace", () => {
+    const noTrace = walkRecord();
+    noTrace.attachments = noTrace.attachments.filter((a) => a.name !== "trace");
+    const j1 = build(walkthrough({}, [noTrace]));
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.UNPROVEN);
   });
 
   it("does not show a failed walkthrough under a passing card — says so", () => {
@@ -778,7 +809,7 @@ describe("checkRunOrigin (the dashboard is built only from the local synthetic b
   });
 });
 
-describe("journeysWithUntracedMedia (a publish needs network proof for gating media)", () => {
+describe("journeysWithUnprovenMedia (a publish needs network proof for gating media)", () => {
   const manifest = [{ id: "j1", name: "J1", match: { file: "j1-score-probe.spec.ts" } }];
   const build = (rec) =>
     buildJourneys({
@@ -794,13 +825,23 @@ describe("journeysWithUntracedMedia (a publish needs network proof for gating me
       ...over,
     });
 
-  it("passes a journey whose trace was copied", () => {
-    expect(journeysWithUntracedMedia(build(withStill()))).toEqual([]);
+  const proven = () => true;
+  it("passes a journey whose copied trace shows a local request", () => {
+    expect(journeysWithUnprovenMedia(build(withStill()), proven)).toEqual([]);
+  });
+  it("flags a journey whose copied trace shows no local request", () => {
+    const seen = [];
+    const unproven = (url) => {
+      seen.push(url);
+      return false;
+    };
+    expect(journeysWithUnprovenMedia(build(withStill()), unproven)).toEqual(["j1"]);
+    expect(seen).toEqual(["trace/j1-chromium.bin"]);
   });
   it("flags a journey with a video and stills but no trace attachment", () => {
     const rec = withStill();
     rec.attachments = rec.attachments.filter((a) => a.name !== "trace");
-    expect(journeysWithUntracedMedia(build(rec))).toEqual(["j1"]);
+    expect(journeysWithUnprovenMedia(build(rec), proven)).toEqual(["j1"]);
   });
   it("flags a journey whose trace could not be served", () => {
     const journeys = buildJourneys({
@@ -811,7 +852,7 @@ describe("journeysWithUntracedMedia (a publish needs network proof for gating me
       resolveAsset: (raw, kind, id, engine, index) =>
         kind === "trace" ? null : echoResolver(raw, kind, id, engine, index),
     });
-    expect(journeysWithUntracedMedia(journeys)).toEqual(["j1"]);
+    expect(journeysWithUnprovenMedia(journeys, proven)).toEqual(["j1"]);
   });
   it("passes an UNVERIFIED journey (nothing published)", () => {
     const journeys = buildJourneys({
@@ -821,6 +862,6 @@ describe("journeysWithUntracedMedia (a publish needs network proof for gating me
       provenance: PROVENANCE,
       resolveAsset: echoResolver,
     });
-    expect(journeysWithUntracedMedia(journeys)).toEqual([]);
+    expect(journeysWithUnprovenMedia(journeys, proven)).toEqual([]);
   });
 });
