@@ -80,3 +80,13 @@ export function validateGoalLabel(raw: string): GoalLabelCheck {
   }
   return GOAL_LABEL_PATTERN.test(label) ? { ok: true, label } : { ok: false, reason: "invalid" };
 }
+
+/**
+ * The usable IEP goal label: the trimmed label if it validates and is non-blank,
+ * else undefined. The one definition behind "this goal is numbered" — the New-Goal
+ * ADOPT path and ARC adoption (canAdopt) both read it.
+ */
+export function usableGoalLabel(raw: string | undefined): string | undefined {
+  const check = validateGoalLabel(raw ?? "");
+  return check.ok ? check.label : undefined;
+}

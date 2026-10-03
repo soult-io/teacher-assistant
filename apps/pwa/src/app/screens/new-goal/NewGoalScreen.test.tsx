@@ -182,6 +182,23 @@ describe("NewGoalScreen — IEP goal # (TEACH-41)", () => {
     expect(screen.queryByTestId("ng-goal-label-dup")).toBeNull();
   });
 
+  it("the warning shows the initials in canonical form, not as typed (TEACH-40)", () => {
+    const records = buildSyntheticSeed(NOW).master;
+    const ab = records.students.find((s) => s.initials === "AB");
+    render(
+      <NewGoalScreen
+        goals={records.goals}
+        studentIdForInitials={() => ab?.student_id}
+        onSubmit={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+    adoptReadyExceptLabel();
+    fireEvent.change(screen.getByTestId("ng-initials"), { target: { value: "a.b." } });
+    fireEvent.change(screen.getByTestId("ng-goal-label"), { target: { value: "2" } });
+    expect(screen.getByTestId("ng-goal-label-dup")).toHaveTextContent(/^AB already has Goal 2/);
+  });
+
   it("a DRAFT is checked against the next IEP only (an active Goal 2 is no clash)", () => {
     const records = buildSyntheticSeed(NOW).master;
     const ab = records.students.find((s) => s.initials === "AB");

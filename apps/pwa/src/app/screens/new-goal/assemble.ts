@@ -5,7 +5,7 @@
 // ADOPT (a baseline is already in hand → active) and DRAFT (a proposed goal to
 // baseline → status proposed, no baseline yet, no owes, never feeds IC).
 
-import { validateGoalLabel } from "@teacher-assistant/domain-core";
+import { usableGoalLabel } from "@teacher-assistant/domain-core";
 import {
   type AccomMod,
   asTimestamp,
@@ -99,8 +99,7 @@ export function assembleGoal(
   const baselineValue = form.path === "adopt" ? parseBaseline(form.baseline) : undefined;
   // IEP goal #: kept only when it validates (trimmed, 1–6 of [A-Za-z0-9.]); a blank
   // or invalid entry stays absent — the screen blocks saving an invalid one.
-  const label = validateGoalLabel(form.goalLabel);
-  const goalLabel = label.ok ? label.label : undefined;
+  const goalLabel = usableGoalLabel(form.goalLabel);
 
   const goal: IEPGoal = {
     goal_id: goalId,

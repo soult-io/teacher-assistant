@@ -8,6 +8,7 @@
 import {
   canBeginMonitoring,
   goalLabelConflicts,
+  usableGoalLabel,
   validateGoalLabel,
 } from "@teacher-assistant/domain-core";
 import {
@@ -133,8 +134,7 @@ function gateMessage(path: NewGoalForm["path"], ready: boolean): string {
  * entry blocks either path.
  */
 function labelReady(path: NewGoalForm["path"], raw: string): boolean {
-  const check = validateGoalLabel(raw);
-  return check.ok && (path === "draft" || check.label !== undefined);
+  return validateGoalLabel(raw).ok && (path === "draft" || usableGoalLabel(raw) !== undefined);
 }
 
 /**
@@ -147,21 +147,22 @@ function duplicateWarning(
   goals: readonly IEPGoal[],
   studentId: OpaqueId | undefined,
 ): string | null {
-  const check = validateGoalLabel(form.goalLabel);
-  if (studentId === undefined || !check.ok || check.label === undefined) {
+  const label = usableGoalLabel(form.goalLabel);
+  if (studentId === undefined || label === undefined) {
     return null;
   }
   const clashes = goalLabelConflicts(goals, {
     student_id: studentId,
     status: form.path === "adopt" ? "active" : "proposed",
-    goal_label: check.label,
+    goal_label: label,
   });
   if (clashes.length === 0) {
     return null;
   }
-  const initials = form.initials.trim().toUpperCase();
+  // A resolved student implies valid initials; show them in canonical form (TEACH-40).
+  const initials = normalizeInitials(form.initials) ?? form.initials.trim();
   const texts = clashes.map((g) => g.goal_text).join(" / ");
-  return `${initials} already has Goal ${check.label} — ${texts}`;
+  return `${initials} already has Goal ${label} — ${texts}`;
 }
 
 export interface NewGoalScreenProps {

@@ -195,6 +195,15 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(screen.queryByText(/z\.q\.z\./i)).toBeNull();
   });
 
+  it("the IEP goal # duplicate warning matches dotted initials to the roster student (TEACH-40 + TEACH-41)", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
+    // ADOPT is the default path; the seed's AB already has an active Goal 2.
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB or JAS"), { target: { value: "a.b." } });
+    fireEvent.change(screen.getByTestId("ng-goal-label"), { target: { value: "2" } });
+    expect(screen.getByTestId("ng-goal-label-dup")).toHaveTextContent(/^AB already has Goal 2/);
+  });
+
   it("a VARIABLE-basis goal accepts any total with NO off-basis ack (F-2 escape valve)", async () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));

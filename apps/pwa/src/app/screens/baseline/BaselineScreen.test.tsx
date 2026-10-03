@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { newOpaqueId } from "@teacher-assistant/schema";
 import { describe, expect, it, vi } from "vitest";
 import { buildSyntheticSeed } from "../../../data/synthetic-seed.js";
-import { ADOPT_NEEDS_LABEL, BaselineScreen } from "./BaselineScreen.js";
+import { ADOPT_FIX_LABEL, ADOPT_NEEDS_LABEL, BaselineScreen } from "./BaselineScreen.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
 
@@ -149,9 +149,12 @@ describe("BaselineScreen — IEP goal label (TEACH-41)", () => {
     expect(onAdopt).toHaveBeenCalledOnce();
   });
 
-  it("a stored label that fails validation counts as no label", () => {
+  it("a stored label that fails validation counts as no label, and the reason points at 'edit'", () => {
     renderBaseline(withGhLabels("Goal 2", null));
-    expect(screen.getByTestId("adopt-button")).toBeDisabled();
-    expect(screen.getByTestId("adopt-needs-label")).toBeInTheDocument();
+    const card = screen.getByTestId("proposed-card");
+    expect(within(card).getByTestId("adopt-button")).toBeDisabled();
+    expect(within(card).getByTestId("adopt-needs-label")).toHaveTextContent(ADOPT_FIX_LABEL);
+    // The control the reason names is the one the card shows for a stored label.
+    expect(within(card).getByTestId("goal-label-edit")).toHaveTextContent("edit");
   });
 });

@@ -14,7 +14,7 @@ import type {
   Timestamp,
 } from "@teacher-assistant/schema";
 import { type BaselineMethod, deriveBaseline } from "./baseline.js";
-import { validateGoalLabel } from "./goal-validation.js";
+import { usableGoalLabel } from "./goal-validation.js";
 
 export type AdoptionBlock =
   | "not_proposed"
@@ -52,8 +52,7 @@ export function canAdopt(goal: IEPGoal, baselinePoints: readonly BaselinePoint[]
   if (!estimate.usable) {
     return { ok: false, reason: "insufficient_baseline" };
   }
-  const label = validateGoalLabel(goal.goal_label ?? "");
-  if (!label.ok || label.label === undefined) {
+  if (usableGoalLabel(goal.goal_label) === undefined) {
     return { ok: false, reason: "missing_label" };
   }
   return { ok: true };

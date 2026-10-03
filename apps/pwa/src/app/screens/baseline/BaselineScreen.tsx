@@ -162,6 +162,8 @@ function AdoptLabelWarning({
 /** The plain reason a ready-but-unnumbered goal cannot be adopted yet (TEACH-41). */
 export const ADOPT_NEEDS_LABEL =
   "Add the IEP goal # first — use “+ Add IEP goal #” beside the ARC date.";
+/** The same block when a stored label fails validation (old/synced data): the box shows “edit”. */
+export const ADOPT_FIX_LABEL = "Fix the IEP goal # first — use “edit” beside the ARC date.";
 
 /**
  * The Adopt-at-ARC action. Shown once the baseline is usable; while the goal has no
@@ -182,11 +184,13 @@ function AdoptAction({
     return null;
   }
   const reasonId = `adopt-reason-${goal.goal_id}`;
+  // GoalLabelEditor shows "+ Add IEP goal #" only when no label is stored at all.
+  const reason = goal.goal_label === undefined ? ADOPT_NEEDS_LABEL : ADOPT_FIX_LABEL;
   return (
     <>
       {needsLabel ? (
         <div className="note warn" id={reasonId} data-testid="adopt-needs-label">
-          {ADOPT_NEEDS_LABEL}
+          {reason}
         </div>
       ) : null}
       <button
@@ -308,6 +312,7 @@ function ProposedCard({
         goal={goal}
         allGoals={allGoals}
         initials={initials}
+        // ok also requires a label; a clash needs one, so missing_label correctly shows nothing.
         adoptable={adoptCheck.ok}
       />
       <AdoptAction
