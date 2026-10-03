@@ -2,7 +2,7 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { newOpaqueId } from "@teacher-assistant/schema";
 import { describe, expect, it, vi } from "vitest";
 import { buildSyntheticSeed } from "../../../data/synthetic-seed.js";
-import { BaselineScreen } from "./BaselineScreen.js";
+import { ADOPT_NEEDS_LABEL, BaselineScreen } from "./BaselineScreen.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
 
@@ -71,7 +71,7 @@ describe("BaselineScreen (U5)", () => {
   });
 
   it("offers Adopt at ARC once the baseline is usable (≥3 comparable points)", () => {
-    const { onAdopt } = renderBaseline();
+    const { onAdopt } = renderBaseline(withGhLabels("1", null));
     fireEvent.click(screen.getByTestId("adopt-button"));
     expect(onAdopt).toHaveBeenCalledOnce();
     // Adoption locks the currently-shown method (average by default).
@@ -124,5 +124,34 @@ describe("BaselineScreen — IEP goal label (TEACH-41)", () => {
   it("no warning when the active goal has a different number", () => {
     renderBaseline(withGhLabels("1", "2"));
     expect(screen.queryByTestId("adopt-label-warning")).toBeNull();
+  });
+
+  it("adopting a goal with no IEP goal # is blocked, with a plain reason pointing at the inline box", () => {
+    const { onAdopt } = renderBaseline(); // the seed's draft is unlabelled, baseline usable
+    const card = screen.getByTestId("proposed-card");
+    const adopt = within(card).getByTestId("adopt-button");
+    expect(adopt).toBeDisabled();
+    expect(within(card).getByTestId("adopt-needs-label")).toHaveTextContent(ADOPT_NEEDS_LABEL);
+    expect(adopt).toHaveAccessibleDescription(ADOPT_NEEDS_LABEL);
+    // The reason names the control that fixes it, and that control is on this card.
+    expect(ADOPT_NEEDS_LABEL).toContain("+ Add IEP goal #");
+    expect(within(card).getByTestId("goal-label-edit")).toHaveTextContent("+ Add IEP goal #");
+    fireEvent.click(adopt);
+    expect(onAdopt).not.toHaveBeenCalled();
+  });
+
+  it("adopting a goal with an IEP goal # is allowed, with no reason shown", () => {
+    const { onAdopt } = renderBaseline(withGhLabels("2", null));
+    const adopt = screen.getByTestId("adopt-button");
+    expect(adopt).toBeEnabled();
+    expect(screen.queryByTestId("adopt-needs-label")).toBeNull();
+    fireEvent.click(adopt);
+    expect(onAdopt).toHaveBeenCalledOnce();
+  });
+
+  it("a stored label that fails validation counts as no label", () => {
+    renderBaseline(withGhLabels("Goal 2", null));
+    expect(screen.getByTestId("adopt-button")).toBeDisabled();
+    expect(screen.getByTestId("adopt-needs-label")).toBeInTheDocument();
   });
 });

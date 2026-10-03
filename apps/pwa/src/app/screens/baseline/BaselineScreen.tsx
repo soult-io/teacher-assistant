@@ -6,6 +6,7 @@
 // calls — no baseline / adoption / window rules live here.
 
 import {
+  type AdoptionCheck,
   type ArcDateAlert,
   type BaselineMethod,
   canAdopt,
@@ -158,6 +159,50 @@ function AdoptLabelWarning({
   ) : null;
 }
 
+/** The plain reason a ready-but-unnumbered goal cannot be adopted yet (TEACH-41). */
+export const ADOPT_NEEDS_LABEL =
+  "Add the IEP goal # first — use “+ Add IEP goal #” beside the ARC date.";
+
+/**
+ * The Adopt-at-ARC action. Shown once the baseline is usable; while the goal has no
+ * IEP goal # (canAdopt → "missing_label", the New-Goal ADOPT rule) it stays visible
+ * but disabled, with the reason as its description.
+ */
+function AdoptAction({
+  goal,
+  check,
+  onAdopt,
+}: {
+  readonly goal: IEPGoal;
+  readonly check: AdoptionCheck;
+  readonly onAdopt: () => void;
+}) {
+  const needsLabel = check.reason === "missing_label";
+  if (!check.ok && !needsLabel) {
+    return null;
+  }
+  const reasonId = `adopt-reason-${goal.goal_id}`;
+  return (
+    <>
+      {needsLabel ? (
+        <div className="note warn" id={reasonId} data-testid="adopt-needs-label">
+          {ADOPT_NEEDS_LABEL}
+        </div>
+      ) : null}
+      <button
+        type="button"
+        className="btn primary small wide adoptbtn"
+        data-testid="adopt-button"
+        disabled={needsLabel}
+        aria-describedby={needsLabel ? reasonId : undefined}
+        onClick={onAdopt}
+      >
+        Adopt at ARC → activate goal
+      </button>
+    </>
+  );
+}
+
 function ProposedCard({
   goal,
   allGoals,
@@ -265,16 +310,11 @@ function ProposedCard({
         initials={initials}
         adoptable={adoptCheck.ok}
       />
-      {adoptCheck.ok ? (
-        <button
-          type="button"
-          className="btn primary small wide adoptbtn"
-          data-testid="adopt-button"
-          onClick={() => onAdopt(goal, points, useMedian ? "median" : "mean")}
-        >
-          Adopt at ARC → activate goal
-        </button>
-      ) : null}
+      <AdoptAction
+        goal={goal}
+        check={adoptCheck}
+        onAdopt={() => onAdopt(goal, points, useMedian ? "median" : "mean")}
+      />
     </div>
   );
 }

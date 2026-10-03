@@ -14,8 +14,13 @@ import type {
   Timestamp,
 } from "@teacher-assistant/schema";
 import { type BaselineMethod, deriveBaseline } from "./baseline.js";
+import { validateGoalLabel } from "./goal-validation.js";
 
-export type AdoptionBlock = "not_proposed" | "insufficient_baseline" | "mixed_conditions";
+export type AdoptionBlock =
+  | "not_proposed"
+  | "insufficient_baseline"
+  | "mixed_conditions"
+  | "missing_label";
 
 export interface AdoptionCheck {
   readonly ok: boolean;
@@ -30,7 +35,12 @@ export class AdoptionError extends Error {
   }
 }
 
-/** Whether a proposed goal may be adopted: it must be proposed and have a usable (≥3 comparable) baseline. */
+/**
+ * Whether a proposed goal may be adopted: it must be proposed, have a usable (≥3
+ * comparable) baseline, and carry a valid IEP goal label (TEACH-41 — the same rule
+ * as the New-Goal ADOPT path: an active goal is always numbered). The label check
+ * runs last, so "missing_label" means the goal is otherwise ready to adopt.
+ */
 export function canAdopt(goal: IEPGoal, baselinePoints: readonly BaselinePoint[]): AdoptionCheck {
   if (goal.status !== "proposed") {
     return { ok: false, reason: "not_proposed" };
@@ -41,6 +51,10 @@ export function canAdopt(goal: IEPGoal, baselinePoints: readonly BaselinePoint[]
   }
   if (!estimate.usable) {
     return { ok: false, reason: "insufficient_baseline" };
+  }
+  const label = validateGoalLabel(goal.goal_label ?? "");
+  if (!label.ok || label.label === undefined) {
+    return { ok: false, reason: "missing_label" };
   }
   return { ok: true };
 }
@@ -53,7 +67,8 @@ export interface AdoptOptions {
 
 /**
  * ARC adoption: lock the derived baseline into the goal and flip proposed → active.
- * Throws AdoptionError if the goal isn't proposed or lacks a usable baseline.
+ * Throws AdoptionError if the goal isn't proposed, lacks a usable baseline, or has
+ * no valid IEP goal label.
  * Baseline points are separate entities and are never discarded.
  */
 export function adoptGoal(

@@ -27,7 +27,9 @@ import {
 const iso = (s: string): IsoDate => s as IsoDate;
 const noBreaks = () => false;
 
-function makeGoal(over?: Partial<{ status: GoalStatus; arcDate: IsoDate }>): IEPGoal {
+function makeGoal(
+  over?: Partial<{ status: GoalStatus; arcDate: IsoDate; goal_label: string }>,
+): IEPGoal {
   return {
     goal_id: newOpaqueId(),
     student_id: newOpaqueId(),
@@ -47,6 +49,7 @@ function makeGoal(over?: Partial<{ status: GoalStatus; arcDate: IsoDate }>): IEP
     created_ts: asTimestamp(0),
     revisions: [],
     ...(over?.arcDate !== undefined ? { arc_date: over.arcDate } : {}),
+    ...(over?.goal_label !== undefined ? { goal_label: over.goal_label } : {}),
   };
 }
 
@@ -109,7 +112,7 @@ describe("ARC adoption locks the baseline + flips active (§2.5)", () => {
   }
 
   it("a proposed goal with ≥3 comparable points adopts → active, baseline locked, audited", () => {
-    const goal = makeGoal({ status: "proposed" });
+    const goal = makeGoal({ status: "proposed", goal_label: "1" });
     const pts = threePts(goal);
     expect(canAdopt(goal, pts).ok).toBe(true);
     const adopted = adoptGoal(goal, pts, { who: "arc", when: asTimestamp(100) });
@@ -131,8 +134,29 @@ describe("ARC adoption locks the baseline + flips active (§2.5)", () => {
     expect(canAdopt(makeGoal({ status: "active" }), threePts(goal)).reason).toBe("not_proposed");
   });
 
+  it("TEACH-41: cannot adopt without a valid IEP goal label; a labelled goal adopts", () => {
+    const unlabelled = makeGoal({ status: "proposed" });
+    expect(canAdopt(unlabelled, threePts(unlabelled))).toEqual({
+      ok: false,
+      reason: "missing_label",
+    });
+    expect(() =>
+      adoptGoal(unlabelled, threePts(unlabelled), { who: "arc", when: asTimestamp(0) }),
+    ).toThrow(AdoptionError);
+    // A stored label that fails validation (e.g. synced from an older client) is no label.
+    const invalid = makeGoal({ status: "proposed", goal_label: "Goal 2" });
+    expect(canAdopt(invalid, threePts(invalid)).reason).toBe("missing_label");
+    // The baseline gate still reports first: missing_label means "otherwise adoptable".
+    expect(canAdopt(unlabelled, []).reason).toBe("insufficient_baseline");
+    const labelled = makeGoal({ status: "proposed", goal_label: "2a" });
+    expect(canAdopt(labelled, threePts(labelled)).ok).toBe(true);
+    expect(
+      adoptGoal(labelled, threePts(labelled), { who: "arc", when: asTimestamp(0) }).status,
+    ).toBe("active");
+  });
+
   it("a proposed goal cannot export to IC; after adoption it can", () => {
-    const goal = makeGoal({ status: "proposed" });
+    const goal = makeGoal({ status: "proposed", goal_label: "1" });
     expect(isIcExportable(goal)).toBe(false); // HARD NO to IC until adoption
     const adopted = adoptGoal(goal, threePts(goal), { who: "arc", when: asTimestamp(0) });
     expect(isIcExportable(adopted)).toBe(true);

@@ -332,6 +332,27 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     );
 
     await step(
+      "Adoption at ARC needs the IEP goal # — blocked with a plain reason until it is added on the card",
+      async () => {
+        await expect(
+          card.getByTestId("adopt-button"),
+          "an unnumbered goal cannot be adopted, the same rule as the New-Goal ADOPT path",
+        ).toBeDisabled();
+        await expect(
+          card.getByTestId("adopt-needs-label"),
+          "the reason points at the inline IEP goal # box on this card",
+        ).toContainText("Add the IEP goal # first");
+        await card.getByTestId("goal-label-edit").click();
+        await enterText(card.getByTestId("goal-label-input"), "3");
+        await card.getByTestId("goal-label-input").press("Enter");
+        await expect(
+          card.getByTestId("adopt-button"),
+          "once the IEP goal # is saved, adoption is allowed",
+        ).toBeEnabled();
+      },
+    );
+
+    await step(
       "Adoption at ARC is what finally makes the goal reachable — it becomes a live, IC-exportable dashboard goal",
       async () => {
         await card.getByTestId("adopt-button").click();

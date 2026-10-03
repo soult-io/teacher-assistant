@@ -6,7 +6,7 @@ import { NewGoalScreen } from "./NewGoalScreen.js";
 const noRoster = { goals: [], studentIdForInitials: () => undefined };
 
 function fillCore() {
-  fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "AB" } });
+  fireEvent.change(screen.getByPlaceholderText("e.g. AB or JAS"), { target: { value: "AB" } });
   fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
     target: { value: "solve two-step equations" },
   });
@@ -68,7 +68,7 @@ describe("NewGoalScreen (U5)", () => {
 
     it.each(["AB", "JAS", "j.a.s."])("accepts %j: no error, form can submit", (raw) => {
       const onSubmit = vi.fn();
-      render(<NewGoalScreen onSubmit={onSubmit} onBack={vi.fn()} />);
+      render(<NewGoalScreen {...noRoster} onSubmit={onSubmit} onBack={vi.fn()} />);
       fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
       fillCore();
       fireEvent.change(screen.getByTestId("ng-initials"), { target: { value: raw } });
@@ -83,7 +83,7 @@ describe("NewGoalScreen (U5)", () => {
       "rejects %j: inline error shown and the form does not submit",
       (raw) => {
         const onSubmit = vi.fn();
-        render(<NewGoalScreen onSubmit={onSubmit} onBack={vi.fn()} />);
+        render(<NewGoalScreen {...noRoster} onSubmit={onSubmit} onBack={vi.fn()} />);
         fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
         fillCore();
         const input = screen.getByTestId("ng-initials");
@@ -104,13 +104,13 @@ describe("NewGoalScreen (U5)", () => {
     );
 
     it("shows no error while the field is still empty", () => {
-      render(<NewGoalScreen onSubmit={vi.fn()} onBack={vi.fn()} />);
+      render(<NewGoalScreen {...noRoster} onSubmit={vi.fn()} onBack={vi.fn()} />);
       fireEvent.blur(screen.getByTestId("ng-initials"));
       expect(screen.queryByText(INITIALS_ERROR)).toBeNull();
     });
 
     it("caps the input length so a pasted full name cannot be typed in whole", () => {
-      render(<NewGoalScreen onSubmit={vi.fn()} onBack={vi.fn()} />);
+      render(<NewGoalScreen {...noRoster} onSubmit={vi.fn()} onBack={vi.fn()} />);
       expect(screen.getByTestId("ng-initials")).toHaveAttribute("maxLength", "6");
     });
   });

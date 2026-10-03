@@ -149,7 +149,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
     fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
-    fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "ZZ" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB or JAS"), { target: { value: "ZZ" } });
     fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
       target: { value: "count coins to a dollar" },
     });
@@ -176,7 +176,9 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
     fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
     // Synthetic initials — a middle initial disambiguates two students (TEACH-26).
-    fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "z.q.z." } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB or JAS"), {
+      target: { value: "z.q.z." },
+    });
     fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
       target: { value: "skip count by fives" },
     });
@@ -197,7 +199,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
     // ADOPT is the default path.
-    fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "AB" } });
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB or JAS"), { target: { value: "AB" } });
     fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
       target: { value: "read sight words" },
     });
