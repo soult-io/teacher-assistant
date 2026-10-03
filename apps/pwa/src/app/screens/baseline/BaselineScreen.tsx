@@ -133,12 +133,11 @@ function ArcAlertNote({ alert }: { readonly alert: ArcDateAlert }) {
 }
 
 /**
- * TEACH-41 label notes for a proposed goal (warn, never block): another proposed
- * goal with the same label (the next-IEP duplicate cue), and — once adoptable — an
- * ACTIVE/mastered goal already numbered the same, which adoption would duplicate.
- * Nothing is retired automatically; the teacher decides.
+ * TEACH-41 adopt-time warning (warn, never block): once a proposed goal is
+ * adoptable, an ACTIVE/mastered goal already numbered the same would become a
+ * duplicate on adoption. Nothing is retired automatically; the teacher decides.
  */
-function LabelNotes({
+function AdoptLabelWarning({
   goal,
   allGoals,
   initials,
@@ -150,10 +149,10 @@ function LabelNotes({
   readonly adoptable: boolean;
 }) {
   const adoptClash = adoptable ? goalLabelConflicts(allGoals, { ...goal, status: "active" }) : [];
-  const [current] = adoptClash;
-  return current !== undefined ? (
+  const [clash] = adoptClash;
+  return clash !== undefined ? (
     <div className="note warn" data-testid="adopt-label-warning">
-      {initials} already has an active Goal {goal.goal_label} — {current.goal_text}. Adopting this
+      {initials} already has an active Goal {goal.goal_label} — {clash.goal_text}. Adopting this
       makes two Goal {goal.goal_label}: retire the old Goal {goal.goal_label}?
     </div>
   ) : null;
@@ -260,7 +259,12 @@ function ProposedCard({
 
       <AddPointRow goal={goal} onAdd={onAddBaselinePoint} />
 
-      <LabelNotes goal={goal} allGoals={allGoals} initials={initials} adoptable={adoptCheck.ok} />
+      <AdoptLabelWarning
+        goal={goal}
+        allGoals={allGoals}
+        initials={initials}
+        adoptable={adoptCheck.ok}
+      />
       {adoptCheck.ok ? (
         <button
           type="button"

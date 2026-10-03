@@ -1,13 +1,13 @@
 // @vitest-environment node
 import type { DashboardGroup } from "@teacher-assistant/store";
 import { buildToScoreQueue, buildWeeklyDashboard, groupDashboard } from "@teacher-assistant/store";
+import { duplicateLabelGoalIds } from "@teacher-assistant/domain-core";
 import { describe, expect, it } from "vitest";
 import { buildSyntheticSeed, type SyntheticSeed } from "../../../data/synthetic-seed.js";
 import { goalLabel } from "../../../design/GoalTitle.js";
 import {
   buildLookups,
   buildStudentCards,
-  duplicateLabelGoalIds,
   orderPeriodGroups,
   type Lookups,
   orderRowsByStudent,

@@ -41,7 +41,7 @@ export function GoalLabelEditor({ label, onSave }: GoalLabelEditorProps) {
     );
   }
 
-  const cancel = () => {
+  const close = () => {
     closed.current = true;
     setDraft(null);
     setInvalid(false);
@@ -55,9 +55,7 @@ export function GoalLabelEditor({ label, onSave }: GoalLabelEditorProps) {
       setInvalid(true);
       return;
     }
-    closed.current = true;
-    setDraft(null);
-    setInvalid(false);
+    close();
     if (check.label !== label) {
       onSave(check.label);
     }
@@ -86,7 +84,7 @@ export function GoalLabelEditor({ label, onSave }: GoalLabelEditorProps) {
             save();
           } else if (e.key === "Escape") {
             e.preventDefault();
-            cancel();
+            close();
           }
         }}
         onBlur={save}

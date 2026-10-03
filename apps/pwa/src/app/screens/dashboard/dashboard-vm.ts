@@ -10,9 +10,9 @@
 import {
   compareArcOldestFirst,
   compareCodePoints,
-  duplicateGoalLabels,
+  duplicateLabelGoalIds,
 } from "@teacher-assistant/domain-core";
-import type { IEPGoal, NoDataReason, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
+import type { NoDataReason, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
 import type {
   DashboardGroup,
   DashboardRow,
@@ -151,21 +151,6 @@ export function buildLookups(
     pendingGoalIds,
     periodByStudent: (studentId) => membershipByStudent.get(studentId) ?? null,
   };
-}
-
-/**
- * Every goal whose IEP label is duplicated within its student's cohort (current =
- * active + mastered, next = proposed; retired never) — the set behind the lasting
- * duplicate cue on the dashboard rows and Goal Detail (TEACH-41).
- */
-export function duplicateLabelGoalIds(goals: readonly IEPGoal[]): ReadonlySet<string> {
-  const ids = new Set<string>();
-  for (const studentId of new Set(goals.map((g) => g.student_id))) {
-    for (const goalId of duplicateGoalLabels(goals, studentId).keys()) {
-      ids.add(goalId);
-    }
-  }
-  return ids;
 }
 
 /**

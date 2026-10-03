@@ -88,6 +88,21 @@ export function duplicateGoalLabels(
   return result;
 }
 
+/**
+ * Every goal whose IEP label is duplicated within its student's cohort (current =
+ * active + mastered, next = proposed; retired never) — the set behind the lasting
+ * duplicate cue on the dashboard rows and the IC export's duplicateLabel flag.
+ */
+export function duplicateLabelGoalIds(goals: readonly IEPGoal[]): ReadonlySet<OpaqueId> {
+  const ids = new Set<OpaqueId>();
+  for (const studentId of new Set(goals.map((g) => g.student_id))) {
+    for (const goalId of duplicateGoalLabels(goals, studentId).keys()) {
+      ids.add(goalId);
+    }
+  }
+  return ids;
+}
+
 /** Thrown when setGoalLabel is handed a label that fails validateGoalLabel. */
 export class GoalLabelError extends Error {
   constructor() {

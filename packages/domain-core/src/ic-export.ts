@@ -15,7 +15,7 @@ import type {
   ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { compareArcNewestFirst, compareCodePoints, compareGoalLabel } from "./comparators.js";
-import { duplicateGoalLabels } from "./goal-label.js";
+import { duplicateLabelGoalIds } from "./goal-label.js";
 import { isoWeekId } from "./instructional-weeks.js";
 import {
   clampAfterFromRevisions,
@@ -146,16 +146,7 @@ export function buildIcExport(
   goals: readonly IEPGoal[],
   points: readonly ProgressDataPoint[],
 ): IcGoalExport[] {
-  const duplicates = new Map<OpaqueId, ReadonlyMap<OpaqueId, readonly IEPGoal[]>>();
-  const duplicatesOf = (studentId: OpaqueId) => {
-    const known = duplicates.get(studentId);
-    if (known !== undefined) {
-      return known;
-    }
-    const found = duplicateGoalLabels(goals, studentId);
-    duplicates.set(studentId, found);
-    return found;
-  };
+  const duplicated = duplicateLabelGoalIds(goals);
   return goals
     .filter(isIcExportable)
     .sort(
@@ -171,7 +162,7 @@ export function buildIcExport(
         goalId: goal.goal_id,
         studentId: goal.student_id,
         goalLabel: goal.goal_label ?? null,
-        duplicateLabel: duplicatesOf(goal.student_id).has(goal.goal_id),
+        duplicateLabel: duplicated.has(goal.goal_id),
         weekly: weeklyRows(mine),
         quarterly: computeQuarterlySummary(
           goal,
