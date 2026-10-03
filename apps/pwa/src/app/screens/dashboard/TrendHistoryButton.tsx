@@ -2,6 +2,7 @@
 // dashboard row (design R3 D2: reachable from EVERY goal). Shared by the flat
 // GoalRow and the nested StudentCard so the label/a11y/icon stay in one place.
 
+import { goalLabelSpoken } from "../../../design/GoalTitle.js";
 import type { RowVM } from "./dashboard-vm.js";
 
 export function TrendHistoryButton({
@@ -16,7 +17,7 @@ export function TrendHistoryButton({
       type="button"
       className="minibtn"
       title="Trend & history"
-      aria-label={`trend and history ${vm.goalText}`}
+      aria-label={`trend and history ${goalLabelSpoken(vm.goalLabel, vm.goalText)}`}
       onClick={() => onOpenDetail(vm)}
     >
       ↗

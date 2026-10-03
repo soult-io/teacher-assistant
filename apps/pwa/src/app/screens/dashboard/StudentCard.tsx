@@ -6,6 +6,7 @@
 
 import { Avatar } from "../../../design/Avatar.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
+import { DuplicateLabelCue, GoalTitle, goalLabelSpoken } from "../../../design/GoalTitle.js";
 import { hueClassForInitials } from "../../../design/hues.js";
 import { type RowVM, rowValueText, type StudentCardVM } from "./dashboard-vm.js";
 import { TrendHistoryButton } from "./TrendHistoryButton.js";
@@ -50,13 +51,17 @@ function NestedGoal({
         <button
           type="button"
           className="g tap gbtn"
-          aria-label={`score ${vm.goalText}`}
+          aria-label={`score ${goalLabelSpoken(vm.goalLabel, vm.goalText)}`}
           onClick={() => onOpenScore(vm)}
         >
-          {vm.goalText}
+          <GoalTitle label={vm.goalLabel} text={vm.goalText} />
+          {vm.duplicateLabel ? <DuplicateLabelCue label={vm.goalLabel} /> : null}
         </button>
       ) : (
-        <span className="g">{vm.goalText}</span>
+        <span className="g">
+          <GoalTitle label={vm.goalLabel} text={vm.goalText} />
+          {vm.duplicateLabel ? <DuplicateLabelCue label={vm.goalLabel} /> : null}
+        </span>
       )}
       {nestedValue(vm)}
       {vm.state === "owes" ? (

@@ -11,10 +11,13 @@ import {
   canAdopt,
   computeBaselineWindowStart,
   deriveBaseline,
+  goalLabelConflicts,
 } from "@teacher-assistant/domain-core";
 import type { BaselinePoint, IEPGoal, OpaqueId } from "@teacher-assistant/schema";
 import { useState } from "react";
 import { Avatar } from "../../../design/Avatar.js";
+import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
+import { GoalLabelEditor } from "../../GoalLabelEditor.js";
 import type { DecryptedRecords } from "../../../data/repository.js";
 import { baselinePointsOldestFirst, orderProposedGoals } from "./baseline-order.js";
 
@@ -33,6 +36,8 @@ export interface BaselineScreenProps {
     method: BaselineMethod,
   ) => void;
   readonly onEditArcDate: (goal: IEPGoal, newArcDate: string) => ArcDateAlert;
+  /** Save a changed IEP goal label (undefined = cleared); the caller audits via setGoalLabel. */
+  readonly onSetGoalLabel: (goal: IEPGoal, label: string | undefined) => void;
 }
 
 function AddPointRow({
@@ -127,8 +132,36 @@ function ArcAlertNote({ alert }: { readonly alert: ArcDateAlert }) {
   );
 }
 
+/**
+ * TEACH-41 label notes for a proposed goal (warn, never block): another proposed
+ * goal with the same label (the next-IEP duplicate cue), and — once adoptable — an
+ * ACTIVE/mastered goal already numbered the same, which adoption would duplicate.
+ * Nothing is retired automatically; the teacher decides.
+ */
+function LabelNotes({
+  goal,
+  allGoals,
+  initials,
+  adoptable,
+}: {
+  readonly goal: IEPGoal;
+  readonly allGoals: readonly IEPGoal[];
+  readonly initials: string;
+  readonly adoptable: boolean;
+}) {
+  const adoptClash = adoptable ? goalLabelConflicts(allGoals, { ...goal, status: "active" }) : [];
+  const [current] = adoptClash;
+  return current !== undefined ? (
+    <div className="note warn" data-testid="adopt-label-warning">
+      {initials} already has an active Goal {goal.goal_label} — {current.goal_text}. Adopting this
+      makes two Goal {goal.goal_label}: retire the old Goal {goal.goal_label}?
+    </div>
+  ) : null;
+}
+
 function ProposedCard({
   goal,
+  allGoals,
   points,
   initials,
   periodLabel,
@@ -137,8 +170,11 @@ function ProposedCard({
   onAddBaselinePoint,
   onAdopt,
   onEditArcDate,
+  onSetGoalLabel,
 }: {
   readonly goal: IEPGoal;
+  /** Every goal on record — the duplicate-label checks read the student's other goals. */
+  readonly allGoals: readonly IEPGoal[];
   readonly points: readonly BaselinePoint[];
   readonly initials: string;
   readonly periodLabel: string | null;
@@ -151,6 +187,7 @@ function ProposedCard({
     method: BaselineMethod,
   ) => void;
   readonly onEditArcDate: (goal: IEPGoal, newArcDate: string) => ArcDateAlert;
+  readonly onSetGoalLabel: (goal: IEPGoal, label: string | undefined) => void;
 }) {
   const [alert, setAlert] = useState<ArcDateAlert>(null);
   const estimate = deriveBaseline(goal, points, useMedian ? "median" : "mean");
@@ -162,7 +199,12 @@ function ProposedCard({
       <div className="bhd">
         <Avatar initials={initials} />
         <div className="btitle">
-          <div className="rowtitle">{goal.goal_text}</div>
+          <div className="rowtitle">
+            <GoalTitle label={goal.goal_label} text={goal.goal_text} />
+            {goalLabelConflicts(allGoals, goal).length > 0 ? (
+              <DuplicateLabelCue label={goal.goal_label} />
+            ) : null}
+          </div>
           <div className="rowmeta">
             {periodLabel !== null ? `${periodLabel} · ` : ""}
             {goal.behavior}
@@ -177,16 +219,29 @@ function ProposedCard({
 
       {/* DD-1: the ARC-date input renders even when unset, so a just-drafted proposed
           goal can get its arc_date and open its window (routed through the engine). */}
-      <label className="arcedit">
-        <span className="nghint">ARC date</span>
-        <input
-          className="tin arcin"
-          type="date"
-          value={goal.arc_date ?? ""}
-          aria-label="arc date"
-          onChange={(e) => e.target.value !== "" && setAlert(onEditArcDate(goal, e.target.value))}
-        />
-      </label>
+      <div className="arcrow">
+        <label className="arcedit">
+          <span className="nghint">ARC date</span>
+          <input
+            className="tin arcin"
+            type="date"
+            value={goal.arc_date ?? ""}
+            aria-label="arc date"
+            onChange={(e) => e.target.value !== "" && setAlert(onEditArcDate(goal, e.target.value))}
+          />
+        </label>
+        {/* TEACH-41: the IEP goal # box sits beside the ARC date (optional on a draft).
+            Outside the <label>: one label wrapping two controls corrupts their names. */}
+        <span className="goallabel-row">
+          {goal.goal_label !== undefined ? (
+            <span className="goalnum">Goal {goal.goal_label}</span>
+          ) : null}
+          <GoalLabelEditor
+            label={goal.goal_label}
+            onSave={(label) => onSetGoalLabel(goal, label)}
+          />
+        </span>
+      </div>
       <ArcAlertNote alert={alert} />
 
       <div className="chips bchips">
@@ -205,6 +260,7 @@ function ProposedCard({
 
       <AddPointRow goal={goal} onAdd={onAddBaselinePoint} />
 
+      <LabelNotes goal={goal} allGoals={allGoals} initials={initials} adoptable={adoptCheck.ok} />
       {adoptCheck.ok ? (
         <button
           type="button"
@@ -288,6 +344,7 @@ export function BaselineScreen(props: BaselineScreenProps) {
             <ProposedCard
               key={goal.goal_id}
               goal={goal}
+              allGoals={records.goals}
               points={pointsByGoal.get(goal.goal_id) ?? []}
               initials={initialsById.get(goal.student_id) ?? "??"}
               periodLabel={periodLabelByStudent(goal.student_id)}
@@ -296,6 +353,7 @@ export function BaselineScreen(props: BaselineScreenProps) {
               onAddBaselinePoint={props.onAddBaselinePoint}
               onAdopt={props.onAdopt}
               onEditArcDate={props.onEditArcDate}
+              onSetGoalLabel={props.onSetGoalLabel}
             />
           ))}
         </div>

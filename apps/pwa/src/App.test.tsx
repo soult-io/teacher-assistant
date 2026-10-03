@@ -35,7 +35,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
   it("scores an owes goal through the Quick-Score sheet, updating the header", async () => {
     await unlock();
-    fireEvent.click(screen.getByRole("button", { name: "score Multiply fractions" }));
+    fireEvent.click(screen.getByRole("button", { name: "score Goal 2, Multiply fractions" }));
     // Bump #correct to 4 of 5 (80%) then save.
     const plus = screen.getByRole("button", { name: "plus" });
     for (let i = 0; i < 4; i++) {
@@ -50,7 +50,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
   it("gates Save behind the F-2 mismatch acknowledgment on a genuine mismatch", async () => {
     await unlock();
-    fireEvent.click(screen.getByRole("button", { name: "score Multiply fractions" }));
+    fireEvent.click(screen.getByRole("button", { name: "score Goal 2, Multiply fractions" }));
     // Change the total from the assigned 5 to 6 → a genuine denominator mismatch.
     fireEvent.change(screen.getByLabelText("total items"), { target: { value: "6" } });
 
@@ -66,7 +66,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
   it("records a no-data ⊘ with a required reason", async () => {
     await unlock();
-    fireEvent.click(screen.getByRole("button", { name: "score Multiply fractions" }));
+    fireEvent.click(screen.getByRole("button", { name: "score Goal 2, Multiply fractions" }));
     fireEvent.click(screen.getByRole("button", { name: "No data" }));
     // Record is disabled until a reason is chosen.
     const record = screen.getByRole("button", { name: "Record no data" });
@@ -91,7 +91,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(await screen.findByTestId("to-score")).toHaveTextContent("To-score (1)");
 
     // Tap the same row to score it directly → completes the queued point in place.
-    fireEvent.click(screen.getByRole("button", { name: "score Two-step equations" }));
+    fireEvent.click(screen.getByRole("button", { name: "score Goal 1, Two-step equations" }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // Exactly one scored point results: the queue empties (not left stranded) and
@@ -102,7 +102,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
   it("opens Goal Detail from a row's ↗ and returns to the dashboard", async () => {
     await unlock();
-    fireEvent.click(screen.getByRole("button", { name: "trend and history Add integers" }));
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Goal 2, Add integers" }));
     // The detail screen renders the DRAFT statement + trend chart.
     expect(await screen.findByText(/Draft progress statement/)).toBeInTheDocument();
     expect(screen.getByRole("img", { name: "progress trend" })).toBeInTheDocument();
@@ -113,7 +113,9 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
   it("acknowledging mastery writes a durable ARC flag (goal stays open)", async () => {
     await unlock();
     // "Multiply fractions" has a met consistency window → the Acknowledge action.
-    fireEvent.click(screen.getByRole("button", { name: "trend and history Multiply fractions" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "trend and history Goal 2, Multiply fractions" }),
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Acknowledge for ARC" }));
     // The write→re-render loop shows the durable acknowledged banner; the goal is
     // NOT auto-closed (still reachable, still on the board on return).
@@ -207,6 +209,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.change(screen.getByLabelText("method tool"), { target: { value: "word list" } });
     fireEvent.click(screen.getByRole("button", { name: "Variable / custom" }));
     fireEvent.change(screen.getByLabelText("baseline percent"), { target: { value: "30" } });
+    fireEvent.change(screen.getByTestId("ng-goal-label"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "Activate goal · begin monitoring" }));
 
     // The new active goal is on the dashboard; open its score sheet.
@@ -216,6 +219,31 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.change(screen.getByLabelText("total items"), { target: { value: "7" } });
     expect(screen.queryByTestId("mismatch-ack")).toBeNull();
     expect(screen.getByRole("button", { name: "Save" })).toBeInTheDocument();
+  });
+
+  it("editing a goal's IEP # on Goal Detail persists it and the duplicate cue shows on BOTH rows (TEACH-41)", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Goal 2, Add integers" }));
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    const input = screen.getByTestId("goal-label-input");
+    fireEvent.change(input, { target: { value: "1" } }); // AB now has two Goal 1
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByTestId("detail-dup-warning")).toHaveTextContent(
+      "AB has two Goal 1 — Add integers and Two-step equations",
+    );
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^Goal 1/);
+    fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
+    // The lasting cue: both of AB's Goal 1 rows carry it on the dashboard.
+    const cues = await screen.findAllByTestId("dup-label-cue");
+    expect(cues.length).toBe(2);
+    // Fixing one label clears the cue everywhere.
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Goal 1, Add integers" }));
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    fireEvent.change(screen.getByTestId("goal-label-input"), { target: { value: "2" } });
+    fireEvent.keyDown(screen.getByTestId("goal-label-input"), { key: "Enter" });
+    await waitFor(() => expect(screen.queryByTestId("detail-dup-warning")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
+    expect(screen.queryAllByTestId("dup-label-cue")).toHaveLength(0);
   });
 
   it("switching to the Para role shows the period-scoped para surface", async () => {

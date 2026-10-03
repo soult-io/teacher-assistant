@@ -17,7 +17,7 @@
 // assertions — written as human-readable evidence, verbatim.
 
 import { expect, test } from "./support/journey";
-import { goalRow, unlockToDashboard } from "./support/track";
+import { goalActionName, goalRow, unlockToDashboard } from "./support/track";
 
 test.describe("J2 — Offline capture → reconnect → sync", () => {
   test("score two probes with the network OFF: rows flip locally, no block/error, reconnect keeps the values", async ({
@@ -41,7 +41,7 @@ test.describe("J2 — Offline capture → reconnect → sync", () => {
     /** The J1 Quick-Score interaction, driven with the network off. */
     async function scoreOffline(goal: string, correct: number, percent: string) {
       await goalRow(page, goal)
-        .getByRole("button", { name: `score ${goal}` })
+        .getByRole("button", { name: goalActionName("score", goal) })
         .click();
       await expect(sheet, `Quick-Score opens for ${goal} with the network off`).toBeVisible();
       const plus = page.getByTestId("stepper-plus");
@@ -112,7 +112,7 @@ test.describe("J2 — Offline capture → reconnect → sync", () => {
       "Open Goal Detail offline — the just-entered point is plotted from the local store",
       async () => {
         await goalRow(page, PROBE_2)
-          .getByRole("button", { name: `trend and history ${PROBE_2}` })
+          .getByRole("button", { name: goalActionName("trend and history", PROBE_2) })
           .click();
         const chart = page.locator("svg.trendsvg");
         await expect(

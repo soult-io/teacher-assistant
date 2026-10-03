@@ -9,7 +9,7 @@
  * Phase-0 spec; for now this proves the shell renders end to end.
  *
  * WALKTHROUGH MODE (E2E_WALKTHROUGH=1): a separate, NON-gating capture that re-runs the
- * J1–J6 journeys on chromium at human pace (slowMo per action, per-character typing, a
+ * J1–J7 journeys on chromium at human pace (slowMo per action, per-character typing, a
  * hold at the end of every step) purely to record a video a person can watch. It
  * writes its own evidence (walkthrough-evidence.json, for the step offsets into THIS
  * recording) under test-results-walkthrough/, so it can never mix with the gating

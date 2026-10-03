@@ -112,6 +112,24 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     );
 
     await step(
+      "Enter the IEP goal # from the printed IEP — required to adopt, typed by the teacher, never auto-filled",
+      async () => {
+        const label = page.getByTestId("ng-goal-label");
+        await expect(
+          label,
+          "the IEP goal # starts empty — the app never guesses a number",
+        ).toHaveValue("");
+        // AB already has Goal 1 and Goal 2 in the synthetic seed.
+        await enterText(label, "3");
+        await expect(label, "the typed IEP goal # is kept as entered").toHaveValue("3");
+        await expect(
+          page.getByTestId("ng-goal-label-dup"),
+          "Goal 3 is new for AB, so no duplicate warning shows",
+        ).toHaveCount(0);
+      },
+    );
+
+    await step(
       "Baseline is MANDATORY — with every other field filled but no baseline, Save is BLOCKED (disabled), not merely nagged",
       async () => {
         await expect(
@@ -200,6 +218,10 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     await step(
       "On the DRAFT path a baseline is NOT required to save — it is gathered later in the Baseline track",
       async () => {
+        await expect(
+          page.getByTestId("ng-goal-label"),
+          "the IEP goal # is left blank — optional on a draft, whose number may only be final at the ARC",
+        ).toHaveValue("");
         await expect(
           page.getByTestId("ng-submit"),
           "a draft (proposed) goal saves without a baseline; the mandatory gate is the ADOPT-path rule",

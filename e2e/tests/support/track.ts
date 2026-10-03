@@ -40,3 +40,13 @@ export async function unlockToDashboard(page: Page): Promise<void> {
 export function goalRow(page: Page, goalText: string): Locator {
   return page.getByTestId("goal-row").filter({ hasText: goalText });
 }
+
+/**
+ * A row action's accessible name for a goal: "score Two-step equations", or with the
+ * IEP goal # the screen reader hears first (TEACH-41) — "score Goal 1, Two-step
+ * equations". Matches either, so a journey keys on the goal text it already knows.
+ */
+export function goalActionName(action: string, goalText: string): RegExp {
+  const escaped = goalText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${action} (Goal [A-Za-z0-9.]{1,6}, )?${escaped}$`);
+}

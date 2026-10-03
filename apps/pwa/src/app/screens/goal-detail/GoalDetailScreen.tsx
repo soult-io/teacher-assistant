@@ -28,6 +28,8 @@ import type {
 } from "@teacher-assistant/schema";
 import type { ReactNode } from "react";
 import { Avatar } from "../../../design/Avatar.js";
+import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
+import { GoalLabelEditor } from "../../GoalLabelEditor.js";
 import { useIsDesktop } from "../../useIsDesktop.js";
 import { TrendChart } from "./TrendChart.js";
 
@@ -173,12 +175,27 @@ function QuarterlyNotes({ q }: { readonly q: GoalDetail["quarterlySummary"] }) {
   );
 }
 
+/**
+ * The IC-prep duplicate warning (ky-sped-lbd-sdi-sme binding condition): a weekly %
+ * entered against the wrong IC goal is an IEP-record error, so every copy-to-IC
+ * area says so while the duplicate exists. Null when there is no duplicate.
+ */
+function IcDuplicateWarning({ duplicate }: { readonly duplicate: string | null }) {
+  return duplicate !== null ? (
+    <div className="note warn" data-testid="ic-dup-warning">
+      {duplicate}
+    </div>
+  ) : null;
+}
+
 function QuarterlyCard({
   detail,
   exportable,
+  icDuplicate,
 }: {
   readonly detail: GoalDetail;
   readonly exportable: boolean;
+  readonly icDuplicate: string | null;
 }) {
   const q = detail.quarterlySummary;
   return (
@@ -205,6 +222,7 @@ function QuarterlyCard({
           <QuarterlyNotes q={q} />
           {/* IC copy path — ONLY for an IC-exportable goal (same structural guard the
               statement card uses); a proposed/baseline/non-% goal has no copy path (DF-1). */}
+          {exportable ? <IcDuplicateWarning duplicate={icDuplicate} /> : null}
           {exportable ? (
             <button
               type="button"
@@ -221,7 +239,13 @@ function QuarterlyCard({
   );
 }
 
-function StatementCard({ statement }: { readonly statement: AutoStatement }) {
+function StatementCard({
+  statement,
+  icDuplicate,
+}: {
+  readonly statement: AutoStatement;
+  readonly icDuplicate: string | null;
+}) {
   // The card only renders for an IC-exportable goal (computeAutoStatement returns
   // null otherwise), so the copy path is inherently guarded (DF-7). Copy is the ONLY
   // action — the statement stays slot-assembled; the teacher reviews/edits in IC
@@ -251,6 +275,7 @@ function StatementCard({ statement }: { readonly statement: AutoStatement }) {
           across).
         </div>
       ) : null}
+      <IcDuplicateWarning duplicate={icDuplicate} />
       <button
         type="button"
         className="btn small primary copybtn"
@@ -454,6 +479,14 @@ export interface GoalDetailScreenProps {
   readonly periodLabel: string | null;
   readonly probeLabel: string;
   /**
+   * The OTHER goals of this student, same cohort, that share this goal's IEP label
+   * (domain-core duplicateGoalLabels) — empty when there is no duplicate. Drives the
+   * lasting duplicate cue on the header and the IC-copy area (TEACH-41).
+   */
+  readonly labelDuplicates: readonly IEPGoal[];
+  /** Save a changed IEP goal label (undefined = cleared); the caller audits via setGoalLabel. */
+  readonly onSetGoalLabel: (label: string | undefined) => void;
+  /**
    * The M4 instructional-weeks calendar predicate — feeds the R3-3 ≥4-instructional-
    * week half of the auto-statement gate. REQUIRED (no default): a default of
    * `() => false` would count every calendar week as instructional and INFLATE the
@@ -486,25 +519,50 @@ function ChartCard({ detail, goal }: { readonly detail: GoalDetail; readonly goa
   );
 }
 
+/** "Two-step equations and Add integers" — the duplicate goals' texts, this one first. */
+function duplicateTexts(goal: IEPGoal, others: readonly IEPGoal[]): string {
+  const texts = [goal.goal_text, ...others.map((g) => g.goal_text)];
+  return texts.length <= 2
+    ? texts.join(" and ")
+    : `${texts.slice(0, -1).join(", ")} and ${texts.at(-1) ?? ""}`;
+}
+
 /** The goal header (avatar + name + criterion/baseline). Desktop lays "+ Add a point" inline. */
 function DetailHeader({
   goal,
   initials,
   periodLabel,
+  labelDuplicates,
+  onSetGoalLabel,
   onAddPoint,
   inlineAdd,
 }: {
   readonly goal: IEPGoal;
   readonly initials: string;
   readonly periodLabel: string | null;
+  readonly labelDuplicates: readonly IEPGoal[];
+  readonly onSetGoalLabel: (label: string | undefined) => void;
   readonly onAddPoint: () => void;
   readonly inlineAdd: boolean;
 }) {
+  const duplicated = labelDuplicates.length > 0;
   return (
     <div className="detailhead">
       <Avatar initials={initials} />
       <div className="detailtitle">
-        <h1>{goal.goal_text}</h1>
+        <h1>
+          <GoalTitle label={goal.goal_label} text={goal.goal_text} />
+        </h1>
+        <div className="goallabel-row">
+          <GoalLabelEditor label={goal.goal_label} onSave={onSetGoalLabel} />
+          {duplicated ? <DuplicateLabelCue label={goal.goal_label} /> : null}
+        </div>
+        {duplicated ? (
+          <div className="note warn" data-testid="detail-dup-warning">
+            {initials} has two Goal {goal.goal_label} — {duplicateTexts(goal, labelDuplicates)}.
+            Change one label.
+          </div>
+        ) : null}
         <div className="sub">
           {periodLabel !== null ? `${periodLabel} · ` : ""}Criterion: {goal.criterion_level}% ×{" "}
           {goal.criterion_consistency.phrase}
@@ -549,6 +607,8 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
     initials,
     periodLabel,
     probeLabel,
+    labelDuplicates,
+    onSetGoalLabel,
     isNonInstructional,
     onAddPoint,
     onEditPoint,
@@ -560,19 +620,28 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
   const statement = computeAutoStatement(goal, initials, points, { isNonInstructional });
   const observation = observations.find((o) => o.goal_id === goal.goal_id);
   const exportable = isIcExportable(goal);
+  const icDuplicate =
+    labelDuplicates.length > 0
+      ? `${initials} has two Goal ${goal.goal_label ?? ""} — check before entering`
+      : null;
 
   const header = (
     <DetailHeader
       goal={goal}
       initials={initials}
       periodLabel={periodLabel}
+      labelDuplicates={labelDuplicates}
+      onSetGoalLabel={onSetGoalLabel}
       onAddPoint={onAddPoint}
       inlineAdd={layout !== "mobile"}
     />
   );
   const chart = <ChartCard detail={detail} goal={goal} />;
-  const quarterly = <QuarterlyCard detail={detail} exportable={exportable} />;
-  const stmt = statement !== null ? <StatementCard statement={statement} /> : null;
+  const quarterly = (
+    <QuarterlyCard detail={detail} exportable={exportable} icDuplicate={icDuplicate} />
+  );
+  const stmt =
+    statement !== null ? <StatementCard statement={statement} icDuplicate={icDuplicate} /> : null;
   const consistency = (
     <ConsistencyCard
       detail={detail}

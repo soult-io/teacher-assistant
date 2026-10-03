@@ -59,3 +59,24 @@ export function probeMatchesGoal(goal: IEPGoal, probe: ProbeDefinition): boolean
   // "equal or derive": the probe condition is, or contains, the goal circumstance.
   return condition === circumstance || condition.includes(circumstance);
 }
+
+/** TEACH-41: an IEP goal label is 1–6 of [A-Za-z0-9.] — "2", "1a", "3.1", "10". */
+const GOAL_LABEL_PATTERN = /^[A-Za-z0-9.]{1,6}$/;
+
+export type GoalLabelCheck =
+  | { readonly ok: true; readonly label: string | undefined }
+  | { readonly ok: false; readonly reason: "invalid" };
+
+/**
+ * Validate a typed IEP goal label. The input is trimmed; blank means "no label"
+ * (ok, `label` undefined) — whether a label is REQUIRED is the caller's path rule
+ * (ADOPT requires one, DRAFT does not), not this check. Otherwise the trimmed text
+ * must be 1–6 of [A-Za-z0-9.], and is kept as typed (no case change).
+ */
+export function validateGoalLabel(raw: string): GoalLabelCheck {
+  const label = raw.trim();
+  if (label === "") {
+    return { ok: true, label: undefined };
+  }
+  return GOAL_LABEL_PATTERN.test(label) ? { ok: true, label } : { ok: false, reason: "invalid" };
+}

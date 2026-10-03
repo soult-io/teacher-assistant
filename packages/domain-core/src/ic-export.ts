@@ -14,7 +14,8 @@ import type {
   OpaqueId,
   ProgressDataPoint,
 } from "@teacher-assistant/schema";
-import { compareArcNewestFirst, compareCodePoints } from "./comparators.js";
+import { compareArcNewestFirst, compareCodePoints, compareGoalLabel } from "./comparators.js";
+import { duplicateGoalLabels } from "./goal-label.js";
 import { isoWeekId } from "./instructional-weeks.js";
 import {
   clampAfterFromRevisions,
@@ -39,6 +40,14 @@ export interface IcWeeklyRow {
 export interface IcGoalExport {
   readonly goalId: OpaqueId;
   readonly studentId: OpaqueId;
+  /** The IEP goal label ("2", "1a"), or null when the goal has none (TEACH-41). */
+  readonly goalLabel: string | null;
+  /**
+   * True while another goal of the same student and cohort carries the same label
+   * — the IC-prep view must flag it, since a weekly % entered against the wrong
+   * IC goal is an IEP-record error (ky-sped-lbd-sdi-sme binding condition).
+   */
+  readonly duplicateLabel: boolean;
   /** (a) One value per instructional week, in week order. */
   readonly weekly: readonly IcWeeklyRow[];
   /** (b) The F4 quarterly 5-point summary. */
@@ -128,25 +137,48 @@ function weeklyRows(points: readonly ProgressDataPoint[]): IcWeeklyRow[] {
  * are filtered out by the structural guard and produce NO output — there is no
  * code path that emits an IC block for them. (Quarterly-window clamping across a
  * criterion/denominator change is a `computeQuarterlySummary` option wired in when
- * goal-edit history is available.)
+ * goal-edit history is available.) Cards come out per student in IEP order:
+ * studentId, then goal label (number-aware, unlabeled last), then goalId. A
+ * missing label never blocks export. Duplicates are checked against ALL goals
+ * passed in (a mastered goal shares the current IEP's numbering).
  */
 export function buildIcExport(
   goals: readonly IEPGoal[],
   points: readonly ProgressDataPoint[],
 ): IcGoalExport[] {
-  return goals.filter(isIcExportable).map((goal) => {
-    const mine = points.filter((p) => p.goal_id === goal.goal_id);
-    const clampAfter = clampAfterFromRevisions(goal);
-    return {
-      goalId: goal.goal_id,
-      studentId: goal.student_id,
-      weekly: weeklyRows(mine),
-      quarterly: computeQuarterlySummary(
-        goal,
-        mine,
-        clampAfter !== undefined ? { clampAfter } : {},
-      ),
-      draftStatement: null,
-    };
-  });
+  const duplicates = new Map<OpaqueId, ReadonlyMap<OpaqueId, readonly IEPGoal[]>>();
+  const duplicatesOf = (studentId: OpaqueId) => {
+    const known = duplicates.get(studentId);
+    if (known !== undefined) {
+      return known;
+    }
+    const found = duplicateGoalLabels(goals, studentId);
+    duplicates.set(studentId, found);
+    return found;
+  };
+  return goals
+    .filter(isIcExportable)
+    .sort(
+      (a, b) =>
+        compareCodePoints(a.student_id, b.student_id) ||
+        compareGoalLabel(a.goal_label, b.goal_label) ||
+        compareCodePoints(a.goal_id, b.goal_id),
+    )
+    .map((goal) => {
+      const mine = points.filter((p) => p.goal_id === goal.goal_id);
+      const clampAfter = clampAfterFromRevisions(goal);
+      return {
+        goalId: goal.goal_id,
+        studentId: goal.student_id,
+        goalLabel: goal.goal_label ?? null,
+        duplicateLabel: duplicatesOf(goal.student_id).has(goal.goal_id),
+        weekly: weeklyRows(mine),
+        quarterly: computeQuarterlySummary(
+          goal,
+          mine,
+          clampAfter !== undefined ? { clampAfter } : {},
+        ),
+        draftStatement: null,
+      };
+    });
 }

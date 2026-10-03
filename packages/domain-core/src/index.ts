@@ -25,6 +25,8 @@ export * from "./mismatch.js";
 export * from "./consistency.js";
 export * from "./owes.js";
 export * from "./goal-validation.js";
+// TEACH-41 — the IEP goal label: audited edit + cohort-scoped duplicate check.
+export * from "./goal-label.js";
 export * from "./goal-detail.js";
 
 // M6a — IEP % → Infinite Campus export + F4 quarterly summary (phase1-spec §4).

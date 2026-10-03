@@ -6,6 +6,7 @@
 
 import type { DashboardState } from "@teacher-assistant/store";
 import { Avatar } from "../../../design/Avatar.js";
+import { DuplicateLabelCue, goalLabelSpoken } from "../../../design/GoalTitle.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { type RowVM, rowValueText } from "./dashboard-vm.js";
@@ -38,7 +39,10 @@ function RowMain({ vm, scoreLater }: { readonly vm: RowVM; readonly scoreLater: 
     <>
       <span className="rowtitle">{vm.goalText}</span>
       <span className="rowmeta">
+        {/* TEACH-41: the IEP goal # leads the grey meta line. */}
+        {vm.goalLabel !== null ? <span className="goalnum">Goal {vm.goalLabel} · </span> : null}
         {vm.periodLabel !== null ? <span className="period">{vm.periodLabel}</span> : null}
+        {vm.duplicateLabel ? <DuplicateLabelCue label={vm.goalLabel} /> : null}
         {/* Owes rows carry glanceable mid-class context: the probe + criterion. */}
         {isOwes && vm.probe !== "" ? ` · ${vm.probe}` : null}
         {isOwes && vm.criterion !== "" ? ` · ${vm.criterion}` : null}
@@ -93,7 +97,7 @@ export function GoalRow({
       <button
         type="button"
         className="rowmain tap"
-        aria-label={`open ${vm.goalText}`}
+        aria-label={`open ${goalLabelSpoken(vm.goalLabel, vm.goalText)}`}
         onClick={() => onSelect(vm)}
       >
         <RowMain vm={vm} scoreLater={scoreLater} />
@@ -102,7 +106,7 @@ export function GoalRow({
       <button
         type="button"
         className="rowmain tap"
-        aria-label={`score ${vm.goalText}`}
+        aria-label={`score ${goalLabelSpoken(vm.goalLabel, vm.goalText)}`}
         onClick={() => onOpenScore(vm)}
       >
         <RowMain vm={vm} scoreLater={scoreLater} />

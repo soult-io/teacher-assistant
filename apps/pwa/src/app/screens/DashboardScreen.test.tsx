@@ -82,13 +82,15 @@ describe("DashboardScreen (U2/U3)", () => {
 
   it("tapping an owes row opens the score sheet target", () => {
     const { onOpenScore } = renderDashboard();
-    fireEvent.click(screen.getByRole("button", { name: "score Two-step equations" }));
+    fireEvent.click(screen.getByRole("button", { name: "score Goal 1, Two-step equations" }));
     expect(onOpenScore).toHaveBeenCalledOnce();
   });
 
   it("every goal has a ↗ trend button that opens Goal Detail (D2 reachability)", () => {
     const { onOpenDetail } = renderDashboard();
-    fireEvent.click(screen.getByRole("button", { name: "trend and history Two-step equations" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "trend and history Goal 1, Two-step equations" }),
+    );
     expect(onOpenDetail).toHaveBeenCalledOnce();
   });
 

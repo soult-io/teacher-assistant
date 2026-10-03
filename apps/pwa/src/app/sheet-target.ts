@@ -10,6 +10,8 @@ export interface SheetTarget {
   readonly goalId: OpaqueId;
   readonly studentId: OpaqueId;
   readonly initials: string;
+  /** The IEP goal label ("2"), or null when unlabeled (TEACH-41) — shown in the sheet header. */
+  readonly goalLabel: string | null;
   readonly goalText: string;
   readonly periodLabel: string | null;
   readonly probeLabel: string;
@@ -37,6 +39,7 @@ export function targetForRow(vm: RowVM, lk: Lookups, adminDate: IsoDate): SheetT
     goalId: vm.goalId,
     studentId: vm.studentId,
     initials: vm.initials,
+    goalLabel: vm.goalLabel,
     goalText: vm.goalText,
     periodLabel: vm.periodLabel,
     probeLabel: probe.label,
@@ -62,6 +65,7 @@ export function targetForGoal(
     goalId: goal.goal_id,
     studentId: goal.student_id,
     initials: lk.initialsById.get(goal.student_id) ?? "??",
+    goalLabel: goal.goal_label ?? null,
     goalText: goal.goal_text,
     periodLabel: periodLabelOf(goal.student_id, lk),
     probeLabel: probe.label,
@@ -79,6 +83,7 @@ export function targetForQueued(point: ProgressDataPoint, lk: Lookups): SheetTar
     goalId: point.goal_id,
     studentId: point.student_id,
     initials: lk.initialsById.get(point.student_id) ?? "??",
+    goalLabel: lk.goalLabelById.get(point.goal_id) ?? null,
     goalText: lk.goalTextById.get(point.goal_id) ?? "(goal)",
     periodLabel: periodLabelOf(point.student_id, lk),
     probeLabel: probe.label,

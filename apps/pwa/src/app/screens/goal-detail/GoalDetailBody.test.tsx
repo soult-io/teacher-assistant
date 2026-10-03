@@ -27,6 +27,8 @@ function renderBody(layout: GoalDetailLayout) {
         onAddPoint={vi.fn()}
         onEditPoint={vi.fn()}
         onAckMastery={vi.fn()}
+        labelDuplicates={[]}
+        onSetGoalLabel={vi.fn()}
         layout={layout}
       />
     </div>,

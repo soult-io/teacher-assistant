@@ -6,6 +6,7 @@
 import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { buildToScoreQueue } from "@teacher-assistant/store";
 import { Avatar } from "../../design/Avatar.js";
+import { GoalTitle } from "../../design/GoalTitle.js";
 import type { DecryptedRecords } from "../../data/repository.js";
 import { type Lookups, orderToScoreQueue, periodLabelOf } from "./dashboard/dashboard-vm.js";
 
@@ -44,6 +45,7 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
           }
           const initials = lk.initialsById.get(entry.studentId) ?? "??";
           const goalText = lk.goalTextById.get(entry.goalId) ?? "(goal)";
+          const goalLabel = lk.goalLabelById.get(entry.goalId);
           // §E.1: the period tag stays on the queue row (the Quick-Score header shows it too).
           const periodLabel = periodLabelOf(entry.studentId, lk);
           return (
@@ -59,7 +61,8 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
               <Avatar initials={initials} />
               <div className="rowmain">
                 <span className="rowtitle">
-                  {goalText} <span className="editpt">full editor ›</span>
+                  <GoalTitle label={goalLabel} text={goalText} />{" "}
+                  <span className="editpt">full editor ›</span>
                 </span>
                 <span className="rowmeta">
                   {periodLabel !== null ? <span className="period">{periodLabel}</span> : null}{" "}

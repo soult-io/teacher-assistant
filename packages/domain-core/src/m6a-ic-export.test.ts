@@ -258,3 +258,72 @@ describe("SME PASS-WITH-CHANGES regressions (M6a PR#16)", () => {
     expect(isIcExportable(makeGoal({ criterion: 0 }))).toBe(false);
   });
 });
+
+// TEACH-41 — the IEP goal label in the IC export engine: carried per card, the
+// cards sorted per student in IEP order, a duplicate flagged, never a blocker.
+describe("M6a — IC export goal label (TEACH-41)", () => {
+  const forStudent = (
+    studentId: IEPGoal["student_id"],
+    over: Partial<Pick<IEPGoal, "goal_label" | "status">> = {},
+  ): IEPGoal => ({ ...makeGoal(), student_id: studentId, ...over });
+
+  it("carries goalLabel (null when unlabeled) and sorts studentId → label (1 < 1a < 2 < 10, none last) → goalId", () => {
+    const [s1, s2] = [newOpaqueId(), newOpaqueId()].sort();
+    const s1None = forStudent(s1 as IEPGoal["student_id"]);
+    const s1Ten = forStudent(s1 as IEPGoal["student_id"], { goal_label: "10" });
+    const s1Two = forStudent(s1 as IEPGoal["student_id"], { goal_label: "2" });
+    const s1OneA = forStudent(s1 as IEPGoal["student_id"], { goal_label: "1a" });
+    const s1One = forStudent(s1 as IEPGoal["student_id"], { goal_label: "1" });
+    const s2One = forStudent(s2 as IEPGoal["student_id"], { goal_label: "1" });
+    const out = buildIcExport([s2One, s1None, s1Ten, s1Two, s1OneA, s1One], []);
+    expect(out.map((e) => [e.studentId, e.goalLabel])).toEqual([
+      [s1, "1"],
+      [s1, "1a"],
+      [s1, "2"],
+      [s1, "10"],
+      [s1, null],
+      [s2, "1"],
+    ]);
+  });
+
+  it("two unlabeled goals of one student fall back to goalId order", () => {
+    const s = newOpaqueId();
+    const a = forStudent(s);
+    const b = forStudent(s);
+    const out = buildIcExport([b, a], []);
+    expect(out.map((e) => e.goalId)).toEqual([a.goal_id, b.goal_id].sort());
+  });
+
+  it("flags duplicateLabel on BOTH same-cohort goals, counting a mastered (non-exported) goal", () => {
+    const s = newOpaqueId();
+    const one = forStudent(s, { goal_label: "1" });
+    const twoA = forStudent(s, { goal_label: "2" });
+    const twoB = forStudent(s, { goal_label: "2" });
+    const out = buildIcExport([one, twoA, twoB], []);
+    expect(out.map((e) => [e.goalLabel, e.duplicateLabel])).toEqual([
+      ["1", false],
+      ["2", true],
+      ["2", true],
+    ]);
+    const mastered = forStudent(s, { goal_label: "1", status: "mastered" });
+    const [first] = buildIcExport([one, mastered], []);
+    expect(first?.duplicateLabel).toBe(true);
+  });
+
+  it("a proposed or retired goal with the same label is no duplicate", () => {
+    const s = newOpaqueId();
+    const active = forStudent(s, { goal_label: "2" });
+    const proposed = forStudent(s, { goal_label: "2", status: "proposed" });
+    const retired = forStudent(s, { goal_label: "2", status: "retired" });
+    const out = buildIcExport([active, proposed, retired], []);
+    expect(out).toHaveLength(1);
+    expect(out[0]?.duplicateLabel).toBe(false);
+  });
+
+  it("a missing label never blocks export", () => {
+    const g = makeGoal();
+    expect(g.goal_label).toBeUndefined();
+    expect(isIcExportable(g)).toBe(true);
+    expect(buildIcExport([g], [])).toHaveLength(1);
+  });
+});

@@ -116,4 +116,27 @@ describe("assembleGoal (U5 create)", () => {
     const { goal } = assembleGoal({ ...filledDraft(), initials: "j.a.s." }, newOpaqueId(), nowTs());
     expect(goal.goal_text.startsWith("JAS will ")).toBe(true);
   });
+
+  it("IEP goal #: parsed trimmed, blank → absent, invalid → absent (TEACH-41)", () => {
+    const labelOf = (goalLabel: string) =>
+      assembleGoal(filledDraft({ goalLabel }), newOpaqueId(), nowTs()).goal.goal_label;
+    expect(labelOf(" 2 ")).toBe("2");
+    expect(labelOf("1a")).toBe("1a");
+    expect(labelOf("")).toBeUndefined();
+    expect(labelOf("   ")).toBeUndefined();
+    expect(labelOf("Goal 2")).toBeUndefined();
+    const blank = assembleGoal(filledDraft(), newOpaqueId(), nowTs()).goal;
+    expect("goal_label" in blank).toBe(false);
+  });
+
+  it("the label is outside the baseline-mandatory gate and is never auto-filled", () => {
+    expect(emptyForm().goalLabel).toBe("");
+    const { goal } = assembleGoal(
+      filledDraft({ path: "adopt", baseline: "20" }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.goal_label).toBeUndefined();
+    expect(canBeginMonitoring(goal).ok).toBe(true);
+  });
 });

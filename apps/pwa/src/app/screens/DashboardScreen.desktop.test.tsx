@@ -53,8 +53,10 @@ describe("DashboardScreen — desktop master-detail (U7)", () => {
   it("rows SELECT into the pane (open), never score, and drop the mobile footer actions", () => {
     renderDesktop();
     // Desktop rows are 'open …' (select), not 'score …'.
-    expect(screen.getByRole("button", { name: "open Two-step equations" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "score Two-step equations" })).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "open Goal 1, Two-step equations" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "score Goal 1, Two-step equations" })).toBeNull();
     // The dashboard footer destinations moved to the sidebar — not on the dashboard.
     expect(screen.queryByTestId("to-score")).toBeNull();
     expect(screen.queryByRole("button", { name: "+ New goal" })).toBeNull();
@@ -63,7 +65,7 @@ describe("DashboardScreen — desktop master-detail (U7)", () => {
   it("clicking a row selects it (accent highlight) and repaints the pane", () => {
     renderDesktop();
     const before = screen.getByTestId("pane-content").textContent;
-    const rowBtn = screen.getByRole("button", { name: "open Multiply fractions" });
+    const rowBtn = screen.getByRole("button", { name: "open Goal 2, Multiply fractions" });
     fireEvent.click(rowBtn);
     expect(rowBtn.closest(".row")?.className).toContain("selected");
     // The pane now shows a different goal than the auto-selected one.
