@@ -231,6 +231,7 @@ function ReadyApp({
   // Detail, the score modal and tab switches (TEACH-43). ReadyApp mounts on unlock, so
   // each unlock starts on owes-first; it is never persisted across reloads.
   const [lens, setLens] = useState<DashboardLens>("owes_first");
+  const lensControl = useMemo(() => ({ lens, onChange: setLens }), [lens]);
   const [detailGoalId, setDetailGoalId] = useState<OpaqueId | null>(null);
   const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
   const [paraFix, setParaFix] = useState<ProgressDataPoint | null>(null);
@@ -561,8 +562,7 @@ function ReadyApp({
         onOpenScore={setSheetTarget}
         onOpenDetail={openDetail}
         apply={apply}
-        lens={lens}
-        onLensChange={setLens}
+        lensControl={lensControl}
         isDesktop={isDesktop}
         validationStrip={validationStrip}
       />

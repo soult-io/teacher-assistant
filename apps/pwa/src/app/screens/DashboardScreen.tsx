@@ -12,7 +12,7 @@
 // Goal Detail. Pending para points render as a full-width table strip above the cards.
 //
 // The grouping lens is owned by App (kept across Goal Detail and Back, reset on
-// unlock); without a `lens` prop the screen keeps its own.
+// unlock); without `lensControl` the screen keeps its own.
 
 import { asTimestamp, type OpaqueId, type ProgressDataPoint } from "@teacher-assistant/schema";
 import {
@@ -201,8 +201,10 @@ export interface DashboardScreenProps {
   readonly onOpenDetail: (goalId: OpaqueId) => void;
   readonly apply: (mutator: DocMutator) => Promise<void>;
   /** The grouping lens, when the caller owns it (App keeps it across Back). */
-  readonly lens?: DashboardLens;
-  readonly onLensChange?: (lens: DashboardLens) => void;
+  readonly lensControl?: {
+    readonly lens: DashboardLens;
+    readonly onChange: (lens: DashboardLens) => void;
+  };
   /** Desktop student-card layout (TEACH-43). Absent/false → the validated mobile layout. */
   readonly isDesktop?: boolean;
   /** Desktop only: the full-width para-validation table strip, above the cards. */
@@ -226,8 +228,8 @@ export function DashboardScreen(props: DashboardScreenProps) {
     validationStrip,
   } = props;
   const [ownLens, setOwnLens] = useState<DashboardLens>("owes_first");
-  const lens = props.lens ?? ownLens;
-  const setLens = props.onLensChange ?? setOwnLens;
+  const lens = props.lensControl?.lens ?? ownLens;
+  const setLens = props.lensControl?.onChange ?? setOwnLens;
   const today = isoDateOf(now);
 
   const dashboard = useMemo(

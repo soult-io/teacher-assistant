@@ -1694,11 +1694,6 @@ button.rowmain {
     margin-left: auto;
   }
 
-  /* The dashboard detail PANE stacks in one column (design §3.1) even on desktop. */
-  .gd-pane .twocol {
-    grid-template-columns: 1fr;
-  }
-
   /* ── Quick-Score / para capture → centered modal (design §3.3) ── */
   .sheet {
     top: 50%;

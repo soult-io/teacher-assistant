@@ -299,9 +299,10 @@ function stubDesktop() {
 
 function groupBy(label: string) {
   const toggle = screen.getByTestId("group-toggle");
-  while (!(toggle.textContent ?? "").includes(label)) {
+  for (let i = 0; i < 3 && !(toggle.textContent ?? "").includes(label); i++) {
     fireEvent.click(toggle);
   }
+  expect(toggle).toHaveTextContent(`Group: ${label}`);
 }
 
 describe("App — the dashboard grouping survives Goal Detail and tab switches (TEACH-43)", () => {

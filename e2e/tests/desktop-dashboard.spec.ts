@@ -33,7 +33,7 @@ async function screenOverflow(page: Page): Promise<number> {
 
 async function groupBy(page: Page, label: string) {
   const toggle = page.getByTestId("group-toggle");
-  while (!((await toggle.textContent()) ?? "").includes(label)) {
+  for (let i = 0; i < 3 && !((await toggle.textContent()) ?? "").includes(label); i++) {
     await toggle.click();
   }
   await expect(toggle).toHaveText(`Group: ${label}`);
