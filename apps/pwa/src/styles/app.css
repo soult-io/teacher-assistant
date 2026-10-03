@@ -1893,3 +1893,70 @@ button.rowmain {
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+/* TEACH-41 — IEP goal label: the grey "Goal 2 ·" prefix, the inline goal # editor,
+   and the lasting duplicate-label cue. */
+.goalnum {
+  color: var(--text-dim);
+  font-weight: 500;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+.linkbtn {
+  background: none;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  font-size: 0.78rem;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.linkbtn.add {
+  color: var(--text-dim);
+  text-decoration: none;
+}
+.goallabel-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.15rem 0;
+}
+.goallabel-box {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.goallabel-in {
+  width: 5.5rem;
+  flex: none;
+}
+.dupcue {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--owes);
+  background: var(--owes-bg);
+  border: 1px solid var(--owes-line);
+  border-radius: 6px;
+  padding: 0.03rem 0.3rem;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+.arcrow {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  column-gap: 0.8rem;
+}

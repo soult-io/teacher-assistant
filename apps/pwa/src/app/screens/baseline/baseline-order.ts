@@ -5,9 +5,10 @@ import { compareCodePoints } from "@teacher-assistant/domain-core";
 import type { BaselinePoint, IEPGoal } from "@teacher-assistant/schema";
 import { compareStudentGoal, type StudentResolvers, studentGoalKey } from "../../display-order.js";
 
-/** Proposed-goal cards in the shared student-goal order; goalId only for true duplicates. */
+/** Proposed-goal cards in the shared student-goal order (IEP label, then text); goalId only for true duplicates. */
 export function orderProposedGoals(goals: readonly IEPGoal[], r: StudentResolvers): IEPGoal[] {
-  const key = (g: IEPGoal) => studentGoalKey(g.student_id, g.goal_text, r);
+  const key = (g: IEPGoal) =>
+    studentGoalKey(g.student_id, { goalLabel: g.goal_label ?? null, goalText: g.goal_text }, r);
   return [...goals].sort(
     (a, b) => compareStudentGoal(key(a), key(b)) || compareCodePoints(a.goal_id, b.goal_id),
   );

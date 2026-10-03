@@ -1,8 +1,10 @@
 // @vitest-environment node
 import type { DashboardGroup } from "@teacher-assistant/store";
 import { buildToScoreQueue, buildWeeklyDashboard, groupDashboard } from "@teacher-assistant/store";
+import { duplicateLabelGoalIds } from "@teacher-assistant/domain-core";
 import { describe, expect, it } from "vitest";
 import { buildSyntheticSeed, type SyntheticSeed } from "../../../data/synthetic-seed.js";
+import { goalLabel } from "../../../design/GoalTitle.js";
 import {
   buildLookups,
   buildStudentCards,
@@ -148,9 +150,16 @@ describe("dashboard view-models", () => {
     expect(ordered.map((x) => x.key)).toEqual(["id-c", "id-a", "id-d", "id-b", "unassigned"]);
   });
 
-  it("lists each student's goals A–Z by goal text, case-insensitively (TEACH-25)", () => {
+  it("lists each student's unlabeled goals A–Z by goal text, case-insensitively (TEACH-25)", () => {
     const vm = (initials: string, goalText: string, goalId: string, periodLabel: string | null) =>
-      ({ initials, goalText, goalId, periodLabel, studentId: `s-${initials}` }) as RowVM;
+      ({
+        initials,
+        goalLabel: null,
+        goalText,
+        goalId,
+        periodLabel,
+        studentId: `s-${initials}`,
+      }) as RowVM;
     const rows = [
       vm("AB", "two-step equations", "g-1", "P2"),
       vm("AB", "Add integers", "g-9", "P2"),
@@ -172,19 +181,21 @@ describe("dashboard view-models", () => {
     expect(inits).toEqual([...inits].sort());
   });
 
-  it("shows the seed's rows in the ruled order: goals A–Z within each student", () => {
+  it("shows the seed's rows in the ruled order: goals in IEP-label order within each student (TEACH-41)", () => {
     const shown = displayed(fixture());
     expect(shown.owes).toEqual(["AB Two-step equations", "CD Multiply fractions"]);
     expect(shown.done).toEqual(["AB Add integers", "CD Number line", "EF Scientific notation"]);
     // Newest point wins: this week's 80%, not the week-7 40% (record order is irrelevant).
     expect(shown.values).toContain("AB Add integers 80%");
+    // IEP order, not A–Z: AB Goal 1 "Two-step equations" before Goal 2 "Add integers";
+    // CD Goal 1 "Number line" before Goal 2 "Multiply fractions".
     expect(shown.cards).toEqual([
-      "AB: Add integers | Two-step equations",
-      "CD: Multiply fractions | Number line",
+      "AB: Goal 1 · Two-step equations | Goal 2 · Add integers",
+      "CD: Goal 1 · Number line | Goal 2 · Multiply fractions",
       "EF: Scientific notation",
     ]);
     expect(shown.periods).toEqual([
-      "P2: AB Add integers | AB Two-step equations | CD Multiply fractions | CD Number line",
+      "P2: AB Two-step equations | AB Add integers | CD Number line | CD Multiply fractions",
       "P4: EF Scientific notation",
     ]);
     expect(shown.validation).toEqual([
@@ -207,7 +218,9 @@ function displayed({ full, lk, dash }: ReturnType<typeof fixture>) {
     values: orderRowsByStudent(rows).map((r) => `${text(r)} ${rowValueText(r) ?? "owes"}`),
     owes: orderRowsByStudent(rows.filter((r) => r.state === "owes")).map(text),
     done: orderRowsByStudent(rows.filter((r) => r.state !== "owes")).map(text),
-    cards: cards.map((c) => `${c.initials}: ${c.rows.map((r) => r.goalText).join(" | ")}`),
+    cards: cards.map(
+      (c) => `${c.initials}: ${c.rows.map((r) => goalLabel(r.goalLabel, r.goalText)).join(" | ")}`,
+    ),
     periods: periods.map(
       (g) =>
         `${periodLabelOfGroup(g, lk)}: ${orderRowsByStudent(g.rows.map((r) => toRowVM(r, lk)))
@@ -247,6 +260,61 @@ function remint(full: SyntheticSeed, order: "same" | "reversed"): SyntheticSeed 
   return remapped;
 }
 
+describe("IEP goal label on rows + the lasting duplicate cue (TEACH-41)", () => {
+  it("resolves each row's label (null when unlabeled) and no duplicate in the seed", () => {
+    const { lk, dash, goalId } = fixture();
+    const vmOf = (text: string) => {
+      const row = dash.rows.find((r) => r.goalId === goalId(text));
+      if (row === undefined) {
+        throw new Error(`expected the ${text} row`);
+      }
+      return toRowVM(row, lk);
+    };
+    expect(vmOf("Two-step equations")).toMatchObject({ goalLabel: "1", duplicateLabel: false });
+    expect(vmOf("Add integers")).toMatchObject({ goalLabel: "2", duplicateLabel: false });
+    expect(vmOf("Scientific notation")).toMatchObject({ goalLabel: null, duplicateLabel: false });
+  });
+
+  it("flags BOTH duplicate rows, and clears once one label changes", () => {
+    const full = buildSyntheticSeed(NOW);
+    const relabel = (label: string) => ({
+      ...full,
+      master: {
+        ...full.master,
+        goals: full.master.goals.map((g) =>
+          g.goal_text === "Add integers" && g.status === "active" ? { ...g, goal_label: label } : g,
+        ),
+      },
+    });
+    const dupe = fixture(relabel("1")); // AB now has two Goal 1
+    const flagged = dupe.dash.rows
+      .map((r) => toRowVM(r, dupe.lk))
+      .filter((v) => v.duplicateLabel)
+      .map((v) => `${v.initials} ${v.goalText}`)
+      .sort();
+    expect(flagged).toEqual(["AB Add integers", "AB Two-step equations"]);
+    const fixed = fixture(relabel("3"));
+    expect(fixed.dash.rows.map((r) => toRowVM(r, fixed.lk)).some((v) => v.duplicateLabel)).toBe(
+      false,
+    );
+  });
+
+  it("a retired goal with the same label never triggers the cue", () => {
+    const full = buildSyntheticSeed(NOW);
+    const ab = full.master.goals.find((g) => g.goal_text === "Two-step equations");
+    if (ab === undefined) {
+      throw new Error("expected AB Two-step equations");
+    }
+    const retired = {
+      ...ab,
+      goal_id: "retired-1" as typeof ab.goal_id,
+      status: "retired" as const,
+    };
+    const ids = duplicateLabelGoalIds([...full.master.goals, retired]);
+    expect(ids.size).toBe(0);
+  });
+});
+
 describe("queue display order (TEACH-25)", () => {
   it("orders the To-Score queue by student-goal, then admin date, then point id", () => {
     const { lk, goalId, seed } = fixture();
@@ -267,10 +335,10 @@ describe("queue display order (TEACH-25)", () => {
       entry("Add integers", "2026-09-10", "p-5"),
     ];
     expect(orderToScoreQueue(queue, lk).map((e) => e.dataPointId)).toEqual([
-      "p-5", // AB Add integers, oldest
+      "p-1", // AB Goal 1 Two-step equations (IEP order, TEACH-41)
+      "p-5", // AB Goal 2 Add integers, oldest
       "p-3", // same goal + date → point id
       "p-4",
-      "p-1", // AB Two-step equations
       "p-2", // CD
     ]);
   });

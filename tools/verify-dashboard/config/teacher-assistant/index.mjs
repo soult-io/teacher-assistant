@@ -82,6 +82,11 @@ export const journeyManifest = [
     name: "No-data — a documented gap, not a zero",
     match: { file: "j6-no-data.spec.ts" },
   },
+  {
+    id: "J7",
+    name: "Goals listed in IEP order",
+    match: { file: "j7-iep-goal-order.spec.ts" },
+  },
 ];
 
 export const branding = {

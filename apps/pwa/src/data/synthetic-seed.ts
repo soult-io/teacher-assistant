@@ -338,16 +338,21 @@ export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   const abTwoStep: IEPGoal = {
     ...baseGoal(ab.student_id, "Two-step equations", createdTs),
     ...baselined(35),
+    // TEACH-41: IEP order differs from A–Z — AB's Goal 1 is "Two-step equations",
+    // Goal 2 "Add integers"; CD's Goal 1 "Number line", Goal 2 "Multiply fractions".
+    goal_label: "1",
     status: "active",
   };
   const cdFractions: IEPGoal = {
     ...baseGoal(cd.student_id, "Multiply fractions", createdTs),
     ...baselined(45),
+    goal_label: "2",
     status: "active",
   };
   const abIntegers: IEPGoal = {
     ...baseGoal(ab.student_id, "Add integers", createdTs),
     ...baselined(40),
+    goal_label: "2",
     status: "active",
   };
   const efSciNotation: IEPGoal = {
@@ -358,9 +363,11 @@ export function buildSyntheticSeed(now: Date = new Date()): SyntheticSeed {
   const cdNumberLine: IEPGoal = {
     ...baseGoal(cd.student_id, "Number line", createdTs),
     ...baselined(40),
+    goal_label: "1",
     status: "active",
   };
-  // Proposed (baselining) — must NEVER reach the active weekly dashboard. Carries an
+  // Proposed (baselining) — must NEVER reach the active weekly dashboard. No IEP
+  // label: the new IEP's numbers may only be final at the ARC (TEACH-41 DRAFT path). Carries an
   // arc_date ~2 weeks out (so the baseline window is open + a reminder shows) and ≥3
   // comparable baseline points (below) so the estimate + median-of-3 are exercised.
   const ghProbeConditionId = newOpaqueId();

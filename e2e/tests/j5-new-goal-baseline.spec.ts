@@ -112,6 +112,24 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     );
 
     await step(
+      "Enter the IEP goal # from the printed IEP — required to adopt, typed by the teacher, never auto-filled",
+      async () => {
+        const label = page.getByTestId("ng-goal-label");
+        await expect(
+          label,
+          "the IEP goal # starts empty — the app never guesses a number",
+        ).toHaveValue("");
+        // AB already has Goal 1 and Goal 2 in the synthetic seed.
+        await enterText(label, "3");
+        await expect(label, "the typed IEP goal # is kept as entered").toHaveValue("3");
+        await expect(
+          page.getByTestId("ng-goal-label-dup"),
+          "Goal 3 is new for AB, so no duplicate warning shows",
+        ).toHaveCount(0);
+      },
+    );
+
+    await step(
       "Baseline is MANDATORY — with every other field filled but no baseline, Save is BLOCKED (disabled), not merely nagged",
       async () => {
         await expect(
@@ -200,6 +218,10 @@ test.describe("J5 — New goal → mandatory baseline", () => {
     await step(
       "On the DRAFT path a baseline is NOT required to save — it is gathered later in the Baseline track",
       async () => {
+        await expect(
+          page.getByTestId("ng-goal-label"),
+          "the IEP goal # is left blank — optional on a draft, whose number may only be final at the ARC",
+        ).toHaveValue("");
         await expect(
           page.getByTestId("ng-submit"),
           "a draft (proposed) goal saves without a baseline; the mandatory gate is the ADOPT-path rule",
@@ -306,6 +328,27 @@ test.describe("J5 — New goal → mandatory baseline", () => {
           card.locator('input[type="date"]'),
           "the card exposes exactly one date control (ARC) — the IEP-end date is a separate field, not this one",
         ).toHaveCount(1);
+      },
+    );
+
+    await step(
+      "Adoption at ARC needs the IEP goal # — blocked with a plain reason until it is added on the card",
+      async () => {
+        await expect(
+          card.getByTestId("adopt-button"),
+          "an unnumbered goal cannot be adopted, the same rule as the New-Goal ADOPT path",
+        ).toBeDisabled();
+        await expect(
+          card.getByTestId("adopt-needs-label"),
+          "the reason points at the inline IEP goal # box on this card",
+        ).toContainText("Add the IEP goal # first");
+        await card.getByTestId("goal-label-edit").click();
+        await enterText(card.getByTestId("goal-label-input"), "3");
+        await card.getByTestId("goal-label-input").press("Enter");
+        await expect(
+          card.getByTestId("adopt-button"),
+          "once the IEP goal # is saved, adoption is allowed",
+        ).toBeEnabled();
       },
     );
 

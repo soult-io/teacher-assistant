@@ -104,6 +104,15 @@ export interface IEPGoal {
   readonly student_id: OpaqueId;
   /** Full composed goal; audience = initials only, no other student named. */
   readonly goal_text: string;
+  /**
+   * The IEP's own goal number/label as the teacher typed it ("2", "1a", "3.1") —
+   * trimmed, 1–6 of [A-Za-z0-9.] (validateGoalLabel). Optional: older goals and
+   * DRAFT goals may have none, and it is never guessed or backfilled. Sorts each
+   * student's goals in IEP order. Teacher-only: encrypted with the goal, never in
+   * the envelope, and NOT on the para path (TEACH-41). Changed only via
+   * setGoalLabel, which appends an audited Revision.
+   */
+  readonly goal_label?: string;
   readonly behavior: string;
   readonly circumstance: string;
   /** Mastery %, 70–90 (most 80). */

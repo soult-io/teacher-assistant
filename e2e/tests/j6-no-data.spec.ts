@@ -7,7 +7,7 @@
 // assertions — written as human-readable evidence, verbatim.
 
 import { expect, test } from "./support/journey";
-import { goalRow, unlockToDashboard } from "./support/track";
+import { goalActionName, goalRow, unlockToDashboard } from "./support/track";
 
 test.describe("J6 — No-data (⊘ not 0)", () => {
   test("owed goal → No data → required reason → ⊘ recorded, owe clears, gap not a zero", async ({
@@ -24,7 +24,7 @@ test.describe("J6 — No-data (⊘ not 0)", () => {
     await step("Open Quick-Score for an owed goal, then switch to No data", async () => {
       await expect(oweCount, "owe-count header reads 2 before recording no-data").toHaveText("2");
       await goalRow(page, GOAL)
-        .getByRole("button", { name: `score ${GOAL}` })
+        .getByRole("button", { name: goalActionName("score", GOAL) })
         .click();
       await page.getByTestId("no-data").click();
     });
@@ -67,7 +67,7 @@ test.describe("J6 — No-data (⊘ not 0)", () => {
 
     await step("Goal Detail: ⊘ is a gap in the trend, never a plotted zero", async () => {
       await goalRow(page, GOAL)
-        .getByRole("button", { name: `trend and history ${GOAL}` })
+        .getByRole("button", { name: goalActionName("trend and history", GOAL) })
         .click();
       const chart = page.locator("svg.trendsvg");
       await expect(chart, "the trend chart renders").toBeVisible();

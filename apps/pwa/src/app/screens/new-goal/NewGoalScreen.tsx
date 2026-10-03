@@ -5,21 +5,29 @@
 // DRAFT allows only the baseline to be missing (it is gathered later in the
 // baseline track). Two paths: ADOPT → active, DRAFT → a proposed goal to baseline.
 
-import { canBeginMonitoring } from "@teacher-assistant/domain-core";
+import {
+  canBeginMonitoring,
+  goalLabelConflicts,
+  usableGoalLabel,
+  validateGoalLabel,
+} from "@teacher-assistant/domain-core";
 import {
   type AccomMod,
   ACCOM_MODS,
   type DenominatorBasis,
   type Frequency,
   FREQUENCIES,
+  type IEPGoal,
   type MethodGeneral,
   METHODS_GENERAL,
   newOpaqueId,
   normalizeInitials,
+  type OpaqueId,
   type Setting,
   SETTINGS,
 } from "@teacher-assistant/schema";
 import { useState } from "react";
+import { GOAL_LABEL_INVALID } from "../../GoalLabelEditor.js";
 import { assembleGoal, emptyForm, type NewGoalForm, nowTs } from "./assemble.js";
 
 const ACCOM_LABEL: Readonly<Record<AccomMod, string>> = {
@@ -113,22 +121,107 @@ function gateMessage(path: NewGoalForm["path"], ready: boolean): string {
   if (path === "adopt") {
     return ready
       ? "✓ Baseline + criterion (level & consistency) present — this goal can go active and feed IC."
-      : "Baseline-mandatory: a goal cannot go active without a baseline value AND a criterion with level + consistency.";
+      : "Baseline-mandatory: a goal cannot go active without a baseline value AND a criterion with level + consistency, and needs its IEP goal #.";
   }
   return ready
     ? "✓ Ready to baseline. Proposed goals never feed IC and carry no weekly “owes” until adopted at ARC."
     : "Fill the KY goal components + the accommodation label to start baselining.";
 }
 
+/**
+ * TEACH-41 label readiness: ADOPT requires a valid IEP goal #, DRAFT accepts a
+ * blank one (the new IEP's numbers may only be final at the ARC); an invalid
+ * entry blocks either path.
+ */
+function labelReady(path: NewGoalForm["path"], raw: string): boolean {
+  return validateGoalLabel(raw).ok && (path === "draft" || usableGoalLabel(raw) !== undefined);
+}
+
+/**
+ * The non-blocking duplicate line under the IEP goal # field: "AB already has Goal 2
+ * — Add integers". Same student + same cohort only (ADOPT = current IEP, DRAFT = next
+ * IEP). Null when there is nothing to warn about.
+ */
+function duplicateWarning(
+  form: NewGoalForm,
+  goals: readonly IEPGoal[],
+  studentId: OpaqueId | undefined,
+): string | null {
+  const label = usableGoalLabel(form.goalLabel);
+  if (studentId === undefined || label === undefined) {
+    return null;
+  }
+  const clashes = goalLabelConflicts(goals, {
+    student_id: studentId,
+    status: form.path === "adopt" ? "active" : "proposed",
+    goal_label: label,
+  });
+  if (clashes.length === 0) {
+    return null;
+  }
+  // A resolved student implies valid initials; show them in canonical form (TEACH-40).
+  const initials = normalizeInitials(form.initials) ?? form.initials.trim();
+  const texts = clashes.map((g) => g.goal_text).join(" / ");
+  return `${initials} already has Goal ${label} — ${texts}`;
+}
+
 export interface NewGoalScreenProps {
+  /** Every goal on record — the IEP goal # duplicate warning reads the student's goals. */
+  readonly goals: readonly IEPGoal[];
+  /** The existing student these initials resolve to (the same match the submit uses), if any. */
+  readonly studentIdForInitials: (initials: string) => OpaqueId | undefined;
   readonly onSubmit: (form: NewGoalForm) => void;
   readonly onBack: () => void;
 }
 
-export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
+/**
+ * Student initials (TEACH-40). One form cell (desktop grid) for the field + its error;
+ * the error sits outside the <label>, so it is the input's description, not part of
+ * its name. It waits for the first blur, so typing "JAS" never flashes it at "J", and
+ * flags only a non-empty bad entry (an empty field is just "not filled yet").
+ */
+function InitialsField({
+  value,
+  onChange,
+}: {
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+}) {
+  const [touched, setTouched] = useState(false);
+  const error = touched && value.trim() !== "" && normalizeInitials(value) === undefined;
+  return (
+    <div className="ngfieldwrap">
+      <Field label="Student initials" hint="(Audience)" required>
+        <input
+          className="tin"
+          data-testid="ng-initials"
+          value={value}
+          placeholder="e.g. AB or JAS"
+          // Room for "J.A.S."; normalizeInitials enforces the real 2–3 letter rule.
+          maxLength={6}
+          autoComplete="off"
+          aria-invalid={error}
+          aria-describedby={error ? "ng-initials-error" : undefined}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => setTouched(true)}
+        />
+      </Field>
+      {error ? (
+        <span className="ngerror" id="ng-initials-error" role="alert">
+          Use 2 or 3 letters (initials only)
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+export function NewGoalScreen({
+  goals,
+  studentIdForInitials,
+  onSubmit,
+  onBack,
+}: NewGoalScreenProps) {
   const [form, setForm] = useState<NewGoalForm>(emptyForm);
-  // The initials error waits for the first blur, so typing "JAS" never flashes it at "J".
-  const [initialsTouched, setInitialsTouched] = useState(false);
   const set = <K extends keyof NewGoalForm>(key: K, value: NewGoalForm[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -140,11 +233,12 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
   // own required-marked text fields the gate doesn't cover: initials = the audience
   // (2–3 letters via the schema rule, TEACH-40) and the method tool (presence).
   const initialsValid = normalizeInitials(form.initials) !== undefined;
-  // Flag only a non-empty bad entry; an empty field is just "not filled yet".
-  const initialsError = initialsTouched && form.initials.trim() !== "" && !initialsValid;
   const fieldsPresent = initialsValid && form.methodTool.trim() !== "";
   const gateReady = form.path === "adopt" ? check.ok : draftReady(check.missing);
-  const ready = gateReady && fieldsPresent;
+  const labelOk = labelReady(form.path, form.goalLabel);
+  const labelInvalid = !validateGoalLabel(form.goalLabel).ok;
+  const dupLine = duplicateWarning(form, goals, studentIdForInitials(form.initials));
+  const ready = gateReady && fieldsPresent && labelOk;
   const variable = form.denominatorBasis === "variable";
 
   return (
@@ -181,30 +275,32 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           </div>
         </Group>
 
-        {/* One form cell (desktop grid) for the field + its error. The error sits outside
-            the <label>, so it is the input's description, not part of its name. */}
-        <div className="ngfieldwrap">
-          <Field label="Student initials" hint="(Audience)" required>
+        <div className="two">
+          <InitialsField value={form.initials} onChange={(v) => set("initials", v)} />
+          {/* TEACH-41: the IEP's own goal number — required to ADOPT, optional on a DRAFT
+              (final at the ARC). Typed from the IEP, never auto-filled. */}
+          <Field label="IEP goal #" hint="(from the IEP)" required={form.path === "adopt"}>
             <input
               className="tin"
-              data-testid="ng-initials"
-              value={form.initials}
-              placeholder="e.g. AB"
-              // Room for "J.A.S."; normalizeInitials enforces the real 2–3 letter rule.
+              data-testid="ng-goal-label"
+              value={form.goalLabel}
+              placeholder="e.g. 1"
               maxLength={6}
-              autoComplete="off"
-              aria-invalid={initialsError}
-              aria-describedby={initialsError ? "ng-initials-error" : undefined}
-              onChange={(e) => set("initials", e.target.value)}
-              onBlur={() => setInitialsTouched(true)}
+              aria-invalid={labelInvalid}
+              onChange={(e) => set("goalLabel", e.target.value)}
             />
           </Field>
-          {initialsError ? (
-            <span className="ngerror" id="ng-initials-error" role="alert">
-              Use 2 or 3 letters (initials only)
-            </span>
-          ) : null}
         </div>
+        {labelInvalid ? (
+          <div className="note warn" role="alert" data-testid="ng-goal-label-invalid">
+            {GOAL_LABEL_INVALID}
+          </div>
+        ) : null}
+        {dupLine !== null ? (
+          <div className="note warn" data-testid="ng-goal-label-dup">
+            {dupLine}
+          </div>
+        ) : null}
         <Field label="Behavior" hint="(what the student will do)" required>
           <input
             className="tin"

@@ -73,6 +73,7 @@ function ctx(over?: Partial<ParaCaptureContext>): ParaCaptureContext {
 describe("#1/#4/#7 — the para-visible source references NO teacher-MK goal field", () => {
   const mkGoalFields: readonly RegExp[] = [
     /\bgoal_text\b/,
+    /\bgoal_label\b/, // TEACH-41: the IEP goal # is teacher-only — never on the para path
     /\.behavior\b/, // a goal.behavior READ (not the "behavior" ⊘-reason string literal)
     /\bcircumstance\b/,
     /\bcriterion_level\b/,

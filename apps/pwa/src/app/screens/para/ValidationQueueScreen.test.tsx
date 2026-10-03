@@ -11,12 +11,18 @@ function renderQueue() {
   const queue = deriveParaQueue(seed.master.points, seed.paraPending);
   const initialsById = new Map(seed.master.students.map((s) => [s.student_id, s.initials]));
   const goalTextById = new Map(seed.master.goals.map((g) => [g.goal_id, g.goal_text]));
+  const goalLabelById = new Map(
+    seed.master.goals.flatMap((g) =>
+      g.goal_label !== undefined ? [[g.goal_id, g.goal_label]] : [],
+    ),
+  );
   const handlers = { onConfirm: vi.fn(), onFix: vi.fn(), onBack: vi.fn() };
   render(
     <ValidationQueueScreen
       queue={queue}
       initialsById={initialsById}
       goalTextById={goalTextById}
+      goalLabelById={goalLabelById}
       {...handlers}
     />,
   );
@@ -39,6 +45,14 @@ describe("ValidationQueueScreen (U6)", () => {
   it("surfaces the off-basis flag on the mismatch entry", () => {
     renderQueue();
     expect(screen.getByTestId("validate-mismatch")).toBeInTheDocument();
+  });
+
+  it("prefixes each row title with the IEP goal # (TEACH-41)", () => {
+    renderQueue();
+    // Seed para captures: AB Goal 1 "Two-step equations", CD Goal 2 "Multiply fractions".
+    const titles = [...document.querySelectorAll(".rowtitle")].map((t) => t.textContent);
+    expect(titles).toContain("Goal 1 · , Two-step equations");
+    expect(titles).toContain("Goal 2 · , Multiply fractions");
   });
 
   it("Confirm routes to the validation handler (nothing counts until then)", () => {

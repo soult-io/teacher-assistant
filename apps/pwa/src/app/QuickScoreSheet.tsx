@@ -11,6 +11,7 @@
 import { asTimestamp, type NoDataReason, type ProgressDataPoint } from "@teacher-assistant/schema";
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../design/Avatar.js";
+import { GoalTitle } from "../design/GoalTitle.js";
 import { matchesDesktop } from "./useIsDesktop.js";
 import type { DocMutator } from "../data/session.js";
 import {
@@ -57,7 +58,7 @@ function TargetHeader({ target }: { readonly target: SheetTarget }) {
       <Avatar initials={target.initials} />
       <span>
         {target.periodLabel !== null ? `${target.periodLabel} · ` : ""}
-        {target.goalText}
+        <GoalTitle label={target.goalLabel} text={target.goalText} />
       </span>
     </div>
   );
