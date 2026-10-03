@@ -1136,6 +1136,8 @@ button.rowmain {
   color: var(--owes);
 }
 .ngerror {
+  /* Sits under its field (a sibling of the label): pull up to the field's own gap. */
+  margin-top: -0.3rem;
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--danger);

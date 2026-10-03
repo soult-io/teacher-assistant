@@ -88,6 +88,7 @@ describe("NewGoalScreen (U5)", () => {
         expect(screen.getByText(INITIALS_ERROR)).toBeInTheDocument();
         expect(input).toHaveAttribute("aria-invalid", "true");
         expect(input).toHaveAccessibleDescription(INITIALS_ERROR);
+        expect(input).not.toHaveAccessibleName(new RegExp(INITIALS_ERROR.slice(0, 12)));
         expect(screen.getByTestId("ng-gate")).toHaveClass("bad");
         const submit = screen.getByRole("button", { name: "Start baselining →" });
         expect(submit).toBeDisabled();

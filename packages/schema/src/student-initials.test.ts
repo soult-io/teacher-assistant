@@ -25,6 +25,8 @@ describe("normalizeInitials (TEACH-40, data-model §1.2: 2–3 letters only)", (
     ["only dots and spaces", ". . ."],
     ["hyphen", "A-B"],
     ["non-ASCII letter", "ÉL"],
+    ["letter that upper-cases to ASCII", "ßa"],
+    ["ligature", "ﬁx"],
   ])("rejects %s (%j)", (_label, raw) => {
     expect(normalizeInitials(raw)).toBeUndefined();
   });

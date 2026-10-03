@@ -275,13 +275,16 @@ function ReadyApp({
   // the dashboard (adopt → active) or the baseline track (draft → proposed).
   const submitNewGoal = useCallback(
     (form: NewGoalForm) => {
-      // The form only enables submit for valid initials; re-check here so no other
-      // caller can create a goal (or a Student) from a name.
+      // Canonical initials for the roster match + hue. The form gates submit on
+      // valid initials, so this guard is defensive.
       const initials = normalizeInitials(form.initials);
       if (initials === undefined) {
         return;
       }
-      const existing = records.students.find((s) => s.initials.toUpperCase() === initials);
+      // Normalize the stored side too, so a pre-TEACH-40 "J.A.S." still matches "JAS".
+      const existing = records.students.find(
+        (s) => (normalizeInitials(s.initials) ?? s.initials.toUpperCase()) === initials,
+      );
       const student =
         existing ?? makeStudent(initials, `--s-${hueClassForInitials(initials)}` as const);
       const assembled = assembleGoal(

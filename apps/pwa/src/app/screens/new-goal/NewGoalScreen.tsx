@@ -195,12 +195,13 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
             onChange={(e) => set("initials", e.target.value)}
             onBlur={() => setInitialsTouched(true)}
           />
-          {initialsError ? (
-            <span className="ngerror" id="ng-initials-error" role="alert">
-              Use 2 or 3 letters (initials only)
-            </span>
-          ) : null}
         </Field>
+        {/* Outside the <label>, so the error is the input's description, not part of its name. */}
+        {initialsError ? (
+          <span className="ngerror" id="ng-initials-error" role="alert">
+            Use 2 or 3 letters (initials only)
+          </span>
+        ) : null}
         <Field label="Behavior" hint="(what the student will do)" required>
           <input
             className="tin"
