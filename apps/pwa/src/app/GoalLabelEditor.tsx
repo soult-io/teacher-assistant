@@ -6,7 +6,7 @@
 // through setGoalLabel (an audited Revision). Never auto-filled.
 
 import { validateGoalLabel } from "@teacher-assistant/domain-core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 export const GOAL_LABEL_INVALID = "Use up to 6 letters, numbers or dots (e.g. 2, 1a, 3.1).";
 
@@ -19,6 +19,9 @@ export interface GoalLabelEditorProps {
 export function GoalLabelEditor({ label, onSave }: GoalLabelEditorProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const [invalid, setInvalid] = useState(false);
+  // Set once Enter / Esc has decided the edit, so a blur fired as the input unmounts
+  // can neither save a cancelled draft nor save a confirmed one twice.
+  const closed = useRef(false);
 
   if (draft === null) {
     return (
@@ -28,6 +31,7 @@ export function GoalLabelEditor({ label, onSave }: GoalLabelEditorProps) {
         data-testid="goal-label-edit"
         aria-label={label === undefined ? "Add IEP goal number" : `Edit IEP goal number ${label}`}
         onClick={() => {
+          closed.current = false;
           setInvalid(false);
           setDraft(label ?? "");
         }}
@@ -38,15 +42,20 @@ export function GoalLabelEditor({ label, onSave }: GoalLabelEditorProps) {
   }
 
   const cancel = () => {
+    closed.current = true;
     setDraft(null);
     setInvalid(false);
   };
   const save = () => {
+    if (closed.current) {
+      return;
+    }
     const check = validateGoalLabel(draft);
     if (!check.ok) {
       setInvalid(true);
       return;
     }
+    closed.current = true;
     setDraft(null);
     setInvalid(false);
     if (check.label !== label) {

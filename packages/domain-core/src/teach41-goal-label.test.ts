@@ -146,6 +146,15 @@ describe("duplicateGoalLabels — cohort-scoped, case-insensitive", () => {
     const fixed = setGoalLabel(g2, "3", { who: "teacher", when: asTimestamp(1) });
     expect(duplicateGoalLabels([g1, fixed], ab).size).toBe(0);
   });
+
+  it("treats leading zeros as the same number, matching the sort (01 = 1)", () => {
+    const g1 = goal(ab, "active", "01");
+    const g2 = goal(ab, "active", "1");
+    expect(duplicateGoalLabels([g1, g2], ab).size).toBe(2);
+    expect(duplicateGoalLabels([goal(ab, "active", "10"), goal(ab, "active", "1")], ab).size).toBe(
+      0,
+    );
+  });
 });
 
 describe("goalLabelConflicts — a goal still being entered or adopted", () => {

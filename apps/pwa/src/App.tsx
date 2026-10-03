@@ -472,7 +472,9 @@ function ReadyApp({
   const renderDetailPane = useCallback(
     (goalId: OpaqueId): ReactNode => {
       const g = records.goals.find((x) => x.goal_id === goalId);
-      return g === undefined ? null : <GoalDetailBody {...goalBodyProps(g)} layout="pane" />;
+      return g === undefined ? null : (
+        <GoalDetailBody key={g.goal_id} {...goalBodyProps(g)} layout="pane" />
+      );
     },
     [records.goals, goalBodyProps],
   );

@@ -31,8 +31,15 @@ export interface GoalLabelCandidate {
   readonly goal_label?: string;
 }
 
+/**
+ * The duplicate-check key: case-insensitive, and leading zeros in a number dropped,
+ * so it agrees with the number-aware sort ("01" and "1" are the same Goal 1).
+ */
 function labelKey(label: string): string {
-  return label.trim().toLowerCase();
+  return label
+    .trim()
+    .toLowerCase()
+    .replace(/\d+/g, (run) => run.replace(/^0+(?=\d)/, ""));
 }
 
 /**

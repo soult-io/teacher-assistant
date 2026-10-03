@@ -554,7 +554,9 @@ function DetailHeader({
           <GoalTitle label={goal.goal_label} text={goal.goal_text} />
         </h1>
         <div className="goallabel-row">
-          <GoalLabelEditor label={goal.goal_label} onSave={onSetGoalLabel} />
+          {/* Keyed by goal: an open draft must never carry over to another goal (the
+              desktop pane reuses this header when a different row is selected). */}
+          <GoalLabelEditor key={goal.goal_id} label={goal.goal_label} onSave={onSetGoalLabel} />
           {duplicated ? <DuplicateLabelCue label={goal.goal_label} /> : null}
         </div>
         {duplicated ? (

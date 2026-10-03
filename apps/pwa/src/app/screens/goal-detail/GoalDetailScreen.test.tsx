@@ -351,4 +351,20 @@ describe("GoalDetailScreen — IEP goal label (TEACH-41)", () => {
     expect(writeText).toHaveBeenCalledOnce();
     expect(String(writeText.mock.calls[0]?.[0])).not.toMatch(/Goal 2/);
   });
+
+  it("Esc then a blur from the closing input never saves; Enter then blur saves once", () => {
+    const { handlers } = renderDetail("Add integers");
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    const input = screen.getByTestId("goal-label-input");
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input); // the detached input's stale handler
+    expect(handlers.onSetGoalLabel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    const again = screen.getByTestId("goal-label-input");
+    fireEvent.change(again, { target: { value: "7" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    fireEvent.blur(again);
+    expect(handlers.onSetGoalLabel).toHaveBeenCalledExactlyOnceWith("7");
+  });
 });

@@ -225,7 +225,7 @@ function resolversOf(lk: Lookups): StudentResolvers {
   };
 }
 
-/** Compare two {studentId, goalId} entries by the shared student-goal order. */
+/** Compare two {studentId, goalId} entries by the shared student-goal order, then goalId (one goal's entries stay together). */
 function byStudentGoal(lk: Lookups) {
   const r = resolversOf(lk);
   const key = (studentId: OpaqueId, goalId: OpaqueId) =>
@@ -240,7 +240,9 @@ function byStudentGoal(lk: Lookups) {
   return (
     a: { readonly studentId: OpaqueId; readonly goalId: OpaqueId },
     b: { readonly studentId: OpaqueId; readonly goalId: OpaqueId },
-  ) => compareStudentGoal(key(a.studentId, a.goalId), key(b.studentId, b.goalId));
+  ) =>
+    compareStudentGoal(key(a.studentId, a.goalId), key(b.studentId, b.goalId)) ||
+    compareCodePoints(a.goalId, b.goalId);
 }
 
 /**
