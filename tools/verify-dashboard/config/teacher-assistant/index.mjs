@@ -87,6 +87,16 @@ export const journeyManifest = [
     name: "Goals listed in IEP order",
     match: { file: "j7-iep-goal-order.spec.ts" },
   },
+  {
+    id: "J8",
+    name: "Desktop dashboard — student cards, graph only on ↗ (1280×800)",
+    match: { file: "desktop-dashboard.spec.ts", title: "1280×800" },
+  },
+  {
+    id: "J8-wide",
+    name: "Desktop dashboard — student cards, graph only on ↗ (1920×1080)",
+    match: { file: "desktop-dashboard.spec.ts", title: "1920×1080" },
+  },
 ];
 
 export const branding = {

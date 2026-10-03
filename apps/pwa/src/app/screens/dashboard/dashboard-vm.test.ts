@@ -2,12 +2,14 @@
 import type { DashboardGroup } from "@teacher-assistant/store";
 import { buildToScoreQueue, buildWeeklyDashboard, groupDashboard } from "@teacher-assistant/store";
 import { duplicateLabelGoalIds } from "@teacher-assistant/domain-core";
+import type { OpaqueId } from "@teacher-assistant/schema";
 import { describe, expect, it } from "vitest";
 import { buildSyntheticSeed, type SyntheticSeed } from "../../../data/synthetic-seed.js";
 import { goalLabel } from "../../../design/GoalTitle.js";
 import {
   buildLookups,
   buildStudentCards,
+  cardsFromOrderedRows,
   orderPeriodGroups,
   type Lookups,
   orderRowsByStudent,
@@ -373,5 +375,67 @@ describe("display order is independent of opaque ids (TEACH-25)", () => {
     for (let i = 0; i < 5; i += 1) {
       expect(displayed(fixture(buildSyntheticSeed(NOW)))).toEqual(expected);
     }
+  });
+});
+
+describe("cardsFromOrderedRows — desktop card sections (TEACH-43)", () => {
+  /** A minimal row: only the fields the card helper reads matter here. */
+  function row(studentId: string, goalId: string, over: Partial<RowVM> = {}): RowVM {
+    return {
+      goalId: goalId as OpaqueId,
+      studentId: studentId as OpaqueId,
+      initials: studentId.toUpperCase(),
+      goalLabel: null,
+      goalText: goalId,
+      duplicateLabel: false,
+      state: "has_point",
+      periodLabel: "P2",
+      value: 0.8,
+      noDataReason: undefined,
+      pending: false,
+      probe: "",
+      criterion: "",
+      ...over,
+    };
+  }
+
+  it("keeps the given order: cards by first appearance, rows as passed — never re-sorted", () => {
+    // Deliberately NOT alphabetical, so any re-sort would show.
+    const rows = [
+      row("zz", "g3"),
+      row("zz", "g1", { state: "owes" }),
+      row("aa", "g2"),
+      row("mm", "g4", { periodLabel: null }),
+    ];
+    const cards = cardsFromOrderedRows(rows);
+    expect(cards.map((c) => c.studentId)).toEqual(["zz", "aa", "mm"]);
+    expect(cards[0]?.rows.map((r) => r.goalId)).toEqual(["g3", "g1"]);
+    expect(cards.map((c) => c.todo)).toEqual([1, 0, 0]);
+    expect(cards.map((c) => c.initials)).toEqual(["ZZ", "AA", "MM"]);
+    expect(cards.map((c) => c.periodLabels)).toEqual([["P2"], ["P2"], []]);
+  });
+
+  it("over the IEP-ordered owes-first rows, each student's card reads in IEP order (TEACH-41)", () => {
+    const { lk, dash } = fixture();
+    const ordered = orderRowsByStudent(
+      (groupDashboard(dash.rows, "owes_first")[0]?.rows ?? []).map((r) => toRowVM(r, lk)),
+    );
+    const cards = cardsFromOrderedRows(ordered);
+    // Every row lands on exactly one card, in the same sequence.
+    expect(cards.flatMap((c) => c.rows)).toEqual(ordered);
+    const ab = cards.find((c) => c.initials === "AB");
+    expect(ab?.rows.map((r) => r.goalLabel)).toEqual(["1", "2"]);
+  });
+
+  it("matches buildStudentCards card-for-card on the same student's rows", () => {
+    const { lk, dash } = fixture();
+    const byStudent = buildStudentCards(groupDashboard(dash.rows, "by_student"), lk);
+    for (const card of byStudent) {
+      expect(cardsFromOrderedRows(card.rows)).toEqual([card]);
+    }
+  });
+
+  it("returns no cards for no rows", () => {
+    expect(cardsFromOrderedRows([])).toEqual([]);
   });
 });

@@ -306,23 +306,48 @@ export function orderPeriodGroups(
 }
 
 /**
+ * Group already-ordered rows into student cards, one per student, in the order each
+ * student first appears (TEACH-43: the desktop owes-first and by-period sections).
+ * It never re-sorts: pass rows through orderRowsByStudent first, so a student's goals
+ * stay adjacent and in IEP order (TEACH-41). buildStudentCards (shared with mobile)
+ * keeps its own card order.
+ */
+export function cardsFromOrderedRows(rows: readonly RowVM[]): StudentCardVM[] {
+  const rowsByStudent = new Map<OpaqueId, RowVM[]>();
+  for (const row of rows) {
+    const studentRows = rowsByStudent.get(row.studentId);
+    if (studentRows === undefined) {
+      rowsByStudent.set(row.studentId, [row]);
+    } else {
+      studentRows.push(row);
+    }
+  }
+  return [...rowsByStudent].map(([studentId, studentRows]) =>
+    toStudentCard(studentId, studentRows),
+  );
+}
+
+/** One card over a student's rows, kept in the order given. */
+function toStudentCard(studentId: OpaqueId, rows: readonly RowVM[]): StudentCardVM {
+  return {
+    studentId,
+    initials: rows[0]?.initials ?? "??",
+    periodLabels: [...new Set(rows.map((r) => r.periodLabel).filter((l) => l !== null))],
+    todo: rows.filter((r) => r.state === "owes").length,
+    rows,
+  };
+}
+
+/**
  * Build by-student cards from the store's by-student groups. Card order is
  * presentation: students who owe a point first, then initials, then the card's
  * first period label (none last), then studentId (design §E.4; TEACH-25). Rows
  * within a card follow orderRowsByStudent, so a student's goals read in IEP order.
  */
 export function buildStudentCards(groups: readonly DashboardGroup[], lk: Lookups): StudentCardVM[] {
-  const cards: StudentCardVM[] = groups.map((group) => {
-    const rows = orderRowsByStudent(group.rows.map((r) => toRowVM(r, lk)));
-    const periodLabels = [...new Set(rows.map((r) => r.periodLabel).filter((l) => l !== null))];
-    return {
-      studentId: group.key as OpaqueId,
-      initials: rows[0]?.initials ?? "??",
-      periodLabels,
-      todo: rows.filter((r) => r.state === "owes").length,
-      rows,
-    };
-  });
+  const cards: StudentCardVM[] = groups.map((group) =>
+    toStudentCard(group.key as OpaqueId, orderRowsByStudent(group.rows.map((r) => toRowVM(r, lk)))),
+  );
   return cards.sort((a, b) => {
     const aTodo = a.todo > 0 ? 0 : 1;
     const bTodo = b.todo > 0 ? 0 : 1;

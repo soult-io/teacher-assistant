@@ -54,6 +54,25 @@ async function columnGeometry(page: Page): Promise<{
   };
 }
 
+/** How many columns the first `.scardgrid` lays out (its computed track list). */
+async function cardColumns(page: Page): Promise<number> {
+  return page
+    .locator(".scardgrid")
+    .first()
+    .evaluate((el) => getComputedStyle(el).gridTemplateColumns.split(" ").filter(Boolean).length);
+}
+
+/** Every `.scard` sits inside the content column (no card pokes past its right edge). */
+async function cardsInsideColumn(page: Page): Promise<boolean> {
+  return page.evaluate(() => {
+    const inner = document.querySelector(".screen-inner")?.getBoundingClientRect();
+    if (inner === undefined) return false;
+    return Array.from(document.querySelectorAll(".scard")).every(
+      (c) => c.getBoundingClientRect().right <= inner.right + 1,
+    );
+  });
+}
+
 /** Computed value of a CSS length property (px) for the first match of `selector`. */
 async function computedPx(page: Page, selector: string, prop: string): Promise<number> {
   return page
@@ -85,14 +104,14 @@ test.describe("wide-monitor content column", () => {
     await unlockToDesktopShell(page);
 
     // Root cause #2: padding must scale on a wide column, not stay at the 1180px values.
-    // Wide-end targets: .headline 1.25rem/20px top, .mddetail 1.4rem/22.4px,
-    // .three gap 0.8rem/12.8px, .md gap 2rem/32px.
+    // Wide-end targets: .headline 1.25rem/20px top, .three gap 0.8rem/12.8px.
     expect(await computedPx(page, ".headline", "padding-top")).toBeGreaterThanOrEqual(18);
-    expect(
-      await computedPx(page, '[data-testid="detail-pane"]', "padding-top"),
-    ).toBeGreaterThanOrEqual(20);
     expect(await computedPx(page, ".three", "column-gap")).toBeGreaterThanOrEqual(11);
-    expect(await computedPx(page, ".md", "column-gap")).toBeGreaterThanOrEqual(28);
+    // TEACH-43: the dashboard is student cards in every grouping — no detail pane. The
+    // card grid gains its fourth column at this width instead of stretching the cards.
+    await expect(page.getByTestId("detail-pane")).toHaveCount(0);
+    expect(await cardColumns(page)).toBe(4);
+    expect(await computedPx(page, ".scardgrid", "column-gap")).toBeGreaterThanOrEqual(11);
   });
 
   test("2560px: section hierarchy — big section gap, promoted eyebrow, caption inside table", async ({
@@ -102,12 +121,16 @@ test.describe("wide-monitor content column", () => {
     await unlockToDesktopShell(page);
 
     // The gaps must now signal grouping: a large gap BELOW a section (`.headline`
-    // margin-bottom = --sec-gap 2rem/32px) far exceeds the small gap between items
-    // within a group (a `.row`'s margin-bottom 0.5rem/8px). Both elements always render.
+    // margin-bottom = --sec-gap 2rem/32px) far exceeds the small gap between the cards
+    // within a group (the `.scardgrid` row gap 0.7rem/11.2px). Both always render.
     const sectionGap = await computedPx(page, ".headline", "margin-bottom");
-    const itemGap = await computedPx(page, ".mdlist .row", "margin-bottom");
+    const itemGap = await computedPx(page, ".scardgrid", "row-gap");
     expect(sectionGap).toBeGreaterThanOrEqual(28);
     expect(sectionGap).toBeGreaterThan(itemGap * 2);
+    // The owes-first "Done this week" section starts with the same big gap.
+    const nextSection = await computedPx(page, ".cardsection + .cardsection", "margin-top");
+    expect(nextSection).toBeGreaterThanOrEqual(28);
+    expect(nextSection).toBeGreaterThan(itemGap * 2);
 
     // The top-level para eyebrow is promoted to full-ink bold with a hairline rule,
     // and its caption is reparented INSIDE the table frame (not an orphaned sibling).
@@ -132,6 +155,8 @@ test.describe("wide-monitor content column", () => {
     expect(g.innerWidth / g.mainWidth).toBeGreaterThanOrEqual(0.8);
     expect(Math.abs(g.leftGap - g.rightGap)).toBeLessThanOrEqual(16);
     expect(g.screenOverflow).toBeLessThanOrEqual(1);
+    expect(await cardColumns(page)).toBe(3);
+    expect(await cardsInsideColumn(page)).toBe(true);
   });
 
   test("1280px: laptop fills the column and padding is NOT inflated", async ({ page }) => {
@@ -146,5 +171,8 @@ test.describe("wide-monitor content column", () => {
     // 1280 is below the first wide breakpoint (1400), so padding stays at the base
     // value (.headline 0.9rem/14.4px) — proving the scaling does not over-inflate laptops.
     expect(await computedPx(page, ".headline", "padding-top")).toBeLessThanOrEqual(16);
+    // The card grid fits the laptop column: at least two cards across, none clipped.
+    expect(await cardColumns(page)).toBeGreaterThanOrEqual(2);
+    expect(await cardsInsideColumn(page)).toBe(true);
   });
 });
