@@ -58,7 +58,7 @@ export interface TeacherProfile {
 /** §1.2 Student [ENCRYPTED]. No name/photo/DOB/id/district number — ever. */
 export interface Student {
   readonly student_id: OpaqueId;
-  /** 2–3 letters, the human identifier. Encrypted. */
+  /** 2–3 letters, the human identifier — enforced by `normalizeInitials`. Encrypted. */
   readonly initials: string;
   readonly color_token: ColorToken;
   /** ≥1 period; a student may sit in more than one. Membership edges live here (encrypted), not in a cleartext join table (§1.3, cross-dep #1). */

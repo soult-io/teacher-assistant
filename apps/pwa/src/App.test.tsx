@@ -169,6 +169,28 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(body).not.toContain("count coins to a dollar");
   });
 
+  it("normalizes dotted 3-letter initials end to end (TEACH-40)", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));
+    fireEvent.click(screen.getByRole("button", { name: /Draft a proposed goal/ }));
+    // Synthetic initials — a middle initial disambiguates two students (TEACH-26).
+    fireEvent.change(screen.getByPlaceholderText("e.g. AB"), { target: { value: "z.q.z." } });
+    fireEvent.change(screen.getByPlaceholderText("solve two-step equations"), {
+      target: { value: "skip count by fives" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("given a 5-item probe and a number line"), {
+      target: { value: "given a 5-item probe" },
+    });
+    fireEvent.change(screen.getByLabelText("criterion level"), { target: { value: "80" } });
+    fireEvent.change(screen.getByLabelText("criterion consistency"), { target: { value: "4" } });
+    fireEvent.change(screen.getByLabelText("method tool"), { target: { value: "count probe" } });
+    fireEvent.click(screen.getByRole("button", { name: "Start baselining →" }));
+
+    expect(await screen.findByText("Baseline / proposed goals")).toBeInTheDocument();
+    expect(screen.getAllByRole("img", { name: "student ZQZ" }).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/z\.q\.z\./i)).toBeNull();
+  });
+
   it("a VARIABLE-basis goal accepts any total with NO off-basis ack (F-2 escape valve)", async () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "+ New goal" }));

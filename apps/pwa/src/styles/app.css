@@ -337,6 +337,15 @@ h2 {
   color: #fff;
   vertical-align: middle;
 }
+/* 3-letter initials: tighter type so wide glyphs (MWM) fit the disc (TEACH-40) */
+.av.tri {
+  font-size: 0.72rem;
+  letter-spacing: -0.04em;
+}
+.av.sm.tri {
+  font-size: 0.54rem;
+  letter-spacing: -0.06em;
+}
 .av.ab {
   background: var(--s-ab);
 }
@@ -1125,6 +1134,16 @@ button.rowmain {
 }
 .reqmark {
   color: var(--owes);
+}
+.ngfieldwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.ngerror {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--danger);
 }
 .tin {
   width: 100%;

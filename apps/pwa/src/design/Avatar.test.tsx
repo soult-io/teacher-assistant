@@ -16,4 +16,11 @@ describe("Avatar (monogram identity, design §E.1)", () => {
     render(<Avatar initials="CD" small />);
     expect(screen.getByRole("img", { name: "student CD" }).className).toContain("sm");
   });
+
+  it("tightens the type for 3-letter initials only (TEACH-40)", () => {
+    render(<Avatar initials="jms" small />);
+    expect(screen.getByRole("img", { name: "student JMS" }).className).toContain("tri");
+    render(<Avatar initials="JM" />);
+    expect(screen.getByRole("img", { name: "student JM" }).className).not.toContain("tri");
+  });
 });

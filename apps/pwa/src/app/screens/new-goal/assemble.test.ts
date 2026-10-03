@@ -28,7 +28,8 @@ describe("assembleGoal (U5 create)", () => {
     expect(goal.probe_definition_id).toBe(probe.probe_definition_id);
     expect(probe.expected_denominator).toBe(5);
     // goal_text carries the initials (stranger test: audience = initials only).
-    expect(goal.goal_text).toContain("ab");
+    // TEACH-40: the canonical (normalized) initials, not the raw "ab" entry.
+    expect(goal.goal_text.startsWith("AB will ")).toBe(true);
   });
 
   it("an ADOPT builds an ACTIVE goal with the baseline locked in", () => {
@@ -98,5 +99,21 @@ describe("assembleGoal (U5 create)", () => {
     expect(s.initials).toBe("AB");
     expect(s.color_token).toBe("--s-ab");
     expect(s.active).toBe(true);
+  });
+
+  it("makeStudent normalizes dotted/spaced initials (TEACH-40)", () => {
+    expect(makeStudent("j.a.s.", "--s-ab").initials).toBe("JAS");
+  });
+
+  it.each(["John Smith", "J", "ABCD", "A1"])(
+    "makeStudent throws on invalid initials %j (TEACH-40)",
+    (raw) => {
+      expect(() => makeStudent(raw, "--s-ab")).toThrow(/initials/);
+    },
+  );
+
+  it("the goal text carries the normalized initials, not the raw entry (TEACH-40)", () => {
+    const { goal } = assembleGoal({ ...filledDraft(), initials: "j.a.s." }, newOpaqueId(), nowTs());
+    expect(goal.goal_text.startsWith("JAS will ")).toBe(true);
   });
 });

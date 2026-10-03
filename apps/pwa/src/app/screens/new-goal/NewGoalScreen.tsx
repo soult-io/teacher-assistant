@@ -15,6 +15,7 @@ import {
   type MethodGeneral,
   METHODS_GENERAL,
   newOpaqueId,
+  normalizeInitials,
   type Setting,
   SETTINGS,
 } from "@teacher-assistant/schema";
@@ -126,6 +127,8 @@ export interface NewGoalScreenProps {
 
 export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
   const [form, setForm] = useState<NewGoalForm>(emptyForm);
+  // The initials error waits for the first blur, so typing "JAS" never flashes it at "J".
+  const [initialsTouched, setInitialsTouched] = useState(false);
   const set = <K extends keyof NewGoalForm>(key: K, value: NewGoalForm[K]) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -134,9 +137,12 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
   const preview = assembleGoal(form, newOpaqueId(), nowTs());
   const check = canBeginMonitoring(preview.goal);
   // Domain validity comes from the engine gate; the form additionally requires its
-  // own required-marked text fields the gate doesn't cover (initials = the audience,
-  // method tool) — plain presence checks, not domain rules.
-  const fieldsPresent = form.initials.trim() !== "" && form.methodTool.trim() !== "";
+  // own required-marked text fields the gate doesn't cover: initials = the audience
+  // (2–3 letters via the schema rule, TEACH-40) and the method tool (presence).
+  const initialsValid = normalizeInitials(form.initials) !== undefined;
+  // Flag only a non-empty bad entry; an empty field is just "not filled yet".
+  const initialsError = initialsTouched && form.initials.trim() !== "" && !initialsValid;
+  const fieldsPresent = initialsValid && form.methodTool.trim() !== "";
   const gateReady = form.path === "adopt" ? check.ok : draftReady(check.missing);
   const ready = gateReady && fieldsPresent;
   const variable = form.denominatorBasis === "variable";
@@ -175,15 +181,30 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           </div>
         </Group>
 
-        <Field label="Student initials" hint="(Audience)" required>
-          <input
-            className="tin"
-            data-testid="ng-initials"
-            value={form.initials}
-            placeholder="e.g. AB"
-            onChange={(e) => set("initials", e.target.value)}
-          />
-        </Field>
+        {/* One form cell (desktop grid) for the field + its error. The error sits outside
+            the <label>, so it is the input's description, not part of its name. */}
+        <div className="ngfieldwrap">
+          <Field label="Student initials" hint="(Audience)" required>
+            <input
+              className="tin"
+              data-testid="ng-initials"
+              value={form.initials}
+              placeholder="e.g. AB"
+              // Room for "J.A.S."; normalizeInitials enforces the real 2–3 letter rule.
+              maxLength={6}
+              autoComplete="off"
+              aria-invalid={initialsError}
+              aria-describedby={initialsError ? "ng-initials-error" : undefined}
+              onChange={(e) => set("initials", e.target.value)}
+              onBlur={() => setInitialsTouched(true)}
+            />
+          </Field>
+          {initialsError ? (
+            <span className="ngerror" id="ng-initials-error" role="alert">
+              Use 2 or 3 letters (initials only)
+            </span>
+          ) : null}
+        </div>
         <Field label="Behavior" hint="(what the student will do)" required>
           <input
             className="tin"

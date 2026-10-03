@@ -11,6 +11,7 @@ import {
   type IEPGoal,
   type IsoDate,
   newOpaqueId,
+  normalizeInitials,
   type OpaqueId,
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
@@ -274,8 +275,14 @@ function ReadyApp({
   // the dashboard (adopt → active) or the baseline track (draft → proposed).
   const submitNewGoal = useCallback(
     (form: NewGoalForm) => {
-      const initials = form.initials.trim().toUpperCase();
-      const existing = records.students.find((s) => s.initials.toUpperCase() === initials);
+      // Canonical initials for the roster match + hue. The form gates submit on
+      // valid initials, so this guard is defensive.
+      const initials = normalizeInitials(form.initials);
+      if (initials === undefined) {
+        return;
+      }
+      // Normalize the stored side too, so a pre-TEACH-40 "J.A.S." still matches "JAS".
+      const existing = records.students.find((s) => normalizeInitials(s.initials) === initials);
       const student =
         existing ?? makeStudent(initials, `--s-${hueClassForInitials(initials)}` as const);
       const assembled = assembleGoal(
