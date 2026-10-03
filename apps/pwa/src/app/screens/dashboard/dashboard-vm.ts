@@ -305,6 +305,11 @@ export function orderPeriodGroups(
   );
 }
 
+/** Store rows → row VMs in orderRowsByStudent order (the one ordering every lens renders in). */
+export function orderedRowVMs(rows: readonly DashboardRow[], lk: Lookups): RowVM[] {
+  return orderRowsByStudent(rows.map((row) => toRowVM(row, lk)));
+}
+
 /**
  * Group already-ordered rows into student cards, one per student, in the order each
  * student first appears (TEACH-43: the desktop owes-first and by-period sections).
@@ -346,7 +351,7 @@ function toStudentCard(studentId: OpaqueId, rows: readonly RowVM[]): StudentCard
  */
 export function buildStudentCards(groups: readonly DashboardGroup[], lk: Lookups): StudentCardVM[] {
   const cards: StudentCardVM[] = groups.map((group) =>
-    toStudentCard(group.key as OpaqueId, orderRowsByStudent(group.rows.map((r) => toRowVM(r, lk)))),
+    toStudentCard(group.key as OpaqueId, orderedRowVMs(group.rows, lk)),
   );
   return cards.sort((a, b) => {
     const aTodo = a.todo > 0 ? 0 : 1;

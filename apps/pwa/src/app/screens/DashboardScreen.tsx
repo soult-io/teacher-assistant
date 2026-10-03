@@ -37,6 +37,7 @@ import {
   type Lookups,
   orderPeriodGroups,
   oldestFirst,
+  orderedRowVMs,
   orderRowsByStudent,
   periodLabelOfGroup,
   type RowVM,
@@ -149,20 +150,7 @@ function DashboardBody({
   readonly cards: CardHandlers;
 }) {
   if (lens === "by_student") {
-    return (
-      <>
-        {buildStudentCards(groups, lk).map((card) => (
-          <StudentCard
-            key={card.studentId}
-            card={card}
-            queuedGoalIds={cards.queuedGoalIds}
-            onScoreLater={cards.onScoreLater}
-            onOpenScore={cards.onOpenScore}
-            onOpenDetail={cards.onOpenDetail}
-          />
-        ))}
-      </>
-    );
+    return <StudentCardList studentCards={buildStudentCards(groups, lk)} cards={cards} />;
   }
   if (lens === "by_period") {
     return (
@@ -170,7 +158,7 @@ function DashboardBody({
         {orderPeriodGroups(groups, lk).map((group) => (
           <div key={group.key}>
             <SectionLabel text={`Period ${periodLabelOfGroup(group, lk)}`} />
-            {orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))).map(renderRow)}
+            {orderedRowVMs(group.rows, lk).map(renderRow)}
           </div>
         ))}
       </>
@@ -224,12 +212,13 @@ export function DashboardScreen(props: DashboardScreenProps) {
     onOpenScore,
     onOpenDetail,
     apply,
+    lensControl,
     isDesktop = false,
     validationStrip,
   } = props;
   const [ownLens, setOwnLens] = useState<DashboardLens>("owes_first");
-  const lens = props.lensControl?.lens ?? ownLens;
-  const setLens = props.lensControl?.onChange ?? setOwnLens;
+  const lens = lensControl?.lens ?? ownLens;
+  const setLens = lensControl?.onChange ?? setOwnLens;
   const today = isoDateOf(now);
 
   const dashboard = useMemo(
@@ -431,9 +420,9 @@ function CardSection({
       <SectionLabel text={label} owes={owes} />
       {studentCards.length > 0 ? (
         <StudentCardGrid studentCards={studentCards} cards={cards} />
-      ) : (
+      ) : empty !== undefined ? (
         <div className="note">{empty}</div>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -449,6 +438,21 @@ function StudentCardGrid({
 }) {
   return (
     <div className="scardgrid" data-testid={testId}>
+      <StudentCardList studentCards={studentCards} cards={cards} />
+    </div>
+  );
+}
+
+/** The StudentCards themselves — shared by the mobile by-student body and every desktop grid. */
+function StudentCardList({
+  studentCards,
+  cards,
+}: {
+  readonly studentCards: readonly StudentCardVM[];
+  readonly cards: CardHandlers;
+}) {
+  return (
+    <>
       {studentCards.map((card) => (
         <StudentCard
           key={card.studentId}
@@ -459,7 +463,7 @@ function StudentCardGrid({
           onOpenDetail={cards.onOpenDetail}
         />
       ))}
-    </div>
+    </>
   );
 }
 
@@ -496,18 +500,14 @@ function DesktopCards({
           <CardSection
             key={group.key}
             label={`Period ${periodLabelOfGroup(group, lk)}`}
-            studentCards={cardsFromOrderedRows(
-              orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))),
-            )}
+            studentCards={cardsFromOrderedRows(orderedRowVMs(group.rows, lk))}
             cards={cards}
           />
         ))}
       </div>
     );
   }
-  const all = cardsFromOrderedRows(
-    orderRowsByStudent((groups[0]?.rows ?? []).map((row) => toRowVM(row, lk))),
-  );
+  const all = cardsFromOrderedRows(orderedRowVMs(groups[0]?.rows ?? [], lk));
   const done = all.filter((card) => card.todo === 0);
   return (
     <div data-testid="dashboard-body">
