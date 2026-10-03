@@ -282,9 +282,7 @@ function ReadyApp({
         return;
       }
       // Normalize the stored side too, so a pre-TEACH-40 "J.A.S." still matches "JAS".
-      const existing = records.students.find(
-        (s) => (normalizeInitials(s.initials) ?? s.initials.toUpperCase()) === initials,
-      );
+      const existing = records.students.find((s) => normalizeInitials(s.initials) === initials);
       const student =
         existing ?? makeStudent(initials, `--s-${hueClassForInitials(initials)}` as const);
       const assembled = assembleGoal(

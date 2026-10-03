@@ -181,27 +181,30 @@ export function NewGoalScreen({ onSubmit, onBack }: NewGoalScreenProps) {
           </div>
         </Group>
 
-        <Field label="Student initials" hint="(Audience)" required>
-          <input
-            className="tin"
-            data-testid="ng-initials"
-            value={form.initials}
-            placeholder="e.g. AB"
-            // Room for "J.A.S."; normalizeInitials enforces the real 2–3 letter rule.
-            maxLength={6}
-            autoComplete="off"
-            aria-invalid={initialsError}
-            aria-describedby={initialsError ? "ng-initials-error" : undefined}
-            onChange={(e) => set("initials", e.target.value)}
-            onBlur={() => setInitialsTouched(true)}
-          />
-        </Field>
-        {/* Outside the <label>, so the error is the input's description, not part of its name. */}
-        {initialsError ? (
-          <span className="ngerror" id="ng-initials-error" role="alert">
-            Use 2 or 3 letters (initials only)
-          </span>
-        ) : null}
+        {/* One form cell (desktop grid) for the field + its error. The error sits outside
+            the <label>, so it is the input's description, not part of its name. */}
+        <div className="ngfieldwrap">
+          <Field label="Student initials" hint="(Audience)" required>
+            <input
+              className="tin"
+              data-testid="ng-initials"
+              value={form.initials}
+              placeholder="e.g. AB"
+              // Room for "J.A.S."; normalizeInitials enforces the real 2–3 letter rule.
+              maxLength={6}
+              autoComplete="off"
+              aria-invalid={initialsError}
+              aria-describedby={initialsError ? "ng-initials-error" : undefined}
+              onChange={(e) => set("initials", e.target.value)}
+              onBlur={() => setInitialsTouched(true)}
+            />
+          </Field>
+          {initialsError ? (
+            <span className="ngerror" id="ng-initials-error" role="alert">
+              Use 2 or 3 letters (initials only)
+            </span>
+          ) : null}
+        </div>
         <Field label="Behavior" hint="(what the student will do)" required>
           <input
             className="tin"

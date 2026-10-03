@@ -1135,9 +1135,12 @@ button.rowmain {
 .reqmark {
   color: var(--owes);
 }
+.ngfieldwrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
 .ngerror {
-  /* Sits under its field (a sibling of the label): pull up to the field's own gap. */
-  margin-top: -0.3rem;
   font-size: 0.78rem;
   font-weight: 700;
   color: var(--danger);
