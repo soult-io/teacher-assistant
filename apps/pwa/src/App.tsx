@@ -11,6 +11,7 @@ import {
   type IEPGoal,
   type IsoDate,
   newOpaqueId,
+  normalizeInitials,
   type OpaqueId,
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
@@ -274,7 +275,12 @@ function ReadyApp({
   // the dashboard (adopt → active) or the baseline track (draft → proposed).
   const submitNewGoal = useCallback(
     (form: NewGoalForm) => {
-      const initials = form.initials.trim().toUpperCase();
+      // The form only enables submit for valid initials; re-check here so no other
+      // caller can create a goal (or a Student) from a name.
+      const initials = normalizeInitials(form.initials);
+      if (initials === undefined) {
+        return;
+      }
       const existing = records.students.find((s) => s.initials.toUpperCase() === initials);
       const student =
         existing ?? makeStudent(initials, `--s-${hueClassForInitials(initials)}` as const);

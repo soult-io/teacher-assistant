@@ -1126,6 +1126,11 @@ button.rowmain {
 .reqmark {
   color: var(--owes);
 }
+.ngerror {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--danger);
+}
 .tin {
   width: 100%;
   border: 1px solid var(--border);

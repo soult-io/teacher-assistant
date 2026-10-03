@@ -14,6 +14,7 @@ import {
   type IEPGoal,
   type MethodGeneral,
   newOpaqueId,
+  normalizeInitials,
   type OpaqueId,
   type ProbeDefinition,
   type Setting,
@@ -99,7 +100,9 @@ export function assembleGoal(
     student_id: studentId,
     // Link the assigned probe so baseline points can share one comparable condition.
     probe_definition_id: probeId,
-    goal_text: `${form.initials.trim()} will ${form.behavior.trim()}, ${circumstance}`,
+    // Canonical initials when valid; the raw entry only for an invalid preview (the
+    // form blocks submit until normalizeInitials accepts it).
+    goal_text: `${normalizeInitials(form.initials) ?? form.initials.trim()} will ${form.behavior.trim()}, ${circumstance}`,
     behavior: form.behavior.trim(),
     circumstance,
     criterion_level: level,
@@ -140,11 +143,18 @@ export function assembleGoal(
   return { goal, probe, ...(newStudent !== undefined ? { student: newStudent } : {}) };
 }
 
-/** Mint a new roster Student for initials that don't match an existing one. */
+/**
+ * Mint a new roster Student for initials that don't match an existing one. Throws
+ * on anything that is not 2–3 letters — the last guard before a Student is stored.
+ */
 export function makeStudent(initials: string, color: ColorToken): Student {
+  const normalized = normalizeInitials(initials);
+  if (normalized === undefined) {
+    throw new Error("makeStudent: student initials must be 2 or 3 letters");
+  }
   return {
     student_id: newOpaqueId(),
-    initials: initials.trim().toUpperCase(),
+    initials: normalized,
     color_token: color,
     period_memberships: [],
     active: true,
