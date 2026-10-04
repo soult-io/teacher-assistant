@@ -6,17 +6,11 @@
 //   #4 H-PUB-4 — the public surface is identity-clean: every 4xx body is exactly
 //      {error, record_id} (an opaque reference), with no initials/goal-text/score.
 
-import {
-  generateSigningKeypair,
-  sign,
-  sodiumReady,
-  toBase64,
-  utf8,
-} from "@teacher-assistant/crypto";
-import { canonicalRequest, SYNC_HEADERS } from "@teacher-assistant/schema";
+import { sodiumReady, toBase64, utf8 } from "@teacher-assistant/crypto";
 import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { InMemoryRelayStore } from "@teacher-assistant/sync-relay/store";
 import { beforeAll, describe, expect, it } from "vitest";
+import { makeSigner, type Signer } from "./relay-signer.js";
 
 /** The relay app type, without importing fastify as a direct dependency. */
 type RelayApp = ReturnType<typeof buildApp>;
@@ -24,36 +18,6 @@ type RelayApp = ReturnType<typeof buildApp>;
 beforeAll(async () => {
   await sodiumReady();
 });
-
-interface Signer {
-  readonly publicKeyB64: string;
-  sign(
-    method: "GET" | "POST",
-    path: string,
-    scope: string,
-    body: Uint8Array,
-  ): Record<string, string>;
-}
-
-function makeSigner(): Signer {
-  const kp = generateSigningKeypair();
-  return {
-    publicKeyB64: toBase64(kp.publicKey),
-    sign(method, path, scope, body) {
-      const ts = String(Date.now());
-      const nonce = toBase64(utf8(`${Math.random()}`));
-      const canonical = canonicalRequest(method, path, scope, ts, nonce, body);
-      return {
-        [SYNC_HEADERS.device]: toBase64(kp.publicKey),
-        [SYNC_HEADERS.scope]: scope,
-        [SYNC_HEADERS.timestamp]: ts,
-        [SYNC_HEADERS.nonce]: nonce,
-        [SYNC_HEADERS.signature]: toBase64(sign(canonical, kp.privateKey)),
-        "content-type": "application/json",
-      };
-    },
-  };
-}
 
 async function pull(app: RelayApp, signer: Signer, docId: string, scope: string) {
   const path = `/sync/${encodeURIComponent(docId)}?since=`;
@@ -73,8 +37,8 @@ describe("HARD STOP #3 — unauthorized device gets zero bytes + zero existence"
 
     const alice = makeSigner(); // authorized for S (owns the stream)
     const bob = makeSigner(); // authorized for T only — NOT for S
-    store.authorize(alice.publicKeyB64, scopeS);
-    store.authorize(bob.publicKeyB64, scopeT);
+    await store.authorize(alice.publicKeyB64, scopeS);
+    await store.authorize(bob.publicKeyB64, scopeT);
 
     // Alice creates a real doc D under S.
     const docId = "doc-D";

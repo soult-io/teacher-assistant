@@ -21,7 +21,8 @@ import {
 } from "@teacher-assistant/schema";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
-import type { RelayStore } from "./store.js";
+import { errorCode } from "./sql.js";
+import { parseCursor, type RelayStore } from "./store.js";
 
 /** Requests older/newer than this (clock skew + transit) are rejected (replay window). */
 const TIMESTAMP_WINDOW_MS = 300_000;
@@ -61,10 +62,40 @@ function header(req: FastifyRequest, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function sendError(reply: FastifyReply, status: number, code: string): void {
-  const body: SyncErrorBody = { error: code, record_id: randomUUID() };
+/** Send the identity-clean error body; returns its opaque record_id. */
+function sendError(reply: FastifyReply, status: number, code: string): string {
+  const record_id = randomUUID();
+  const body: SyncErrorBody = { error: code, record_id };
   reply.code(status).send(body);
+  return record_id;
 }
+
+/**
+ * A store failure (e.g. the database is unreachable) → 503. The log line carries
+ * the opaque record_id and, for a database error, its 5-character SQLSTATE —
+ * never the error message, the doc id, or anything from the request (H-PUB-4).
+ * A 503 means "outcome unknown": a timed-out append may still have committed,
+ * so a client retry can append the same updates again (CRDT updates are
+ * idempotent to apply, so this is safe for the sync client).
+ */
+function storeUnavailable(req: FastifyRequest, reply: FastifyReply, err: unknown): void {
+  const code = errorCode(err);
+  const sqlstate = code !== undefined && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
+  const record_id = sendError(reply, 503, "unavailable");
+  req.log.error({ record_id, sqlstate }, "sync store unavailable");
+}
+
+/**
+ * Longest doc id / scope tag accepted (clients mint UUIDs, 36 chars). Keeps every
+ * key well under Postgres' btree entry limit, so an oversized id is an unknown
+ * doc (404) on every store instead of a database error (503) on one. (Fastify
+ * already refuses a doc id over 100 chars with 414; the scope header is the
+ * case this guards.)
+ */
+const MAX_ID_LENGTH = 256;
+
+/** Ciphertext travels as base64 (standard or URL-safe alphabet). */
+const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
 
 /** Identical response for "unknown doc" and "unauthorized" — the H-PUB-3 zero-existence guarantee. */
 function notFound(reply: FastifyReply): void {
@@ -110,16 +141,37 @@ function verifyRequest(
   return { devicePublicKeyB64: device, scope };
 }
 
+/** The push body's updates, or null unless it is `{updates: string[]}` of base64. */
+function parsePushUpdates(rawBody: Uint8Array): readonly string[] | null {
+  let parsed: SyncPushBody;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(rawBody)) as SyncPushBody;
+  } catch {
+    return null;
+  }
+  const updates: unknown = parsed?.updates;
+  if (!Array.isArray(updates) || !updates.every((u) => typeof u === "string" && BASE64.test(u))) {
+    return null;
+  }
+  return updates as string[];
+}
+
 function rawBodyOf(req: FastifyRequest): Uint8Array {
   const body = req.body;
   return body instanceof Uint8Array ? body : new Uint8Array(0);
 }
 
+export interface BuildAppOptions {
+  /** Where log lines go (default stdout). Tests capture them to assert what is logged. */
+  readonly logStream?: { write(line: string): void };
+}
+
 /** Build the relay app over a store (injected so tests can seed the ACL). */
-export function buildApp(store: RelayStore): FastifyInstance {
+export function buildApp(store: RelayStore, options: BuildAppOptions = {}): FastifyInstance {
   // disableRequestLogging: bodies (opaque ciphertext) and signed headers are
   // never written to a log line (H-PUB-4, defence in depth).
-  const app = Fastify({ logger: true, disableRequestLogging: true });
+  const logger = options.logStream === undefined ? true : { stream: options.logStream };
+  const app = Fastify({ logger, disableRequestLogging: true });
   const nonces = new NonceCache();
 
   // Per-IP rate limiting (H-PUB-5) — app-level defence in depth in front of the
@@ -154,15 +206,26 @@ export function buildApp(store: RelayStore): FastifyInstance {
    * Keeping it in one place keeps the zero-existence response identical on both
    * routes.
    */
-  function authorizeDoc(
+  async function authorizeDoc(
     req: FastifyRequest,
     reply: FastifyReply,
     rawBody: Uint8Array,
     docId: string,
-  ): VerifiedRequest | null {
+  ): Promise<VerifiedRequest | null> {
     const verified = verifyRequest(req, rawBody, nonces);
     if (verified === null) {
       sendError(reply, 401, "unauthorized");
+      return null;
+    }
+    // A doc id with a NUL (Postgres text cannot hold one) or an oversized id or
+    // scope can never exist, so it gets the same 404 as any other unknown doc.
+    if (
+      docId.includes("\u0000") ||
+      verified.scope.includes("\u0000") ||
+      docId.length > MAX_ID_LENGTH ||
+      verified.scope.length > MAX_ID_LENGTH
+    ) {
+      notFound(reply);
       return null;
     }
     // A device not authorized for the declared scope gets 404 for everything, so
@@ -170,11 +233,11 @@ export function buildApp(store: RelayStore): FastifyInstance {
     // device may touch its own scope; a doc bound to a DIFFERENT scope stays
     // hidden (404). An as-yet-unwritten doc under its scope is a legitimate empty
     // stream (the route decides what to do with it).
-    if (!store.isAuthorized(verified.devicePublicKeyB64, verified.scope)) {
+    if (!(await store.isAuthorized(verified.devicePublicKeyB64, verified.scope))) {
       notFound(reply);
       return null;
     }
-    const bound = store.docScope(docId);
+    const bound = await store.docScope(docId);
     if (bound !== undefined && bound !== verified.scope) {
       notFound(reply);
       return null;
@@ -187,37 +250,45 @@ export function buildApp(store: RelayStore): FastifyInstance {
   // Fetch updates after ?since for an opaque doc id.
   app.get("/sync/:docId", async (req, reply) => {
     const { docId } = req.params as { docId: string };
-    const verified = authorizeDoc(req, reply, rawBodyOf(req), docId);
-    if (verified === null) {
-      return reply;
+    try {
+      const verified = await authorizeDoc(req, reply, rawBodyOf(req), docId);
+      if (verified === null) {
+        return reply;
+      }
+      const raw = (req.query as { since?: unknown }).since;
+      const since = parseCursor(typeof raw === "string" ? raw : undefined);
+      const result = await store.fetch(docId, since);
+      const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
+      return reply.send(payload);
+    } catch (err) {
+      return storeUnavailable(req, reply, err);
     }
-    const sinceRaw = Number((req.query as { since?: string }).since ?? "0");
-    const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
-    const result = store.fetch(docId, since);
-    const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
-    return reply.send(payload);
   });
 
   // Append encrypted updates for an opaque doc id.
   app.post("/sync/:docId", async (req, reply) => {
     const rawBody = rawBodyOf(req);
     const { docId } = req.params as { docId: string };
-    const verified = authorizeDoc(req, reply, rawBody, docId);
-    if (verified === null) {
-      return reply;
-    }
-    let parsed: SyncPushBody;
     try {
-      parsed = JSON.parse(new TextDecoder().decode(rawBody)) as SyncPushBody;
-    } catch {
-      return sendError(reply, 400, "bad_request");
+      const verified = await authorizeDoc(req, reply, rawBody, docId);
+      if (verified === null) {
+        return reply;
+      }
+      const updates = parsePushUpdates(rawBody);
+      if (updates === null) {
+        return sendError(reply, 400, "bad_request");
+      }
+      // undefined: another scope bound this doc after authorizeDoc looked — the
+      // same zero-existence 404 as if it had been bound already.
+      const cursor = await store.append(docId, verified.scope, updates);
+      if (cursor === undefined) {
+        return notFound(reply);
+      }
+      const payload: SyncPushResult = { cursor };
+      return reply.send(payload);
+    } catch (err) {
+      return storeUnavailable(req, reply, err);
     }
-    if (!Array.isArray(parsed.updates) || !parsed.updates.every((u) => typeof u === "string")) {
-      return sendError(reply, 400, "bad_request");
-    }
-    const cursor = store.append(docId, verified.scope, parsed.updates);
-    const payload: SyncPushResult = { cursor };
-    return reply.send(payload);
   });
 
   return app;
