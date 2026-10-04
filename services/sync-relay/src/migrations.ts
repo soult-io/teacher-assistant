@@ -12,7 +12,7 @@
 // store.contract.test.ts pins this list.
 //
 // RESTORING FROM A BACKUP: after the restore and BEFORE the relay serves
-// traffic, run (as the DB owner):
+// traffic, run ROTATE_EPOCHS_SQL (below) as the DB owner:
 //   UPDATE sync_relay.docs SET epoch = gen_random_uuid()::text;
 // Sequence numbers are reused after a restore; a new epoch makes every client
 // cursor from before the restore re-sync from 0 instead of skipping updates.
@@ -20,6 +20,9 @@
 import type { SqlClient } from "./sql.js";
 
 export const SCHEMA = "sync_relay";
+
+/** Run after restoring a backup, BEFORE the relay serves traffic (see header). */
+export const ROTATE_EPOCHS_SQL = `UPDATE ${SCHEMA}.docs SET epoch = gen_random_uuid()::text`;
 
 /** Fixed, arbitrary key for pg_advisory_xact_lock; only this migration takes it. */
 const MIGRATION_LOCK_KEY = 7_311_725_801;

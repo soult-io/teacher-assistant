@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import pg from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { LATEST_SCHEMA_VERSION, migrate, SCHEMA } from "./migrations.js";
+import { LATEST_SCHEMA_VERSION, migrate, ROTATE_EPOCHS_SQL, SCHEMA } from "./migrations.js";
 import { PostgresRelayStore } from "./postgres-store.js";
 import { poolClient, type SqlClient } from "./sql.js";
 import { InMemoryRelayStore, parseCursor, type RelayStore } from "./store.js";
@@ -122,7 +122,7 @@ const impls: Impl[] = [
 
 /** The restore-runbook statement (migrations.ts). */
 async function rotateEpochsSql(sql: SqlClient): Promise<void> {
-  await sql.query(`UPDATE ${SCHEMA}.docs SET epoch = gen_random_uuid()::text`);
+  await sql.query(ROTATE_EPOCHS_SQL);
 }
 
 const START = parseCursor(undefined);
@@ -136,7 +136,7 @@ const BLOBS = ["AAEC", "_-8", "q83v7w==", "SGVsbG8/Kw=", ""];
 describe("parseCursor", () => {
   it("parses <epoch>.<seq>; anything else is from the start", () => {
     expect(parseCursor("e-1.7")).toEqual({ epoch: "e-1", seq: 7 });
-    expect(parseCursor("a.b.3")).toEqual({ epoch: "a.b", seq: 3 });
+    expect(parseCursor("9f1c-AB.3")).toEqual({ epoch: "9f1c-AB", seq: 3 });
     for (const raw of [
       undefined,
       "",
@@ -150,6 +150,9 @@ describe("parseCursor", () => {
       "e.1e3",
       "e. 1",
       "e.0x1",
+      "a.b.3",
+      "e\u0000x.1",
+      "e x.1",
     ]) {
       expect(parseCursor(raw), String(raw)).toEqual(START);
     }

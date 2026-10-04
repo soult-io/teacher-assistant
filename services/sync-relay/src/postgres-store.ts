@@ -3,7 +3,8 @@
 //
 // What the database holds (schema `sync_relay`, see migrations.ts) is exactly
 // what the in-memory store holds: opaque doc ids, opaque scope tags, device
-// signing public keys, base64 ciphertext blobs and integer sequence numbers.
+// signing public keys, base64 ciphertext blobs, integer sequence numbers and a
+// random per-doc epoch (carries no information).
 // No timestamps, no client metadata, no plaintext column of any kind.
 //
 // Every write is a single SQL statement, so each is atomic on its own and the

@@ -1,6 +1,7 @@
 // The relay's append-only encrypted-update store + per-opaque-id ACL
 // (architecture §1.5). It holds ONLY opaque ids, opaque scope tags, device
-// signing public keys, and base64 ciphertext blobs — never plaintext, never a
+// signing public keys, base64 ciphertext blobs, sequence numbers and a random
+// per-doc epoch (carries no information) — never plaintext, never a
 // student-identifying field. It cannot decrypt anything it stores.
 //
 // Two implementations of one contract (store.contract.test.ts runs against both):
@@ -33,6 +34,9 @@ export interface Cursor {
 const START: Cursor = { epoch: undefined, seq: 0 };
 const MAX_CURSOR_LENGTH = 128;
 
+/** A relay-minted epoch is a UUID; accept only that alphabet from a client. */
+const EPOCH = /^[0-9A-Za-z-]{1,64}$/;
+
 /** Parse `?since=`. Anything that is not `<epoch>.<non-negative int>` is "from the start". */
 export function parseCursor(raw: string | undefined): Cursor {
   if (raw === undefined || raw.length > MAX_CURSOR_LENGTH) {
@@ -42,10 +46,12 @@ export function parseCursor(raw: string | undefined): Cursor {
   if (dot <= 0) {
     return START;
   }
+  const epoch = raw.slice(0, dot);
   const digits = raw.slice(dot + 1);
   const seq = Number(digits);
-  return /^\d+$/.test(digits) && Number.isSafeInteger(seq)
-    ? { epoch: raw.slice(0, dot), seq }
+  // The epoch alphabet check also keeps a NUL or other odd text away from the database.
+  return EPOCH.test(epoch) && /^\d+$/.test(digits) && Number.isSafeInteger(seq)
+    ? { epoch, seq }
     : START;
 }
 
