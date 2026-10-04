@@ -369,7 +369,7 @@ describe("TEACH-49 — durable relay: sync survives a relay restart, the databas
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
-  });
+  }, 30_000); // two PGlite starts (initdb + migrate), slow on a shared CI runner
 });
 
 /** True if `needle`'s bytes appear contiguously in `haystack`. */

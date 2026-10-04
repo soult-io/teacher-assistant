@@ -12,11 +12,11 @@
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { buildApp } from "./app.js";
-import { loadStoreConfig } from "./config.js";
+import { loadStoreConfig, type StoreConfig } from "./config.js";
 import { migrate } from "./migrations.js";
 import { PostgresRelayStore } from "./postgres-store.js";
 import { sodiumReady } from "./sodium-verify.js";
-import { poolClient } from "./sql.js";
+import { errorCode, poolClient } from "./sql.js";
 import { InMemoryRelayStore, type RelayStore } from "./store.js";
 
 const PORT = Number(process.env.SYNC_RELAY_PORT ?? process.env.PORT ?? 8931);
@@ -29,13 +29,13 @@ function describeError(err: unknown): string {
   if (!(err instanceof Error)) {
     return "unknown error";
   }
-  const code = (err as { code?: unknown }).code;
-  return `${err.name}${typeof code === "string" ? ` (${code})` : ""}: ${err.message}`;
+  const code = errorCode(err);
+  return `${err.name}${code === undefined ? "" : ` (${code})`}: ${err.message}`;
 }
 
 async function openStore(): Promise<{
   store: RelayStore;
-  kind: string;
+  kind: StoreConfig["kind"];
   close: () => Promise<void>;
 }> {
   const config = loadStoreConfig(process.env, (path) => readFileSync(path, "utf8"));
@@ -50,13 +50,15 @@ async function openStore(): Promise<{
     password: config.password,
     max: 10,
     connectionTimeoutMillis: 5_000,
-    query_timeout: 10_000, // a hung database fails the request (503) instead of holding it
+    // A hung database fails the request (503) instead of holding it; the server
+    // also cancels the statement, so a timed-out write is less likely to land late.
+    query_timeout: 10_000,
+    statement_timeout: 10_000,
   });
   // An idle client's connection dropping must not crash the process; the next
   // query reconnects or fails its request (503). Log the code only.
   pool.on("error", (err) => {
-    const code = (err as { code?: unknown }).code;
-    console.error(`sync-relay: idle database connection error (${String(code ?? err.name)})`);
+    console.error(`sync-relay: idle database connection error (${errorCode(err) ?? err.name})`);
   });
   try {
     const sql = poolClient(pool);

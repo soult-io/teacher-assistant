@@ -10,7 +10,7 @@ import { sodiumReady, utf8 } from "@teacher-assistant/crypto";
 import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
 import { beforeAll, describe, expect, it } from "vitest";
-import { makeSigner } from "./relay-signer.js";
+import { makeSigner, type Signer } from "./relay-signer.js";
 
 beforeAll(async () => {
   await sodiumReady();
@@ -44,7 +44,7 @@ function brokenStore(): RelayStore {
   };
 }
 
-function pushRequest(signer: ReturnType<typeof makeSigner>, docId: string, updates: string[]) {
+function pushRequest(signer: Signer, docId: string, updates: string[]) {
   const path = `/sync/${encodeURIComponent(docId)}`;
   const body = utf8(JSON.stringify({ updates }));
   return {
@@ -55,7 +55,7 @@ function pushRequest(signer: ReturnType<typeof makeSigner>, docId: string, updat
   };
 }
 
-function pullRequest(signer: ReturnType<typeof makeSigner>, docId: string) {
+function pullRequest(signer: Signer, docId: string) {
   const path = `/sync/${encodeURIComponent(docId)}?since=0`;
   return {
     method: "GET" as const,
@@ -134,7 +134,7 @@ describe("TEACH-49 — write-time scope binding keeps the zero-existence 404", (
     expect(res.json().error).toBe("not_found");
   });
 
-  it("a doc id containing NUL is an unknown doc (404) and never reaches the store", async () => {
+  it("a doc id containing NUL, or a scope over 256 chars, is an unknown doc (404) and never reaches the store", async () => {
     let lookedUp = false;
     const store = new InMemoryRelayStore();
     const app = buildApp({
@@ -147,7 +147,16 @@ describe("TEACH-49 — write-time scope binding keeps the zero-existence 404", (
       append: (...args) => store.append(...args),
       fetch: (...args) => store.fetch(...args),
     });
-    const res = await app.inject(pullRequest(makeSigner(), "doc\u0000x"));
+    expect((await app.inject(pullRequest(makeSigner(), "doc\u0000x"))).statusCode).toBe(404);
+    // Doc ids over 100 chars are already refused by Fastify (414, maxParamLength);
+    // an oversized scope header reaches the relay and must be an unknown doc too.
+    const path = `/sync/${DOC}?since=0`;
+    const longScope = "s".repeat(257);
+    const res = await app.inject({
+      method: "GET",
+      url: path,
+      headers: makeSigner().sign("GET", path, longScope, new Uint8Array(0)),
+    });
     expect(res.statusCode).toBe(404);
     expect(lookedUp).toBe(false);
   });

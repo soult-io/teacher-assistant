@@ -9,6 +9,12 @@ export interface SqlClient {
   exec(script: string): Promise<unknown>;
 }
 
+/** The string `code` of an error (a pg SQLSTATE or a Node errno like ECONNREFUSED). */
+export function errorCode(err: unknown): string | undefined {
+  const code = (err as { code?: unknown } | null)?.code;
+  return typeof code === "string" ? code : undefined;
+}
+
 export function poolClient(pool: pg.Pool): SqlClient {
   return {
     query: async <R>(text: string, params?: unknown[]) => {

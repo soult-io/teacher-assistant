@@ -21,6 +21,7 @@ import {
 } from "@teacher-assistant/schema";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
+import { errorCode } from "./sql.js";
 import type { RelayStore } from "./store.js";
 
 /** Requests older/newer than this (clock skew + transit) are rejected (replay window). */
@@ -61,24 +62,37 @@ function header(req: FastifyRequest, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function sendError(reply: FastifyReply, status: number, code: string): void {
-  const body: SyncErrorBody = { error: code, record_id: randomUUID() };
+/** Send the identity-clean error body; returns its opaque record_id. */
+function sendError(reply: FastifyReply, status: number, code: string): string {
+  const record_id = randomUUID();
+  const body: SyncErrorBody = { error: code, record_id };
   reply.code(status).send(body);
+  return record_id;
 }
 
 /**
  * A store failure (e.g. the database is unreachable) → 503. The log line carries
  * the opaque record_id and, for a database error, its 5-character SQLSTATE —
  * never the error message, the doc id, or anything from the request (H-PUB-4).
+ * A 503 means "outcome unknown": a timed-out append may still have committed,
+ * so a client retry can append the same updates again (CRDT updates are
+ * idempotent to apply, so this is safe for the sync client).
  */
 function storeUnavailable(req: FastifyRequest, reply: FastifyReply, err: unknown): void {
-  const record_id = randomUUID();
-  const code = (err as { code?: unknown } | null)?.code;
-  const sqlstate = typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
+  const code = errorCode(err);
+  const sqlstate = code !== undefined && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
+  const record_id = sendError(reply, 503, "unavailable");
   req.log.error({ record_id, sqlstate }, "sync store unavailable");
-  const body: SyncErrorBody = { error: "unavailable", record_id };
-  reply.code(503).send(body);
 }
+
+/**
+ * Longest doc id / scope tag accepted (clients mint UUIDs, 36 chars). Keeps every
+ * key well under Postgres' btree entry limit, so an oversized id is an unknown
+ * doc (404) on every store instead of a database error (503) on one. (Fastify
+ * already refuses a doc id over 100 chars with 414; the scope header is the
+ * case this guards.)
+ */
+const MAX_ID_LENGTH = 256;
 
 /** Ciphertext travels as base64 (standard or URL-safe alphabet). */
 const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
@@ -203,17 +217,21 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
       sendError(reply, 401, "unauthorized");
       return null;
     }
+    // A doc id with a NUL (Postgres text cannot hold one) or an oversized id or
+    // scope can never exist, so it gets the same 404 as any other unknown doc.
+    if (
+      docId.includes("\u0000") ||
+      docId.length > MAX_ID_LENGTH ||
+      verified.scope.length > MAX_ID_LENGTH
+    ) {
+      notFound(reply);
+      return null;
+    }
     // A device not authorized for the declared scope gets 404 for everything, so
     // it cannot tell whether a stream under that scope exists. An authorized
     // device may touch its own scope; a doc bound to a DIFFERENT scope stays
     // hidden (404). An as-yet-unwritten doc under its scope is a legitimate empty
     // stream (the route decides what to do with it).
-    // A doc id with a NUL can never exist (Postgres text cannot hold one), so it
-    // gets the same 404 as any other unknown doc.
-    if (docId.includes("\u0000")) {
-      notFound(reply);
-      return null;
-    }
     if (!(await store.isAuthorized(verified.devicePublicKeyB64, verified.scope))) {
       notFound(reply);
       return null;
