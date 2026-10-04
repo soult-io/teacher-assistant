@@ -138,7 +138,10 @@ describe("TEACH-49 — write-time scope binding keeps the zero-existence 404", (
     let lookedUp = false;
     const store = new InMemoryRelayStore();
     const app = buildApp({
-      isAuthorized: () => Promise.resolve(true),
+      isAuthorized: () => {
+        lookedUp = true;
+        return Promise.resolve(true);
+      },
       authorize: () => Promise.resolve(),
       docScope: (id) => {
         lookedUp = true;

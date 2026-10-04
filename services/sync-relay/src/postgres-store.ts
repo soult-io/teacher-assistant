@@ -34,11 +34,12 @@ SELECT head_seq::text AS cursor FROM head`;
 
 // One statement, so the cursor (head_seq) and the updates come from the same
 // snapshot: a concurrent append can never move the cursor past an update this
-// fetch did not return.
+// fetch did not return. A `since` past the head restarts from 0 (see RelayStore).
 const FETCH_SQL = `
 SELECT d.head_seq::text AS head, u.blob
 FROM ${SCHEMA}.docs d
-LEFT JOIN ${SCHEMA}.updates u ON u.doc_id = d.doc_id AND u.seq > $2::numeric
+LEFT JOIN ${SCHEMA}.updates u ON u.doc_id = d.doc_id
+  AND u.seq > CASE WHEN $2::numeric > d.head_seq THEN 0 ELSE $2::numeric END
 WHERE d.doc_id = $1
 ORDER BY u.seq`;
 
@@ -93,7 +94,7 @@ export class PostgresRelayStore implements RelayStore {
     ]);
     const first = rows[0];
     if (first === undefined) {
-      return { cursor: String(since), updates: [] };
+      return { cursor: "0", updates: [] };
     }
     const updates = rows.flatMap((r) => (r.blob === null ? [] : [r.blob]));
     return { cursor: first.head, updates };

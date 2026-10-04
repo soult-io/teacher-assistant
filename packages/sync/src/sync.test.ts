@@ -372,6 +372,45 @@ describe("TEACH-49 — durable relay: sync survives a relay restart, the databas
   }, 30_000); // two PGlite starts (initdb + migrate), slow on a shared CI runner
 });
 
+describe("TEACH-49 — a relay restored from an older backup does not make a client skip updates", () => {
+  it("B's cursor is ahead of the restored relay; B still receives A's post-restore update", async () => {
+    const period = generatePeriodKey(newScopeTag());
+    const docId = newOpaqueId();
+    const before = new InMemoryRelayStore();
+    const restored = new InMemoryRelayStore(); // the backup predates this doc
+    let app = buildApp(before);
+
+    // Each device's transport follows `app`, so a relay swap is a "restore".
+    const device = async () => {
+      const signing = generateSigningKeypair();
+      for (const s of [before, restored]) {
+        await s.authorize(toBase64(signing.publicKey), period.scopeTag);
+      }
+      const transport: Transport = (req) => injectTransport(app, [])(req);
+      const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
+      const relay = new RelayClient({ transport, signingKeypair: signing });
+      return { engine: new SyncEngine(stream, relay, new InMemoryPersistence()), stream };
+    };
+    const a = await device();
+    const b = await device();
+
+    // Before the restore: several updates, B syncs and holds a cursor > 0.
+    for (let i = 0; i < 3; i++) {
+      await a.engine.capture((doc) => doc.getMap("points").set(`old${i}`, i));
+    }
+    await a.engine.sync();
+    await b.engine.sync();
+
+    // Restore: the relay's data goes back to before this doc existed.
+    app = buildApp(restored);
+    await a.engine.capture((doc) => doc.getMap("points").set("new", 1));
+    await a.engine.sync(); // appends at seq 1 on the restored relay
+    await b.engine.sync(); // B's since (3) > head (1): must still get "new"
+
+    expect(b.stream.doc.getMap("points").get("new")).toBe(1);
+  });
+});
+
 /** True if `needle`'s bytes appear contiguously in `haystack`. */
 function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
   if (needle.length === 0 || needle.length > haystack.length) {

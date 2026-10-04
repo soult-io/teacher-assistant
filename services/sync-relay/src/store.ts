@@ -30,8 +30,12 @@ export interface RelayStore {
   append(docId: string, scopeTag: string, blobsB64: readonly string[]): Promise<string | undefined>;
   /**
    * Fetch updates after `since` (0 = from the start). The cursor is the doc's
-   * head sequence, read in the same snapshot as the updates; an unknown doc
-   * echoes `since` with no updates.
+   * head sequence (an unknown doc's head is 0), read in the same snapshot as the
+   * updates. A `since` AHEAD of the head — the relay's data was restored from an
+   * older backup — is treated as 0: every update is returned, so the client
+   * re-applies them (idempotent for CRDT updates) instead of silently skipping
+   * the ones appended after the restore. (Pagination, when it lands, will make
+   * the cursor "last seq returned"; do not rely on cursor == head elsewhere.)
    */
   fetch(docId: string, since: number): Promise<FetchResult>;
 }
@@ -85,9 +89,11 @@ export class InMemoryRelayStore implements RelayStore {
   async fetch(docId: string, since: number): Promise<FetchResult> {
     const doc = this.#docs.get(docId);
     if (doc === undefined) {
-      return { cursor: String(since), updates: [] };
+      return { cursor: "0", updates: [] };
     }
-    const updates = doc.updates.filter((u) => u.seq > since).map((u) => u.blobB64);
-    return { cursor: String(doc.updates.length), updates };
+    const head = doc.updates.length;
+    const from = since > head ? 0 : since;
+    const updates = doc.updates.filter((u) => u.seq > from).map((u) => u.blobB64);
+    return { cursor: String(head), updates };
   }
 }

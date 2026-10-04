@@ -17,7 +17,12 @@ export const SCHEMA = "sync_relay";
 /** Fixed, arbitrary key for pg_advisory_xact_lock; only this migration takes it. */
 const MIGRATION_LOCK_KEY = 7_311_725_801;
 
-/** Ordered; append new entries, never edit a shipped one. */
+/**
+ * Ordered; append new entries, never edit a shipped one. Each runs inside a
+ * PL/pgSQL DO block in one transaction, so statements that cannot run there
+ * (e.g. CREATE INDEX CONCURRENTLY) need a different mechanism. Startup shares
+ * the pool's 10 s statement_timeout: a long migration must raise it locally.
+ */
 const MIGRATIONS: readonly { readonly version: number; readonly sql: string }[] = [
   {
     version: 1,

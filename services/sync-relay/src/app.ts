@@ -221,6 +221,7 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     // scope can never exist, so it gets the same 404 as any other unknown doc.
     if (
       docId.includes("\u0000") ||
+      verified.scope.includes("\u0000") ||
       docId.length > MAX_ID_LENGTH ||
       verified.scope.length > MAX_ID_LENGTH
     ) {

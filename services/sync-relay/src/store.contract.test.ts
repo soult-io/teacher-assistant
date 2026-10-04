@@ -126,11 +126,21 @@ describe.each(impls)("RelayStore contract — $name", (impl) => {
     expect(await s.isAuthorized("dev-B", "scope-1")).toBe(false);
   });
 
-  it("an unknown doc has no scope and fetch echoes `since` with no updates", async () => {
+  it("an unknown doc has no scope; fetch returns head 0 for any `since`", async () => {
     const s = await impl.make();
     expect(await s.docScope("doc-x")).toBeUndefined();
     expect(await s.fetch("doc-x", 0)).toEqual({ cursor: "0", updates: [] });
-    expect(await s.fetch("doc-x", 7)).toEqual({ cursor: "7", updates: [] });
+    // Never echo a client cursor the relay does not have: after a restore, the
+    // next writer starts at seq 1 and a client holding 7 would skip 1..7.
+    expect(await s.fetch("doc-x", 7)).toEqual({ cursor: "0", updates: [] });
+  });
+
+  it("a `since` ahead of the head (restored relay) returns every update", async () => {
+    const s = await impl.make();
+    await s.append("doc-1", "scope-1", ["b1", "b2", "b3"]);
+    // A client last saw cursor 50 before the relay was restored to head 3.
+    expect(await s.fetch("doc-1", 50)).toEqual({ cursor: "3", updates: ["b1", "b2", "b3"] });
+    expect(await s.fetch("doc-1", 3.5)).toEqual({ cursor: "3", updates: ["b1", "b2", "b3"] });
   });
 
   it("the first append binds the doc to its scope — even an empty batch", async () => {
@@ -147,8 +157,6 @@ describe.each(impls)("RelayStore contract — $name", (impl) => {
     expect(await s.fetch("doc-1", 0)).toEqual({ cursor: "3", updates: ["b1", "b2", "b3"] });
     expect(await s.fetch("doc-1", 2)).toEqual({ cursor: "3", updates: ["b3"] });
     expect(await s.fetch("doc-1", 3)).toEqual({ cursor: "3", updates: [] });
-    // Past the head: no updates, cursor is the head.
-    expect(await s.fetch("doc-1", 99)).toEqual({ cursor: "3", updates: [] });
     // A fractional since behaves as a strict lower bound.
     expect(await s.fetch("doc-1", 1.5)).toEqual({ cursor: "3", updates: ["b2", "b3"] });
   });
