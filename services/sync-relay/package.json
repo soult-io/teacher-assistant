@@ -12,6 +12,14 @@
     "./store": {
       "types": "./dist/store.d.ts",
       "import": "./dist/store.js"
+    },
+    "./postgres-store": {
+      "types": "./dist/postgres-store.d.ts",
+      "import": "./dist/postgres-store.js"
+    },
+    "./migrations": {
+      "types": "./dist/migrations.d.ts",
+      "import": "./dist/migrations.js"
     }
   },
   "scripts": {
@@ -25,10 +33,13 @@
     "@fastify/rate-limit": "11.2.0",
     "@teacher-assistant/schema": "workspace:*",
     "fastify": "~5.12.0",
-    "libsodium-wrappers-sumo": "0.8.4"
+    "libsodium-wrappers-sumo": "0.8.4",
+    "pg": "8.23.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@types/node": "~26.2.0",
+    "@types/pg": "8.23.1",
     "tsx": "~4.23.12",
     "typescript": "~5.9.3",
     "vitest": "~4.1.10"

@@ -11,9 +11,15 @@ import {
   sodiumReady,
   toBase64,
 } from "@teacher-assistant/crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PGlite } from "@electric-sql/pglite";
 import { newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
 import { buildApp } from "@teacher-assistant/sync-relay/app";
-import { InMemoryRelayStore } from "@teacher-assistant/sync-relay/store";
+import { migrate, SCHEMA } from "@teacher-assistant/sync-relay/migrations";
+import { PostgresRelayStore } from "@teacher-assistant/sync-relay/postgres-store";
+import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
 import { beforeAll, describe, expect, it } from "vitest";
 import { EncryptedStream } from "./doc.js";
 import { SyncEngine } from "./engine.js";
@@ -53,15 +59,15 @@ interface Device {
   readonly stream: EncryptedStream;
 }
 
-function makeDevice(
+async function makeDevice(
   app: RelayApp,
-  store: InMemoryRelayStore,
+  store: RelayStore,
   docId: ReturnType<typeof newOpaqueId>,
   period: PeriodKey,
   sent: Uint8Array[],
-): Device {
+): Promise<Device> {
   const signing = generateSigningKeypair();
-  store.authorize(toBase64(signing.publicKey), period.scopeTag);
+  await store.authorize(toBase64(signing.publicKey), period.scopeTag);
   const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
   const relay = new RelayClient({ transport: injectTransport(app, sent), signingKeypair: signing });
   return { engine: new SyncEngine(stream, relay, new InMemoryPersistence()), stream };
@@ -75,8 +81,8 @@ describe("Phase-0 EXIT TEST — offline A reconciles to B, zero PII on server", 
     const docId = newOpaqueId();
     const sent: Uint8Array[] = [];
 
-    const a = makeDevice(app, store, docId, period, sent);
-    const b = makeDevice(app, store, docId, period, sent);
+    const a = await makeDevice(app, store, docId, period, sent);
+    const b = await makeDevice(app, store, docId, period, sent);
 
     // A captures a point OFFLINE (no sync yet) — queued + persisted as ciphertext.
     await a.engine.capture((doc) => {
@@ -105,8 +111,8 @@ describe("Phase-0 EXIT TEST — offline A reconciles to B, zero PII on server", 
     const period = generatePeriodKey(newScopeTag());
     const docId = newOpaqueId();
     const sent: Uint8Array[] = [];
-    const a = makeDevice(app, store, docId, period, sent);
-    const b = makeDevice(app, store, docId, period, sent);
+    const a = await makeDevice(app, store, docId, period, sent);
+    const b = await makeDevice(app, store, docId, period, sent);
 
     await a.engine.capture((doc) => doc.getMap("points").set("a1", 1));
     await b.engine.capture((doc) => doc.getMap("points").set("b1", 2));
@@ -138,7 +144,7 @@ describe("unauthorized gets zero bytes + zero existence signal (H-PUB-3)", () =>
     const sent: Uint8Array[] = [];
 
     // Authorized device A creates the stream.
-    const a = makeDevice(app, store, docId, period, sent);
+    const a = await makeDevice(app, store, docId, period, sent);
     await a.engine.capture((doc) => doc.getMap("points").set("p1", { note: MARKER }));
     await a.engine.sync();
 
@@ -183,7 +189,7 @@ describe("unauthorized gets zero bytes + zero existence signal (H-PUB-3)", () =>
     const sent: Uint8Array[] = [];
 
     // Authorized device A writes an EXISTING doc.
-    const a = makeDevice(app, store, existingDocId, period, sent);
+    const a = await makeDevice(app, store, existingDocId, period, sent);
     await a.engine.capture((doc) => doc.getMap("points").set("p1", { note: MARKER }));
     await a.engine.sync();
 
@@ -229,7 +235,7 @@ describe("authorized never-synced doc pulls 200-empty (the invariant the 404-han
     const period = generatePeriodKey(newScopeTag());
 
     const signing = generateSigningKeypair();
-    store.authorize(toBase64(signing.publicKey), period.scopeTag);
+    await store.authorize(toBase64(signing.publicKey), period.scopeTag);
 
     let raw: RelayHttpResponse | null = null;
     const inject = injectTransport(app, []);
@@ -256,7 +262,7 @@ describe("no silent loss under concurrency", () => {
     const docId = newOpaqueId();
 
     const signing = generateSigningKeypair();
-    store.authorize(toBase64(signing.publicKey), period.scopeTag);
+    await store.authorize(toBase64(signing.publicKey), period.scopeTag);
     const base = injectTransport(app, []);
     // A transport that signals when a push begins and blocks until released —
     // this opens exactly the window the reviewer flagged (capture during push).
@@ -294,10 +300,75 @@ describe("no silent loss under concurrency", () => {
 
     // A second sync flushes p2; a fresh device B then sees BOTH points.
     await engine.sync();
-    const b = makeDevice(app, store, docId, period, []);
+    const b = await makeDevice(app, store, docId, period, []);
     await b.engine.sync();
     expect(b.stream.doc.getMap("points").get("p1")).toBe(1);
     expect(b.stream.doc.getMap("points").get("p2")).toBe(2);
+  });
+});
+
+describe("TEACH-49 — durable relay: sync survives a relay restart, the database holds no plaintext", () => {
+  it("A syncs, the relay restarts on the same Postgres, B still converges; no marker in any row", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "relay-durable-"));
+    try {
+      const period = generatePeriodKey(newScopeTag());
+      const docId = newOpaqueId();
+
+      // Relay process #1 over a Postgres database on disk.
+      const db1 = await PGlite.create(dir);
+      await migrate(db1);
+      const store1 = new PostgresRelayStore(db1);
+      const app1 = buildApp(store1);
+      const a = await makeDevice(app1, store1, docId, period, []);
+      await a.engine.capture((doc) => {
+        doc.getMap("points").set("p1", { numerator: 7, denominator: 10, note: MARKER });
+      });
+      await a.engine.sync();
+      expect(a.engine.pendingCount).toBe(0);
+      await app1.close();
+      await db1.close();
+
+      // Relay process #2: a fresh connection to the SAME database.
+      const db2 = await PGlite.create(dir);
+      try {
+        await migrate(db2);
+        const store2 = new PostgresRelayStore(db2);
+        const app2 = buildApp(store2);
+        const b = await makeDevice(app2, store2, docId, period, []);
+        await b.engine.sync();
+        expect(b.stream.doc.getMap("points").get("p1")).toEqual({
+          numerator: 7,
+          denominator: 10,
+          note: MARKER,
+        });
+        await app2.close();
+
+        // Nothing in the database reads as the plaintext: not any column as text,
+        // and not any ciphertext blob once base64-decoded.
+        const marker = new TextEncoder().encode(MARKER);
+        let blobs = 0;
+        for (const table of ["acl", "docs", "updates"]) {
+          const { rows } = await db2.query<Record<string, unknown>>(
+            `SELECT * FROM ${SCHEMA}.${table}`,
+          );
+          for (const row of rows) {
+            for (const value of Object.values(row)) {
+              expect(String(value)).not.toContain(MARKER);
+            }
+            if (table === "updates") {
+              blobs += 1;
+              const bytes = new Uint8Array(Buffer.from(String(row["blob"]), "base64"));
+              expect(containsBytes(bytes, marker)).toBe(false);
+            }
+          }
+        }
+        expect(blobs).toBeGreaterThan(0); // the scan saw real ciphertext
+      } finally {
+        await db2.close();
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
