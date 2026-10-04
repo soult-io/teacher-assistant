@@ -373,7 +373,7 @@ describe("TEACH-49 — durable relay: sync survives a relay restart, the databas
 });
 
 describe("TEACH-49 — a relay restored from an older backup does not make a client skip updates", () => {
-  it("B's cursor is ahead of the restored relay; B still receives A's post-restore update", async () => {
+  it("B's cursor is from before the restore; B still receives every post-restore update", async () => {
     const period = generatePeriodKey(newScopeTag());
     const docId = newOpaqueId();
     const before = new InMemoryRelayStore();
@@ -401,13 +401,18 @@ describe("TEACH-49 — a relay restored from an older backup does not make a cli
     await a.engine.sync();
     await b.engine.sync();
 
-    // Restore: the relay's data goes back to before this doc existed.
+    // Restore: the relay's data goes back to before this doc existed. Sequence
+    // numbers restart, so A's new updates reuse seq 1..4 — at and past B's seq 3.
     app = buildApp(restored);
-    await a.engine.capture((doc) => doc.getMap("points").set("new", 1));
-    await a.engine.sync(); // appends at seq 1 on the restored relay
-    await b.engine.sync(); // B's since (3) > head (1): must still get "new"
+    for (let i = 0; i < 4; i++) {
+      await a.engine.capture((doc) => doc.getMap("points").set(`new${i}`, i));
+    }
+    await a.engine.sync();
+    await b.engine.sync(); // B's cursor is from the old epoch: served from 0
 
-    expect(b.stream.doc.getMap("points").get("new")).toBe(1);
+    for (let i = 0; i < 4; i++) {
+      expect(b.stream.doc.getMap("points").get(`new${i}`)).toBe(i);
+    }
   });
 });
 

@@ -22,7 +22,7 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
 import { errorCode } from "./sql.js";
-import type { RelayStore } from "./store.js";
+import { parseCursor, type RelayStore } from "./store.js";
 
 /** Requests older/newer than this (clock skew + transit) are rejected (replay window). */
 const TIMESTAMP_WINDOW_MS = 300_000;
@@ -255,8 +255,8 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
       if (verified === null) {
         return reply;
       }
-      const sinceRaw = Number((req.query as { since?: string }).since ?? "0");
-      const since = Number.isFinite(sinceRaw) && sinceRaw > 0 ? sinceRaw : 0;
+      const raw = (req.query as { since?: unknown }).since;
+      const since = parseCursor(typeof raw === "string" ? raw : undefined);
       const result = await store.fetch(docId, since);
       const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
       return reply.send(payload);

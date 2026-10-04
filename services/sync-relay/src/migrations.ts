@@ -7,8 +7,15 @@
 // applies every migration not yet recorded. Any failure rolls the whole run back.
 //
 // Columns are the FERPA surface (D1): opaque ids, opaque scope tags, device
-// public keys, base64 ciphertext, integer sequence numbers. Nothing else — no
-// timestamps, no client/IP metadata. store.contract.test.ts pins this list.
+// public keys, base64 ciphertext, integer sequence numbers, and a random
+// per-doc epoch. Nothing else — no timestamps, no client/IP metadata.
+// store.contract.test.ts pins this list.
+//
+// RESTORING FROM A BACKUP: after the restore and BEFORE the relay serves
+// traffic, run (as the DB owner):
+//   UPDATE sync_relay.docs SET epoch = gen_random_uuid()::text;
+// Sequence numbers are reused after a restore; a new epoch makes every client
+// cursor from before the restore re-sync from 0 instead of skipping updates.
 
 import type { SqlClient } from "./sql.js";
 
@@ -35,7 +42,8 @@ const MIGRATIONS: readonly { readonly version: number; readonly sql: string }[] 
       CREATE TABLE ${SCHEMA}.docs (
         doc_id    text   PRIMARY KEY,
         scope_tag text   NOT NULL,
-        head_seq  bigint NOT NULL CHECK (head_seq >= 0)
+        head_seq  bigint NOT NULL CHECK (head_seq >= 0),
+        epoch     text   NOT NULL  -- random id, part of every cursor (store.ts Cursor)
       );
       CREATE TABLE ${SCHEMA}.updates (
         doc_id text   NOT NULL REFERENCES ${SCHEMA}.docs (doc_id),

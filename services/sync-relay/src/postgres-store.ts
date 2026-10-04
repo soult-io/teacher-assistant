@@ -11,7 +11,7 @@
 
 import { SCHEMA } from "./migrations.js";
 import type { SqlClient } from "./sql.js";
-import type { FetchResult, RelayStore } from "./store.js";
+import { type Cursor, type FetchResult, formatCursor, newEpoch, type RelayStore } from "./store.js";
 
 // One statement: bind-or-extend the doc row (row-locked by ON CONFLICT, so
 // concurrent appends to one doc serialize) and insert the blobs at the sequence
@@ -19,27 +19,31 @@ import type { FetchResult, RelayStore } from "./store.js";
 // suppresses the update, `head` is empty, nothing is inserted, and no row returns.
 const APPEND_SQL = `
 WITH head AS (
-  INSERT INTO ${SCHEMA}.docs AS d (doc_id, scope_tag, head_seq)
-  VALUES ($1, $2, cardinality($3::text[]))
+  INSERT INTO ${SCHEMA}.docs AS d (doc_id, scope_tag, head_seq, epoch)
+  VALUES ($1, $2, cardinality($3::text[]), $4)
   ON CONFLICT (doc_id) DO UPDATE
     SET head_seq = d.head_seq + cardinality($3::text[])
     WHERE d.scope_tag = EXCLUDED.scope_tag
-  RETURNING d.head_seq
+  RETURNING d.head_seq, d.epoch
 ), ins AS (
   INSERT INTO ${SCHEMA}.updates (doc_id, seq, blob)
   SELECT $1, head.head_seq - cardinality($3::text[]) + u.ord, u.blob
   FROM head, unnest($3::text[]) WITH ORDINALITY AS u(blob, ord)
 )
-SELECT head_seq::text AS cursor FROM head`;
+SELECT epoch, head_seq::text AS head FROM head`;
 
 // One statement, so the cursor (head_seq) and the updates come from the same
 // snapshot: a concurrent append can never move the cursor past an update this
-// fetch did not return. A `since` past the head restarts from 0 (see RelayStore).
+// fetch did not return. A cursor from another epoch, or past the head, restarts
+// from 0 (see RelayStore.fetch).
 const FETCH_SQL = `
-SELECT d.head_seq::text AS head, u.blob
+SELECT d.epoch, d.head_seq::text AS head, u.blob
 FROM ${SCHEMA}.docs d
 LEFT JOIN ${SCHEMA}.updates u ON u.doc_id = d.doc_id
-  AND u.seq > CASE WHEN $2::numeric > d.head_seq THEN 0 ELSE $2::numeric END
+  AND u.seq > CASE
+    WHEN d.epoch IS DISTINCT FROM $3::text OR $2::bigint > d.head_seq THEN 0
+    ELSE $2::bigint
+  END
 WHERE d.doc_id = $1
 ORDER BY u.seq`;
 
@@ -79,24 +83,26 @@ export class PostgresRelayStore implements RelayStore {
     scopeTag: string,
     blobsB64: readonly string[],
   ): Promise<string | undefined> {
-    const { rows } = await this.#sql.query<{ cursor: string }>(APPEND_SQL, [
+    const { rows } = await this.#sql.query<{ epoch: string; head: string }>(APPEND_SQL, [
       docId,
       scopeTag,
       [...blobsB64],
+      newEpoch(),
     ]);
-    return rows[0]?.cursor;
+    const row = rows[0];
+    return row === undefined ? undefined : formatCursor(row.epoch, row.head);
   }
 
-  async fetch(docId: string, since: number): Promise<FetchResult> {
-    const { rows } = await this.#sql.query<{ head: string; blob: string | null }>(FETCH_SQL, [
-      docId,
-      since,
-    ]);
+  async fetch(docId: string, since: Cursor): Promise<FetchResult> {
+    const { rows } = await this.#sql.query<{ epoch: string; head: string; blob: string | null }>(
+      FETCH_SQL,
+      [docId, since.seq, since.epoch ?? null],
+    );
     const first = rows[0];
     if (first === undefined) {
       return { cursor: "0", updates: [] };
     }
     const updates = rows.flatMap((r) => (r.blob === null ? [] : [r.blob]));
-    return { cursor: first.head, updates };
+    return { cursor: formatCursor(first.epoch, first.head), updates };
   }
 }

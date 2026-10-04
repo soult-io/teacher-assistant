@@ -9,9 +9,53 @@
 // The choice is made at startup from configuration (config.ts); it does not
 // change the wire protocol or the authorization logic.
 
+import { randomUUID } from "node:crypto";
+
 export interface FetchResult {
   readonly cursor: string;
   readonly updates: string[];
+}
+
+/**
+ * A client cursor, parsed. On the wire it is the opaque string
+ * `<epoch>.<seq>`: `seq` is the last sequence number the client has, and
+ * `epoch` is a random id minted when the doc row is created. Restoring the
+ * relay from a backup re-mints every doc's epoch (see migrations.ts), so a
+ * cursor from before the restore no longer matches and the client is served
+ * from 0 — sequence numbers are reused after a restore, so `seq` alone cannot
+ * tell an old history from the current one.
+ */
+export interface Cursor {
+  readonly epoch: string | undefined;
+  readonly seq: number;
+}
+
+const START: Cursor = { epoch: undefined, seq: 0 };
+const MAX_CURSOR_LENGTH = 128;
+
+/** Parse `?since=`. Anything that is not `<epoch>.<non-negative int>` is "from the start". */
+export function parseCursor(raw: string | undefined): Cursor {
+  if (raw === undefined || raw.length > MAX_CURSOR_LENGTH) {
+    return START;
+  }
+  const dot = raw.lastIndexOf(".");
+  if (dot <= 0) {
+    return START;
+  }
+  const digits = raw.slice(dot + 1);
+  const seq = Number(digits);
+  return /^\d+$/.test(digits) && Number.isSafeInteger(seq)
+    ? { epoch: raw.slice(0, dot), seq }
+    : START;
+}
+
+export function formatCursor(epoch: string, seq: number | string): string {
+  return `${epoch}.${seq}`;
+}
+
+/** Mint a doc epoch (random; carries no information). */
+export function newEpoch(): string {
+  return randomUUID();
 }
 
 export interface RelayStore {
@@ -22,22 +66,23 @@ export interface RelayStore {
   /** The scope a doc is bound to, or undefined if the doc is unknown. */
   docScope(docId: string): Promise<string | undefined>;
   /**
-   * Atomically append ciphertext updates; binds docId→scope on first write.
-   * Returns the new cursor, or undefined (nothing written) when the doc is
+   * Atomically append ciphertext updates; binds docId→scope (and mints the doc's
+   * epoch) on first write. Returns the new cursor, or undefined (nothing written) when the doc is
    * already bound to a DIFFERENT scope — the check and the write are one step,
    * so two concurrent first writers under different scopes cannot both land.
    */
   append(docId: string, scopeTag: string, blobsB64: readonly string[]): Promise<string | undefined>;
   /**
-   * Fetch updates after `since` (0 = from the start). The cursor is the doc's
-   * head sequence (an unknown doc's head is 0), read in the same snapshot as the
-   * updates. A `since` AHEAD of the head — the relay's data was restored from an
-   * older backup — is treated as 0: every update is returned, so the client
-   * re-applies them (idempotent for CRDT updates) instead of silently skipping
-   * the ones appended after the restore. (Pagination, when it lands, will make
-   * the cursor "last seq returned"; do not rely on cursor == head elsewhere.)
+   * Fetch updates after `since`. The returned cursor is `<epoch>.<head>`, read in
+   * the same snapshot as the updates; an unknown doc returns cursor "0" and no
+   * updates. `since` is honoured only if its epoch is the doc's AND its seq is
+   * not past the head; otherwise (a cursor from before a restore, a legacy or
+   * malformed cursor) every update is returned, so the client re-applies them
+   * (idempotent for CRDT updates) instead of silently skipping any.
+   * (Pagination, when it lands, will make the cursor "last seq returned"; do not
+   * rely on cursor == head elsewhere.)
    */
-  fetch(docId: string, since: number): Promise<FetchResult>;
+  fetch(docId: string, since: Cursor): Promise<FetchResult>;
 }
 
 interface StoredUpdate {
@@ -47,6 +92,7 @@ interface StoredUpdate {
 
 interface StoredDoc {
   readonly scopeTag: string;
+  readonly epoch: string;
   readonly updates: StoredUpdate[];
 }
 
@@ -75,7 +121,7 @@ export class InMemoryRelayStore implements RelayStore {
   ): Promise<string | undefined> {
     let doc = this.#docs.get(docId);
     if (doc === undefined) {
-      doc = { scopeTag, updates: [] };
+      doc = { scopeTag, epoch: newEpoch(), updates: [] };
       this.#docs.set(docId, doc);
     } else if (doc.scopeTag !== scopeTag) {
       return undefined;
@@ -83,17 +129,24 @@ export class InMemoryRelayStore implements RelayStore {
     for (const blobB64 of blobsB64) {
       doc.updates.push({ seq: doc.updates.length + 1, blobB64 });
     }
-    return String(doc.updates.length);
+    return formatCursor(doc.epoch, doc.updates.length);
   }
 
-  async fetch(docId: string, since: number): Promise<FetchResult> {
+  async fetch(docId: string, since: Cursor): Promise<FetchResult> {
     const doc = this.#docs.get(docId);
     if (doc === undefined) {
       return { cursor: "0", updates: [] };
     }
     const head = doc.updates.length;
-    const from = since > head ? 0 : since;
+    const from = since.epoch === doc.epoch && since.seq <= head ? since.seq : 0;
     const updates = doc.updates.filter((u) => u.seq > from).map((u) => u.blobB64);
-    return { cursor: String(head), updates };
+    return { cursor: formatCursor(doc.epoch, head), updates };
+  }
+
+  /** Test hook: what a backup restore does to every doc (see migrations.ts). */
+  rotateEpochs(): void {
+    for (const [id, doc] of this.#docs) {
+      this.#docs.set(id, { ...doc, epoch: newEpoch() });
+    }
   }
 }

@@ -110,7 +110,8 @@ describe("TEACH-49 — request logging stays off", () => {
 
     expect((await app.inject(pushRequest(signer, DOC, [CIPHERTEXT]))).statusCode).toBe(200);
     const pulled = await app.inject(pullRequest(signer, DOC));
-    expect(pulled.json()).toEqual({ cursor: "1", updates: [CIPHERTEXT] });
+    expect(pulled.json()).toMatchObject({ updates: [CIPHERTEXT] });
+    expect(pulled.json().cursor).toMatch(/\.1$/);
     expectNoRequestData(lines, signer.publicKeyB64);
     await app.close();
   });

@@ -16,7 +16,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { LATEST_SCHEMA_VERSION, migrate, SCHEMA } from "./migrations.js";
 import { PostgresRelayStore } from "./postgres-store.js";
 import { poolClient, type SqlClient } from "./sql.js";
-import { InMemoryRelayStore, type RelayStore } from "./store.js";
+import { InMemoryRelayStore, parseCursor, type RelayStore } from "./store.js";
 
 const TEST_DATABASE_URL = process.env.TEST_DATABASE_URL;
 
@@ -98,26 +98,68 @@ async function openPostgresStore(backend: Backend) {
 
 interface Impl {
   readonly name: string;
-  make(): Promise<RelayStore>;
+  /** A fresh store, plus what a backup restore does to it (re-mint every epoch). */
+  make(): Promise<{ s: RelayStore; restoreEpochs(): Promise<void> }>;
 }
 
 const impls: Impl[] = [
-  { name: "memory", make: async () => new InMemoryRelayStore() },
+  {
+    name: "memory",
+    async make() {
+      const s = new InMemoryRelayStore();
+      return { s, restoreEpochs: async () => s.rotateEpochs() };
+    },
+  },
   ...pgBackends.map((b) => ({
     name: b.name,
     async make() {
       await b.reset();
-      return (await openPostgresStore(b)).store;
+      const { store, sql } = await openPostgresStore(b);
+      return { s: store, restoreEpochs: () => rotateEpochsSql(sql) };
     },
   })),
 ];
 
+/** The restore-runbook statement (migrations.ts). */
+async function rotateEpochsSql(sql: SqlClient): Promise<void> {
+  await sql.query(`UPDATE ${SCHEMA}.docs SET epoch = gen_random_uuid()::text`);
+}
+
+const START = parseCursor(undefined);
+const at = (cursor: string | undefined) => parseCursor(cursor);
+/** The sequence part of a cursor (`<epoch>.<seq>`, or "0" for an unknown doc). */
+const seqOf = (cursor: string | undefined) => Number(cursor?.slice(cursor.lastIndexOf(".") + 1));
+
 // URL-safe and standard base64, with and without padding — round-trip verbatim.
 const BLOBS = ["AAEC", "_-8", "q83v7w==", "SGVsbG8/Kw=", ""];
 
+describe("parseCursor", () => {
+  it("parses <epoch>.<seq>; anything else is from the start", () => {
+    expect(parseCursor("e-1.7")).toEqual({ epoch: "e-1", seq: 7 });
+    expect(parseCursor("a.b.3")).toEqual({ epoch: "a.b", seq: 3 });
+    for (const raw of [
+      undefined,
+      "",
+      "0",
+      "7",
+      ".3",
+      "e.",
+      "e.-1",
+      "e.1.5x",
+      "e.x",
+      "e.1e3",
+      "e. 1",
+      "e.0x1",
+    ]) {
+      expect(parseCursor(raw), String(raw)).toEqual(START);
+    }
+    expect(parseCursor(`${"e".repeat(200)}.1`)).toEqual(START);
+  });
+});
+
 describe.each(impls)("RelayStore contract — $name", (impl) => {
   it("ACL: unknown is false; authorize grants exactly (device, scope); idempotent", async () => {
-    const s = await impl.make();
+    const { s } = await impl.make();
     expect(await s.isAuthorized("dev-A", "scope-1")).toBe(false);
     await s.authorize("dev-A", "scope-1");
     await s.authorize("dev-A", "scope-1");
@@ -126,90 +168,108 @@ describe.each(impls)("RelayStore contract — $name", (impl) => {
     expect(await s.isAuthorized("dev-B", "scope-1")).toBe(false);
   });
 
-  it("an unknown doc has no scope; fetch returns head 0 for any `since`", async () => {
-    const s = await impl.make();
+  it("an unknown doc has no scope; fetch returns cursor 0 for any `since`", async () => {
+    const { s } = await impl.make();
     expect(await s.docScope("doc-x")).toBeUndefined();
-    expect(await s.fetch("doc-x", 0)).toEqual({ cursor: "0", updates: [] });
-    // Never echo a client cursor the relay does not have: after a restore, the
-    // next writer starts at seq 1 and a client holding 7 would skip 1..7.
-    expect(await s.fetch("doc-x", 7)).toEqual({ cursor: "0", updates: [] });
-  });
-
-  it("a `since` ahead of the head (restored relay) returns every update", async () => {
-    const s = await impl.make();
-    await s.append("doc-1", "scope-1", ["b1", "b2", "b3"]);
-    // A client last saw cursor 50 before the relay was restored to head 3.
-    expect(await s.fetch("doc-1", 50)).toEqual({ cursor: "3", updates: ["b1", "b2", "b3"] });
-    expect(await s.fetch("doc-1", 3.5)).toEqual({ cursor: "3", updates: ["b1", "b2", "b3"] });
+    expect(await s.fetch("doc-x", START)).toEqual({ cursor: "0", updates: [] });
+    expect(await s.fetch("doc-x", at("old-epoch.7"))).toEqual({ cursor: "0", updates: [] });
   });
 
   it("the first append binds the doc to its scope — even an empty batch", async () => {
-    const s = await impl.make();
-    expect(await s.append("doc-1", "scope-1", [])).toBe("0");
+    const { s } = await impl.make();
+    const c0 = await s.append("doc-1", "scope-1", []);
+    expect(seqOf(c0)).toBe(0);
     expect(await s.docScope("doc-1")).toBe("scope-1");
-    expect(await s.fetch("doc-1", 0)).toEqual({ cursor: "0", updates: [] });
+    expect(await s.fetch("doc-1", START)).toEqual({ cursor: c0, updates: [] });
   });
 
   it("append returns the head cursor; fetch returns updates after `since`, in order", async () => {
-    const s = await impl.make();
-    expect(await s.append("doc-1", "scope-1", ["b1", "b2"])).toBe("2");
-    expect(await s.append("doc-1", "scope-1", ["b3"])).toBe("3");
-    expect(await s.fetch("doc-1", 0)).toEqual({ cursor: "3", updates: ["b1", "b2", "b3"] });
-    expect(await s.fetch("doc-1", 2)).toEqual({ cursor: "3", updates: ["b3"] });
-    expect(await s.fetch("doc-1", 3)).toEqual({ cursor: "3", updates: [] });
-    // A fractional since behaves as a strict lower bound.
-    expect(await s.fetch("doc-1", 1.5)).toEqual({ cursor: "3", updates: ["b2", "b3"] });
+    const { s } = await impl.make();
+    const c2 = await s.append("doc-1", "scope-1", ["b1", "b2"]);
+    const c3 = await s.append("doc-1", "scope-1", ["b3"]);
+    expect([seqOf(c2), seqOf(c3)]).toEqual([2, 3]);
+    expect(at(c2).epoch).toBe(at(c3).epoch); // one doc, one epoch
+    expect(await s.fetch("doc-1", START)).toEqual({ cursor: c3, updates: ["b1", "b2", "b3"] });
+    expect(await s.fetch("doc-1", at(c2))).toEqual({ cursor: c3, updates: ["b3"] });
+    expect(await s.fetch("doc-1", at(c3))).toEqual({ cursor: c3, updates: [] });
+  });
+
+  it("a cursor from another epoch, a legacy cursor, or one past the head → every update", async () => {
+    const { s } = await impl.make();
+    const c3 = await s.append("doc-1", "scope-1", ["b1", "b2", "b3"]);
+    const epoch = at(c3).epoch;
+    const all = { cursor: c3, updates: ["b1", "b2", "b3"] };
+    expect(await s.fetch("doc-1", at("other-epoch.2"))).toEqual(all);
+    expect(await s.fetch("doc-1", at("2"))).toEqual(all); // pre-epoch (numeric) cursor
+    expect(await s.fetch("doc-1", at(`${epoch}.50`))).toEqual(all);
+  });
+
+  it("after a restore, a stale cursor at or below the new head still gets every update", async () => {
+    // The reviewer's case: sequence numbers are reused after a restore, so a
+    // client holding seq 3 from the old history must not take seq 1..3 of the
+    // new one as already seen.
+    const { s, restoreEpochs } = await impl.make();
+    const stale = await s.append("doc-1", "scope-1", ["old1", "old2", "old3"]);
+    await restoreEpochs();
+    const fresh = await s.fetch("doc-1", at(stale));
+    expect(fresh.updates).toEqual(["old1", "old2", "old3"]);
+    expect(at(fresh.cursor).epoch).not.toBe(at(stale).epoch);
+    expect(await s.fetch("doc-1", at(fresh.cursor))).toEqual({
+      cursor: fresh.cursor,
+      updates: [],
+    });
   });
 
   it("ciphertext blobs round-trip byte-for-byte", async () => {
-    const s = await impl.make();
+    const { s } = await impl.make();
     await s.append("doc-1", "scope-1", BLOBS);
-    expect((await s.fetch("doc-1", 0)).updates).toEqual(BLOBS);
+    expect((await s.fetch("doc-1", START)).updates).toEqual(BLOBS);
   });
 
-  it("docs are independent streams", async () => {
-    const s = await impl.make();
-    await s.append("doc-1", "scope-1", ["a"]);
-    await s.append("doc-2", "scope-1", ["x", "y"]);
-    expect(await s.fetch("doc-1", 0)).toEqual({ cursor: "1", updates: ["a"] });
-    expect(await s.fetch("doc-2", 0)).toEqual({ cursor: "2", updates: ["x", "y"] });
+  it("docs are independent streams with independent epochs", async () => {
+    const { s } = await impl.make();
+    const a = await s.append("doc-1", "scope-1", ["a"]);
+    const b = await s.append("doc-2", "scope-1", ["x", "y"]);
+    expect(await s.fetch("doc-1", START)).toEqual({ cursor: a, updates: ["a"] });
+    expect(await s.fetch("doc-2", START)).toEqual({ cursor: b, updates: ["x", "y"] });
+    expect(at(a).epoch).not.toBe(at(b).epoch);
   });
 
   it("append to a doc bound to ANOTHER scope writes nothing and returns undefined", async () => {
-    const s = await impl.make();
-    await s.append("doc-1", "scope-1", ["a"]);
+    const { s } = await impl.make();
+    const c1 = await s.append("doc-1", "scope-1", ["a"]);
     expect(await s.append("doc-1", "scope-2", ["evil"])).toBeUndefined();
     expect(await s.docScope("doc-1")).toBe("scope-1");
-    expect(await s.fetch("doc-1", 0)).toEqual({ cursor: "1", updates: ["a"] });
+    expect(await s.fetch("doc-1", START)).toEqual({ cursor: c1, updates: ["a"] });
   });
 
   it("concurrent appends to one doc get distinct, gap-free sequence numbers", async () => {
-    const s = await impl.make();
+    const { s } = await impl.make();
     const n = 20;
     const cursors = await Promise.all(
       Array.from({ length: n }, (_, i) => s.append("doc-1", "scope-1", [`b${i}`])),
     );
-    expect([...cursors].map(Number).sort((a, b) => a - b)).toEqual(
+    expect(cursors.map(seqOf).sort((a, b) => a - b)).toEqual(
       Array.from({ length: n }, (_, i) => i + 1),
     );
-    const { cursor, updates } = await s.fetch("doc-1", 0);
-    expect(cursor).toBe(String(n));
+    const { cursor, updates } = await s.fetch("doc-1", START);
+    expect(seqOf(cursor)).toBe(n);
     expect([...updates].sort()).toEqual(Array.from({ length: n }, (_, i) => `b${i}`).sort());
     // Each append's cursor points at its own blob.
     for (let i = 0; i < n; i++) {
-      expect(updates[Number(cursors[i]) - 1]).toBe(`b${i}`);
+      expect(updates[seqOf(cursors[i]) - 1]).toBe(`b${i}`);
     }
   });
 
   it("concurrent first writers under different scopes: exactly one binds the doc", async () => {
-    const s = await impl.make();
+    const { s } = await impl.make();
     const results = await Promise.all([
       s.append("doc-1", "scope-1", ["one"]),
       s.append("doc-1", "scope-2", ["two"]),
     ]);
-    expect(results.filter((r) => r !== undefined)).toEqual(["1"]);
+    expect(results.filter((r) => r !== undefined).map(seqOf)).toEqual([1]);
     const bound = await s.docScope("doc-1");
-    const { updates } = await s.fetch("doc-1", 0);
+    const { updates } = await s.fetch("doc-1", START);
     expect(updates).toEqual([bound === "scope-1" ? "one" : "two"]);
   });
 });
@@ -219,14 +279,16 @@ describe.each(pgBackends)("PostgresRelayStore durability + privacy — $name", (
     await backend.reset();
     const first = await openPostgresStore(backend);
     await first.store.authorize("dev-A", "scope-1");
-    await first.store.append("doc-1", "scope-1", ["c1", "c2"]);
+    const c2 = await first.store.append("doc-1", "scope-1", ["c1", "c2"]);
     await first.sql.close();
 
     const second = await openPostgresStore(backend); // re-runs migrate: idempotent
     expect(await second.store.isAuthorized("dev-A", "scope-1")).toBe(true);
     expect(await second.store.docScope("doc-1")).toBe("scope-1");
-    expect(await second.store.fetch("doc-1", 0)).toEqual({ cursor: "2", updates: ["c1", "c2"] });
-    expect(await second.store.append("doc-1", "scope-1", ["c3"])).toBe("3");
+    expect(await second.store.fetch("doc-1", START)).toEqual({ cursor: c2, updates: ["c1", "c2"] });
+    // A cursor from before the restart stays valid: same epoch, only the tail.
+    const c3 = await second.store.append("doc-1", "scope-1", ["c3"]);
+    expect(await second.store.fetch("doc-1", at(c2))).toEqual({ cursor: c3, updates: ["c3"] });
   });
 
   it("the schema holds only the opaque columns — no plaintext or metadata column", async () => {
@@ -242,6 +304,7 @@ describe.each(pgBackends)("PostgresRelayStore durability + privacy — $name", (
       "acl.device_pubkey:text",
       "acl.scope_tag:text",
       "docs.doc_id:text",
+      "docs.epoch:text",
       "docs.head_seq:bigint",
       "docs.scope_tag:text",
       "schema_migrations.version:integer",
@@ -270,8 +333,14 @@ describe.each(pgBackends)("PostgresRelayStore durability + privacy — $name", (
       }
     }
     for (const v of seen) {
-      // Every stored value is an input verbatim, or a sequence number.
-      expect(given.includes(v) || /^\d+$/.test(v), `unexpected stored value ${v}`).toBe(true);
+      // Every stored value is an input verbatim, a sequence number, or a
+      // relay-minted random epoch (a UUID).
+      const isEpoch = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+        v,
+      );
+      expect(given.includes(v) || /^\d+$/.test(v) || isEpoch, `unexpected stored value ${v}`).toBe(
+        true,
+      );
     }
     expect(seen.has("cmVqZWN0ZWQ")).toBe(false);
   });
@@ -284,7 +353,7 @@ describe.each(pgBackends)("PostgresRelayStore durability + privacy — $name", (
       /append-only/,
     );
     await expect(sql.query(`DELETE FROM ${SCHEMA}.updates`)).rejects.toThrow(/append-only/);
-    expect((await store.fetch("doc-1", 0)).updates).toEqual(["a"]);
+    expect((await store.fetch("doc-1", START)).updates).toEqual(["a"]);
   });
 
   it("migrate fails closed on a schema newer than this build", async () => {
