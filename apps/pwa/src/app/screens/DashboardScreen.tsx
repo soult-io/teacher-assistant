@@ -1,17 +1,18 @@
-// Weekly Dashboard (U2 + U3 writes; U7 desktop master-detail) — the 3-lens
-// owes-first list over the M3 store projections.
+// Weekly Dashboard (U2 + U3 writes; U7 desktop; TEACH-43 desktop cards) — the
+// 3-lens owes-first list over the M3 store projections.
 //
 // MOBILE (<900px): the validated single column — tapping an owes row opens the
 // Quick-Score sheet; tapping a scored row opens it for an audited [Fix]; the ⚑ flag
 // WRITES a score-later bookmark; a "To-score (N)" button opens the queue.
 //
-// DESKTOP (>=900px): MASTER-DETAIL (design §3.1). The owes-first list (master) sits
-// left; clicking a row SELECTS it into the right pane, which renders that goal's full
-// Goal Detail (trend + draft statement + consistency + quarterly + ARC). The first
-// owed goal auto-selects so the pane is never empty. Pending para points render as a
-// full-width table strip above the master-detail; the by-student lens becomes a
-// full-width card grid (no pane). Same render functions throughout — only the host
-// containers are re-laid-out (the mobile path is unchanged).
+// DESKTOP (>=900px): every lens renders the full-width StudentCard grid (TEACH-43) —
+// no graph on the dashboard. Owes-first splits into "Owes a point" / "Done this week"
+// card sections, by-period into one card section per period, by-student is the plain
+// grid. Goal text opens Quick-Score, ⚑ marks score-later, ↗ opens the full-screen
+// Goal Detail. Pending para points render as a full-width table strip above the cards.
+//
+// The grouping lens is owned by App (kept across Goal Detail and Back, reset on
+// unlock); without `lensControl` the screen keeps its own.
 
 import { asTimestamp, type OpaqueId, type ProgressDataPoint } from "@teacher-assistant/schema";
 import {
@@ -22,14 +23,7 @@ import {
   nextLens,
   renderHeader,
 } from "@teacher-assistant/store";
-import {
-  type ReactElement,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
+import { type ReactElement, type ReactNode, useCallback, useMemo, useState } from "react";
 import { isNonInstructionalWeek } from "../../data/calendar.js";
 import { isoDateOf } from "../../data/date.js";
 import type { DecryptedRecords } from "../../data/repository.js";
@@ -39,12 +33,15 @@ import { type SheetTarget, targetForRow } from "../sheet-target.js";
 import { GoalRow } from "./dashboard/GoalRow.js";
 import {
   buildStudentCards,
+  cardsFromOrderedRows,
   type Lookups,
   orderPeriodGroups,
   oldestFirst,
+  orderedRowVMs,
   orderRowsByStudent,
   periodLabelOfGroup,
   type RowVM,
+  type StudentCardVM,
   toRowVM,
 } from "./dashboard/dashboard-vm.js";
 import { StudentCard } from "./dashboard/StudentCard.js";
@@ -138,7 +135,7 @@ interface CardHandlers {
   readonly onOpenDetail: (vm: RowVM) => void;
 }
 
-/** The grouped body for a lens. `renderRow` differs per layout (mobile scores; desktop selects). */
+/** The mobile grouped body for a lens (desktop renders DesktopCards). */
 function DashboardBody({
   lens,
   groups,
@@ -153,20 +150,7 @@ function DashboardBody({
   readonly cards: CardHandlers;
 }) {
   if (lens === "by_student") {
-    return (
-      <>
-        {buildStudentCards(groups, lk).map((card) => (
-          <StudentCard
-            key={card.studentId}
-            card={card}
-            queuedGoalIds={cards.queuedGoalIds}
-            onScoreLater={cards.onScoreLater}
-            onOpenScore={cards.onOpenScore}
-            onOpenDetail={cards.onOpenDetail}
-          />
-        ))}
-      </>
-    );
+    return <StudentCardList studentCards={buildStudentCards(groups, lk)} cards={cards} />;
   }
   if (lens === "by_period") {
     return (
@@ -174,7 +158,7 @@ function DashboardBody({
         {orderPeriodGroups(groups, lk).map((group) => (
           <div key={group.key}>
             <SectionLabel text={`Period ${periodLabelOfGroup(group, lk)}`} />
-            {orderRowsByStudent(group.rows.map((row) => toRowVM(row, lk))).map(renderRow)}
+            {orderedRowVMs(group.rows, lk).map(renderRow)}
           </div>
         ))}
       </>
@@ -204,11 +188,14 @@ export interface DashboardScreenProps {
   /** Open Goal Detail for a goal (trend + history) — reachable from every row. */
   readonly onOpenDetail: (goalId: OpaqueId) => void;
   readonly apply: (mutator: DocMutator) => Promise<void>;
-  /** Desktop master-detail (design §3.1). Absent/false → the validated mobile layout. */
+  /** The grouping lens, when the caller owns it (App keeps it across Back). */
+  readonly lensControl?: {
+    readonly lens: DashboardLens;
+    readonly onChange: (lens: DashboardLens) => void;
+  };
+  /** Desktop student-card layout (TEACH-43). Absent/false → the validated mobile layout. */
   readonly isDesktop?: boolean;
-  /** Desktop only: render the selected goal's full Goal Detail into the right pane. */
-  readonly renderDetailPane?: (goalId: OpaqueId) => ReactNode;
-  /** Desktop only: the full-width para-validation table strip, above the master-detail. */
+  /** Desktop only: the full-width para-validation table strip, above the cards. */
   readonly validationStrip?: ReactNode;
 }
 
@@ -225,12 +212,13 @@ export function DashboardScreen(props: DashboardScreenProps) {
     onOpenScore,
     onOpenDetail,
     apply,
+    lensControl,
     isDesktop = false,
-    renderDetailPane,
     validationStrip,
   } = props;
-  const [lens, setLens] = useState<DashboardLens>("owes_first");
-  const [selectedGoalId, setSelectedGoalId] = useState<OpaqueId | null>(null);
+  const [ownLens, setOwnLens] = useState<DashboardLens>("owes_first");
+  const lens = lensControl?.lens ?? ownLens;
+  const setLens = lensControl?.onChange ?? setOwnLens;
   const today = isoDateOf(now);
 
   const dashboard = useMemo(
@@ -260,24 +248,6 @@ export function DashboardScreen(props: DashboardScreenProps) {
   );
   const pendingCount = paraPendingCount;
   const groups = groupDashboard(dashboard.rows, lens);
-
-  // Desktop pane default (design Q1): the first owed goal, else the first row, so the
-  // pane is never empty. Derived from the owes-first ordering the list itself uses.
-  const firstPick = useMemo(() => {
-    const owesFirst = groupDashboard(dashboard.rows, "owes_first")[0]?.rows ?? [];
-    const ordered = orderRowsByStudent(owesFirst.map((row) => toRowVM(row, lk)));
-    const pick = ordered.find((vm) => vm.state === "owes") ?? ordered[0];
-    return pick?.goalId ?? null;
-  }, [dashboard.rows, lk]);
-
-  const paneActive = isDesktop && renderDetailPane !== undefined;
-  const selectedValid =
-    selectedGoalId !== null && dashboard.rows.some((r) => r.goalId === selectedGoalId);
-  useEffect(() => {
-    if (paneActive && !selectedValid && firstPick !== null) {
-      setSelectedGoalId(firstPick);
-    }
-  }, [paneActive, selectedValid, firstPick]);
 
   const toggleLater = useCallback(
     (vm: RowVM) => {
@@ -341,23 +311,9 @@ export function DashboardScreen(props: DashboardScreenProps) {
     />
   );
 
-  // Desktop rows select into the pane instead of scoring (design §4).
-  const renderSelectableRow = (vm: RowVM): ReactElement => (
-    <GoalRow
-      key={vm.goalId}
-      vm={vm}
-      scoreLater={queuedGoalIds.has(vm.goalId)}
-      onScoreLater={toggleLater}
-      onOpenScore={openScore}
-      onOpenDetail={openDetail}
-      onSelect={(picked) => setSelectedGoalId(picked.goalId)}
-      selected={vm.goalId === selectedGoalId}
-    />
-  );
-
   const header = dashboard.header;
 
-  if (paneActive) {
+  if (isDesktop) {
     return (
       <div>
         <Headline
@@ -367,44 +323,10 @@ export function DashboardScreen(props: DashboardScreenProps) {
           showPendButton={false}
         />
         {validationStrip}
-        {lens === "by_student" ? (
-          <>
-            <div className="listtoolbar">
-              <GroupToggle lens={lens} onCycle={() => setLens(nextLens(lens))} />
-            </div>
-            <div className="scardgrid" data-testid="dashboard-body">
-              <DashboardBody
-                lens={lens}
-                groups={groups}
-                lk={lk}
-                renderRow={renderRow}
-                cards={cards}
-              />
-            </div>
-          </>
-        ) : (
-          <div className="md">
-            <div className="mdlist">
-              <div className="listtoolbar">
-                <GroupToggle lens={lens} onCycle={() => setLens(nextLens(lens))} />
-              </div>
-              <div data-testid="dashboard-body">
-                <DashboardBody
-                  lens={lens}
-                  groups={groups}
-                  lk={lk}
-                  renderRow={renderSelectableRow}
-                  cards={cards}
-                />
-              </div>
-            </div>
-            <div className="mddetail" data-testid="detail-pane">
-              {selectedGoalId !== null && renderDetailPane !== undefined
-                ? renderDetailPane(selectedGoalId)
-                : null}
-            </div>
-          </div>
-        )}
+        <div className="listtoolbar">
+          <GroupToggle lens={lens} onCycle={() => setLens(nextLens(lens))} />
+        </div>
+        <DesktopCards lens={lens} groups={groups} lk={lk} cards={cards} />
       </div>
     );
   }
@@ -474,6 +396,130 @@ function OwesFirst({
           <SectionLabel text="Done this week" />
           {done.map(renderRow)}
         </>
+      ) : null}
+    </div>
+  );
+}
+
+/** A labelled full-width card grid — one desktop section (TEACH-43). */
+function CardSection({
+  label,
+  owes = false,
+  studentCards,
+  cards,
+  empty,
+}: {
+  readonly label: string;
+  readonly owes?: boolean;
+  readonly studentCards: readonly StudentCardVM[];
+  readonly cards: CardHandlers;
+  readonly empty?: string;
+}) {
+  return (
+    <section className="cardsection">
+      <SectionLabel text={label} owes={owes} />
+      {studentCards.length > 0 ? (
+        <StudentCardGrid studentCards={studentCards} cards={cards} />
+      ) : empty !== undefined ? (
+        <div className="note">{empty}</div>
+      ) : null}
+    </section>
+  );
+}
+
+function StudentCardGrid({
+  studentCards,
+  cards,
+  testId,
+}: {
+  readonly studentCards: readonly StudentCardVM[];
+  readonly cards: CardHandlers;
+  readonly testId?: string;
+}) {
+  return (
+    <div className="scardgrid" data-testid={testId}>
+      <StudentCardList studentCards={studentCards} cards={cards} />
+    </div>
+  );
+}
+
+/** The StudentCards themselves — shared by the mobile by-student body and every desktop grid. */
+function StudentCardList({
+  studentCards,
+  cards,
+}: {
+  readonly studentCards: readonly StudentCardVM[];
+  readonly cards: CardHandlers;
+}) {
+  return (
+    <>
+      {studentCards.map((card) => (
+        <StudentCard
+          key={card.studentId}
+          card={card}
+          queuedGoalIds={cards.queuedGoalIds}
+          onScoreLater={cards.onScoreLater}
+          onOpenScore={cards.onOpenScore}
+          onOpenDetail={cards.onOpenDetail}
+        />
+      ))}
+    </>
+  );
+}
+
+/**
+ * Desktop body: StudentCards in every lens (TEACH-43). Owes-first puts each student
+ * with an owed goal under "Owes a point" (with ALL their goals) and the rest under
+ * "Done this week"; by-period gives each period its own section. Rows keep the
+ * orderRowsByStudent order and cards follow it — nothing is re-sorted here.
+ */
+function DesktopCards({
+  lens,
+  groups,
+  lk,
+  cards,
+}: {
+  readonly lens: DashboardLens;
+  readonly groups: DashboardGroups;
+  readonly lk: Lookups;
+  readonly cards: CardHandlers;
+}) {
+  if (lens === "by_student") {
+    return (
+      <StudentCardGrid
+        studentCards={buildStudentCards(groups, lk)}
+        cards={cards}
+        testId="dashboard-body"
+      />
+    );
+  }
+  if (lens === "by_period") {
+    return (
+      <div data-testid="dashboard-body">
+        {orderPeriodGroups(groups, lk).map((group) => (
+          <CardSection
+            key={group.key}
+            label={`Period ${periodLabelOfGroup(group, lk)}`}
+            studentCards={cardsFromOrderedRows(orderedRowVMs(group.rows, lk))}
+            cards={cards}
+          />
+        ))}
+      </div>
+    );
+  }
+  const all = cardsFromOrderedRows(orderedRowVMs(groups[0]?.rows ?? [], lk));
+  const done = all.filter((card) => card.todo === 0);
+  return (
+    <div data-testid="dashboard-body">
+      <CardSection
+        label="Owes a point"
+        owes
+        studentCards={all.filter((card) => card.todo > 0)}
+        cards={cards}
+        empty="Nothing owing right now."
+      />
+      {done.length > 0 ? (
+        <CardSection label="Done this week" studentCards={done} cards={cards} />
       ) : null}
     </div>
   );

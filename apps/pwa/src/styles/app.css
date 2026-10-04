@@ -1343,8 +1343,8 @@ button.rowmain {
 
 /* ══════════════════════════════════════════════════════════════════════════════
    U7 — DESKTOP (>=900px). design/desktop-design-spec.md. Same render functions, the
-   host containers re-laid-out: a persistent sidebar + top bar shell, master-detail
-   dashboard, two-column Goal Detail, centered Quick-Score modal, and wider tables.
+   host containers re-laid-out: a persistent sidebar + top bar shell, a student-card
+   dashboard (TEACH-43), two-column Goal Detail, centered Quick-Score modal, and wider tables.
    Below 900px NONE of this applies — the validated mobile layout renders unchanged.
    ══════════════════════════════════════════════════════════════════════════════ */
 @media (min-width: 900px) {
@@ -1470,13 +1470,11 @@ button.rowmain {
        values, so <900px is unaffected. Change a step here, not N one-off values, to
        re-tune — that is what prevents the padding from drifting out of step again. */
     --pad-card: 0.85rem;
-    --pad-mddetail: 1rem;
     --pad-headline: 0.9rem;
     --pad-stat: 0.5rem 0.55rem;
     --gap-three: 0.4rem;
     --pad-cell: 0.3rem 0.45rem;
     --pad-cell-edge: 0.4rem;
-    --gap-md: 1.1rem;
     --pad-screen-y: 1.1rem;
 
     /* ── Section rhythm (hierarchy) ────────────────────────────────────────────
@@ -1613,33 +1611,6 @@ button.rowmain {
     letter-spacing: 0.04em;
   }
 
-  /* ── Detail pane reads as ONE goal (design §3.1) ── */
-  /* `.mddetail` is already a surface (rule above); its inner blocks were separate
-     white `.card` boxes, so the goal read as a stack of cards. Demote the plain cards
-     to hairline-separated sub-panels and make the goal header the pane title. The two
-     export-ready surfaces (`.qsummary`, `.draftstmt`) keep their card so they stay
-     visibly liftable for the IC report. */
-  .mddetail {
-    box-shadow: inset 4px 0 0 var(--accent); /* selected-goal rail, like .row.selected */
-  }
-  .mddetail > .detailhead {
-    border-bottom: 1px solid var(--border);
-    padding-bottom: 0.6rem;
-    margin-bottom: 0.2rem;
-  }
-  .mddetail > .card:not(.qsummary):not(.draftstmt) {
-    background: transparent;
-    border: 0;
-    border-top: 1px solid var(--border);
-    border-radius: 0;
-    padding: 0.85rem 0;
-    margin: 0;
-  }
-  /* First sub-panel sits under the header rule — avoid a doubled line. */
-  .mddetail > .detailhead + .card:not(.qsummary):not(.draftstmt) {
-    border-top: 0;
-  }
-
   /* ── Para-strip caption belongs to its table ── */
   /* Frame the para table as a rounded panel and render its caption as the table's
      footer inside that frame, instead of an orphaned sibling floating below it. */
@@ -1673,29 +1644,10 @@ button.rowmain {
     display: none;
   }
 
-  /* ── Dashboard master-detail (design §3.1) ── */
-  .md {
-    display: grid;
-    grid-template-columns: 24rem 1fr;
-    gap: var(--gap-md);
-    align-items: start;
-  }
-  .mdlist {
-    min-width: 0;
-  }
-  .mddetail {
-    min-width: 0;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: var(--pad-mddetail);
-  }
-  /* The group toggle belongs to the list it controls, so on desktop it sits at the
-     LEFT edge — aligned with the "Owes a point" section label and the cards below it
-     (and, in the by-student lens, with the card grid's first column). Right-aligning it
-     floated it disconnected over the narrow master column, next to but not part of the
-     detail pane. (Mobile is a different element, the sibling `.grouptoggle`, and keeps
-     its own right alignment above the full-width column — this rule does not affect it.) */
+  /* The group toggle belongs to the cards it controls, so on desktop it sits at the
+     LEFT edge — aligned with the section labels and the card grid's first column.
+     (Mobile is a different element, the sibling `.grouptoggle`, and keeps its own
+     right alignment above the full-width column — this rule does not affect it.) */
   .listtoolbar {
     display: flex;
     justify-content: flex-start;
@@ -1712,12 +1664,20 @@ button.rowmain {
     border-color: var(--accent);
   }
 
-  /* by-student lens → full-width card grid (design Q2), no detail pane. */
+  /* Every dashboard lens → full-width StudentCard grids (TEACH-43). */
   .scardgrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(20rem, 1fr));
     gap: 0.7rem;
     align-items: start;
+  }
+  /* A card section's label spans the full width above its grid; the gap above a
+     section's label (not between its cards) marks where the next group starts. */
+  .cardsection > .grouplabel {
+    margin: 0 0.1rem var(--label-gap);
+  }
+  .cardsection + .cardsection {
+    margin-top: var(--sec-gap);
   }
 
   /* ── Goal Detail two-column (design §3.2) ── */
@@ -1732,11 +1692,6 @@ button.rowmain {
   }
   .detailadd {
     margin-left: auto;
-  }
-
-  /* The dashboard detail PANE stacks in one column (design §3.1) even on desktop. */
-  .gd-pane .twocol {
-    grid-template-columns: 1fr;
   }
 
   /* ── Quick-Score / para capture → centered modal (design §3.3) ── */
@@ -1820,8 +1775,7 @@ button.rowmain {
    side — the content reads as a narrow strip marooned in empty space. Rather than a
    single fixed cap, `--content-max` grows at wide breakpoints so the column fills
    most of the main area with modest, intentional margins at every size. The growth
-   goes to structure that wants width — the master-detail list column and the fluid
-   card grids — while prose keeps a readable measure (see `.stmttext` above; forms
+   goes to structure that wants width — the fluid card grids — while prose keeps a readable measure (see `.stmttext` above; forms
    stay capped at `.new-goal .form` / `.to-score`). Values are deliberately below the
    full main-column width so a balanced gutter remains and the layout reads as
    designed, not edge-to-edge.
@@ -1832,13 +1786,11 @@ button.rowmain {
   .main {
     --content-max: 1360px;
     --pad-card: 0.95rem 1rem;
-    --pad-mddetail: 1.15rem;
     --pad-headline: 1rem 1.15rem;
     --pad-stat: 0.65rem 0.55rem;
     --gap-three: 0.55rem;
     --pad-cell: 0.4rem 0.55rem;
     --pad-cell-edge: 0.5rem;
-    --gap-md: 1.4rem;
     --pad-screen-y: 1.3rem;
   }
   .scardgrid,
@@ -1847,28 +1799,22 @@ button.rowmain {
   }
 }
 
-/* >=1760px: the content column widens further and the master-detail list column
-   gains room (more roster context) while the detail pane grows with it. */
+/* >=1760px: the content column widens further. */
 @media (min-width: 1760px) {
   .main {
     --content-max: 1600px;
     --pad-card: 1.05rem 1.15rem;
-    --pad-mddetail: 1.25rem;
     --pad-headline: 1.1rem 1.3rem;
     --pad-stat: 0.8rem 0.6rem;
     --gap-three: 0.65rem;
     --pad-cell: 0.5rem 0.6rem;
     --pad-cell-edge: 0.6rem;
-    --gap-md: 2rem;
     --pad-screen-y: 1.45rem;
-  }
-  .md {
-    grid-template-columns: 28rem 1fr;
   }
 }
 
 /* >=2200px (2560px-class displays): the column fills most of the main area with a
-   balanced gutter; the list column widens again and the card grids gain a fourth
+   balanced gutter; the card grids gain a fourth
    column so cards stay a sensible size rather than stretching. */
 @media (min-width: 2200px) {
   .main {
@@ -1876,17 +1822,12 @@ button.rowmain {
        cap in to ~1760px so the column keeps a balanced ~280px gutter each side. */
     --content-max: 1760px;
     --pad-card: 1.15rem 1.25rem;
-    --pad-mddetail: 1.4rem;
     --pad-headline: 1.25rem 1.5rem;
     --pad-stat: 0.95rem 0.6rem;
     --gap-three: 0.8rem;
     --pad-cell: 0.6rem 0.7rem;
     --pad-cell-edge: 0.7rem;
-    --gap-md: 2rem;
     --pad-screen-y: 1.6rem;
-  }
-  .md {
-    grid-template-columns: 32rem 1fr;
   }
   .scardgrid,
   .bcardgrid {

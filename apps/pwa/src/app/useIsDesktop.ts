@@ -1,9 +1,8 @@
 // A single responsive boolean: is the viewport at/above the desktop breakpoint
 // (design/desktop-design-spec.md §1, 900px)? U7 is ONE codebase driven by CSS
 // media queries for pure layout — but two behaviors genuinely DIVERGE by width and
-// cannot be expressed in CSS (design §4 interaction table): a dashboard row CLICK
-// selects into the master-detail pane on desktop vs navigates to full Goal Detail on
-// mobile, and Goal Detail reflows to two columns. This hook is that one boolean, not
+// cannot be expressed in CSS: the dashboard renders student cards in every grouping
+// on desktop (TEACH-43), and Goal Detail reflows to two columns. This hook is that one boolean, not
 // a second layout tree; every other desktop difference stays in the stylesheet.
 //
 // jsdom has no `matchMedia`, so the guarded reader returns `false` under test — the

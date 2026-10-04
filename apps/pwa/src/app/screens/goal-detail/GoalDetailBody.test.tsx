@@ -36,15 +36,15 @@ function renderBody(layout: GoalDetailLayout) {
 }
 
 describe("GoalDetailBody — layout reflow (U7)", () => {
-  it("full layout uses two columns; pane layout is a single stacked column", () => {
+  it("full layout uses two columns; mobile layout is a single column", () => {
     const full = renderBody("full");
     expect(full.container.querySelector(".twocol")).not.toBeNull();
     full.unmount();
-    const pane = renderBody("pane");
-    expect(pane.container.querySelector(".twocol")).toBeNull();
+    const mobile = renderBody("mobile");
+    expect(mobile.container.querySelector(".twocol")).toBeNull();
   });
 
-  it.each<GoalDetailLayout>(["mobile", "pane", "full"])(
+  it.each<GoalDetailLayout>(["mobile", "full"])(
     "preserves the honesty surfaces verbatim in the %s layout",
     (layout) => {
       const { getByTestId, getAllByText } = renderBody(layout);
@@ -57,7 +57,7 @@ describe("GoalDetailBody — layout reflow (U7)", () => {
     },
   );
 
-  it("an open goal # draft never carries over when the pane switches goal (TEACH-41)", () => {
+  it("an open goal # draft never carries over when the body switches goal (TEACH-41)", () => {
     const records = buildSyntheticSeed(NOW).master;
     const [a, b] = records.goals.filter((g) => g.status === "active");
     if (a === undefined || b === undefined) {
@@ -79,7 +79,7 @@ describe("GoalDetailBody — layout reflow (U7)", () => {
         onAckMastery={vi.fn()}
         labelDuplicates={[]}
         onSetGoalLabel={onSetGoalLabel}
-        layout="pane"
+        layout="full"
       />
     );
     const view = render(body(a));

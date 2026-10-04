@@ -1,6 +1,6 @@
 import { RelayRequestError } from "@teacher-assistant/sync";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
 import type { BootstrapOptions } from "./data/session.js";
 import { buildSyntheticSeed } from "./data/synthetic-seed.js";
@@ -276,6 +276,70 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     await waitFor(() =>
       expect(screen.getAllByRole("button", { name: /^confirm / }).length).toBe(1),
     );
+  });
+});
+
+/** Force the desktop breakpoint (jsdom has no matchMedia, so it defaults to mobile). */
+function stubDesktop() {
+  Object.defineProperty(window, "matchMedia", {
+    writable: true,
+    configurable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })),
+  });
+}
+
+function groupBy(label: string) {
+  const toggle = screen.getByTestId("group-toggle");
+  for (let i = 0; i < 3 && !(toggle.textContent ?? "").includes(label); i++) {
+    fireEvent.click(toggle);
+  }
+  expect(toggle).toHaveTextContent(`Group: ${label}`);
+}
+
+describe("App — the dashboard grouping survives Goal Detail and tab switches (TEACH-43)", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it.each([
+    ["mobile", () => {}],
+    ["desktop", stubDesktop],
+  ])("%s: by period → ↗ → Back is still 'Group: by period'", async (_layout, setup) => {
+    setup();
+    await unlock();
+    expect(screen.getByTestId("group-toggle")).toHaveTextContent("Group: owes-first");
+    groupBy("by period");
+    fireEvent.click(screen.getByRole("button", { name: "trend and history Goal 2, Add integers" }));
+    expect(await screen.findByRole("img", { name: "progress trend" })).toBeInTheDocument();
+    // Desktop shows the top-bar back and the (CSS-hidden) in-screen one; either returns.
+    fireEvent.click(screen.getAllByRole("button", { name: "‹ Dashboard" })[0] as HTMLElement);
+    expect(await screen.findByTestId("group-toggle")).toHaveTextContent("Group: by period");
+  });
+
+  it("keeps the grouping across a Plan → Track tab switch", async () => {
+    await unlock();
+    groupBy("by student");
+    fireEvent.click(screen.getAllByRole("button", { name: /Plan/ })[0] as HTMLElement);
+    expect(screen.queryByTestId("group-toggle")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: /Track/ })[0] as HTMLElement);
+    expect(await screen.findByTestId("group-toggle")).toHaveTextContent("Group: by student");
+  });
+
+  it("starts on owes-first after a fresh unlock", async () => {
+    await unlock();
+    groupBy("by period");
+    cleanup();
+    await unlock();
+    expect(screen.getByTestId("group-toggle")).toHaveTextContent("Group: owes-first");
   });
 });
 

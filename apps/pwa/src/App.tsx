@@ -20,16 +20,15 @@ import {
   type OpaqueId,
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
-import { buildToScoreQueue } from "@teacher-assistant/store";
+import { buildToScoreQueue, type DashboardLens } from "@teacher-assistant/store";
 import { SyncError } from "@teacher-assistant/sync";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
 import { QuickScoreSheet, type ParaFixEdit } from "./app/QuickScoreSheet.js";
 import { BaselineScreen } from "./app/screens/baseline/BaselineScreen.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
 import {
-  GoalDetailBody,
   GoalDetailScreen,
   type GoalDetailScreenProps,
 } from "./app/screens/goal-detail/GoalDetailScreen.js";
@@ -228,6 +227,11 @@ function ReadyApp({
   const [role, setRole] = useState<Role>("teacher");
   const [tab, setTab] = useState<Tab>("track");
   const [trackView, setTrackView] = useState<TrackView>("dashboard");
+  // The dashboard grouping lives here, not in DashboardScreen, so it survives Goal
+  // Detail, the score modal and tab switches (TEACH-43). ReadyApp mounts on unlock, so
+  // each unlock starts on owes-first; it is never persisted across reloads.
+  const [lens, setLens] = useState<DashboardLens>("owes_first");
+  const lensControl = useMemo(() => ({ lens, onChange: setLens }), [lens]);
   const [detailGoalId, setDetailGoalId] = useState<OpaqueId | null>(null);
   const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
   const [paraFix, setParaFix] = useState<ProgressDataPoint | null>(null);
@@ -433,14 +437,12 @@ function ReadyApp({
   const detailGoal =
     detailGoalId !== null ? records.goals.find((g) => g.goal_id === detailGoalId) : undefined;
 
-  // ── U7 desktop shell wiring (design §2/§3.1). Inert on mobile: the mobile chrome and
-  // the mobile DashboardScreen path ignore isDesktop/renderDetailPane/validationStrip. ──
+  // ── U7 desktop shell wiring (design §2). Inert on mobile: the mobile chrome and the
+  // mobile DashboardScreen path ignore isDesktop/validationStrip. ──
   const toScoreCount = buildToScoreQueue(records.points).length;
   const baselineCount = records.goals.filter((g) => g.status === "proposed").length;
 
-  // The shared Goal Detail props for a goal — assembled once so the master-detail pane
-  // and the deep-linked full screen never drift (a new GoalDetailBody prop is added here,
-  // not in two call sites). The two sites differ only in layout vs onBack.
+  // The Goal Detail props for a goal (everything but onBack).
   const goalBodyProps = useCallback(
     (g: IEPGoal): Omit<GoalDetailScreenProps, "onBack"> => ({
       goal: g,
@@ -466,17 +468,6 @@ function ReadyApp({
       apply,
       saveGoalLabel,
     ],
-  );
-
-  // The master-detail right pane: the selected goal's full Goal Detail (pane layout).
-  const renderDetailPane = useCallback(
-    (goalId: OpaqueId): ReactNode => {
-      const g = records.goals.find((x) => x.goal_id === goalId);
-      return g === undefined ? null : (
-        <GoalDetailBody key={g.goal_id} {...goalBodyProps(g)} layout="pane" />
-      );
-    },
-    [records.goals, goalBodyProps],
   );
 
   // The full-width "Needs your OK" table strip (desktop dashboard); reuses the teacher
@@ -571,8 +562,8 @@ function ReadyApp({
         onOpenScore={setSheetTarget}
         onOpenDetail={openDetail}
         apply={apply}
+        lensControl={lensControl}
         isDesktop={isDesktop}
-        renderDetailPane={renderDetailPane}
         validationStrip={validationStrip}
       />
     );

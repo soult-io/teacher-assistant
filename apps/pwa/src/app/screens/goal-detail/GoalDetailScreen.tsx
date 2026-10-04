@@ -554,8 +554,7 @@ function DetailHeader({
           <GoalTitle label={goal.goal_label} text={goal.goal_text} />
         </h1>
         <div className="goallabel-row">
-          {/* Keyed by goal: an open draft must never carry over to another goal (the
-              desktop pane reuses this header when a different row is selected). */}
+          {/* Keyed by goal: an open draft must never carry over to another goal. */}
           <GoalLabelEditor key={goal.goal_id} label={goal.goal_label} onSave={onSetGoalLabel} />
           {duplicated ? <DuplicateLabelCue label={goal.goal_label} /> : null}
         </div>
@@ -583,22 +582,21 @@ function DetailHeader({
 }
 
 /** Which arrangement to render the Goal Detail cards in (design §3.1/§3.2). */
-export type GoalDetailLayout = "mobile" | "pane" | "full";
+export type GoalDetailLayout = "mobile" | "full";
 
 export interface GoalDetailBodyProps extends Omit<GoalDetailScreenProps, "onBack"> {
-  /** mobile = validated single column; full = two columns (deep-link); pane = stacked (dashboard). */
+  /** mobile = validated single column; full = two columns (desktop). */
   readonly layout: GoalDetailLayout;
 }
 
 /**
- * The Goal Detail cards, arranged for one of three layouts. The SAME card components
+ * The Goal Detail cards, arranged for one of two layouts. The SAME card components
  * render everywhere — only their arrangement changes (design §5: desktop reflows the
  * honesty surfaces, never their meaning or copy):
  *   - mobile: the validated single column (chart · quarterly · statement · consistency · ARC).
  *   - full  : two columns — data left (chart · consistency · ARC), report-bound honesty
- *             surfaces right (draft statement · quarterly) — the deep-linked Goal Detail.
- *   - pane  : one stacked column inside the dashboard master-detail (chart · statement ·
- *             consistency · quarterly · ARC), with "+ Add a point" inline in the header.
+ *             surfaces right (draft statement · quarterly) — the desktop Goal Detail,
+ *             with "+ Add a point" inline in the header.
  * The caller wraps this in `.goal-detail`.
  */
 export function GoalDetailBody(props: GoalDetailBodyProps) {
@@ -674,19 +672,6 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
             overflowed and clipped the "Fix" action behind a horizontal scrollbar. It spans
             the full content width below the two-column honesty surfaces so every column —
             and the per-row Fix — is visible without scrolling. */}
-        {history}
-      </>
-    );
-  }
-
-  if (layout === "pane") {
-    return (
-      <>
-        {header}
-        {chart}
-        {stmt}
-        {consistency}
-        {quarterly}
         {history}
       </>
     );
