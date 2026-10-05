@@ -8,9 +8,9 @@
 // role/status/kind words, owner-code hashes and operator/pairing expiry times.
 // No student or activity timestamp, no client metadata, no plaintext column.
 //
-// Data-plane writes (append) and the single-row pairing steps are one SQL
+// Data-plane writes (append) and the pairing request write are one SQL
 // statement each, so each is atomic on its own. Every other control-plane
-// write runs in one transaction that first takes CONTROL_LOCK_KEY, so its
+// write (including the pairing take and the expiry sweep) runs in one transaction that first takes CONTROL_LOCK_KEY, so its
 // checks (last owner, single master, kind fixed, member never master) and its
 // writes cannot interleave with another control write. Control writes are rare
 // (enrollment, pairing, revoke), so serializing them costs nothing.
@@ -401,23 +401,32 @@ export class PostgresRelayStore implements RelayStore {
         [devicePublicKeyB64, role],
       );
       await this.#writeGrant(tx, devicePublicKeyB64, scopes);
-      await tx.query(`UPDATE ${SCHEMA}.pairing SET grant_blob = $2 WHERE sid = $1`, [
-        sid,
-        grantBlob,
-      ]);
+      const stored = await tx.query(
+        `UPDATE ${SCHEMA}.pairing SET grant_blob = $2 WHERE sid = $1 RETURNING sid`,
+        [sid, grantBlob],
+      );
+      if (stored.rows.length !== 1) {
+        // Unreachable while every pairing delete holds the control lock; if it
+        // ever happens, roll the enrollment back rather than enroll without a grant.
+        throw new Error("pairing session vanished during completePairing");
+      }
       return "ok";
     });
   }
 
-  async takePairingGrant(sid: string, signerPublicKeyB64: string): Promise<string | undefined> {
-    const { rows } = await this.#sql.query<{ grant_blob: string }>(
-      `DELETE FROM ${SCHEMA}.pairing
-       WHERE sid = $1 AND request_pubkey = $2 AND grant_blob IS NOT NULL AND expires_at > $3
-         AND EXISTS (SELECT 1 FROM ${SCHEMA}.devices WHERE device_pubkey = $2 AND status = 'active')
-       RETURNING grant_blob`,
-      [sid, signerPublicKeyB64, this.#now()],
-    );
-    return rows[0]?.grant_blob;
+  /** Under the control lock, so a grant is never handed to a key a concurrent revoke just revoked. */
+  takePairingGrant(sid: string, signerPublicKeyB64: string): Promise<string | undefined> {
+    return this.#control(async (tx) => {
+      const { rows } = await tx.query<{ grant_blob: string }>(
+        `DELETE FROM ${SCHEMA}.pairing
+         WHERE sid = $1 AND request_pubkey = $2 AND grant_blob IS NOT NULL AND expires_at > $3
+           AND EXISTS (SELECT 1 FROM ${SCHEMA}.devices
+                       WHERE device_pubkey = $2 AND status = 'active')
+         RETURNING grant_blob`,
+        [sid, signerPublicKeyB64, this.#now()],
+      );
+      return rows[0]?.grant_blob;
+    });
   }
 
   async putRecoveryWrap(blob: string): Promise<void> {
@@ -435,11 +444,14 @@ export class PostgresRelayStore implements RelayStore {
     return rows[0]?.blob;
   }
 
+  /** Under the control lock, so a sweep never deletes a session mid-completePairing. */
   async sweepExpired(): Promise<void> {
-    await this.#sql.query(
-      `WITH p AS (DELETE FROM ${SCHEMA}.pairing WHERE expires_at <= $1)
-       DELETE FROM ${SCHEMA}.owner_codes WHERE expires_at <= $1 AND NOT used`,
-      [this.#now()],
+    await this.#control((tx) =>
+      tx.query(
+        `WITH p AS (DELETE FROM ${SCHEMA}.pairing WHERE expires_at <= $1)
+         DELETE FROM ${SCHEMA}.owner_codes WHERE expires_at <= $1 AND NOT used`,
+        [this.#now()],
+      ),
     );
   }
 }
