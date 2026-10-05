@@ -7,9 +7,12 @@
 // applies every migration not yet recorded. Any failure rolls the whole run back.
 //
 // Columns are the FERPA surface (D1): opaque ids, opaque scope tags, device
-// public keys, base64 ciphertext, integer sequence numbers, and a random
-// per-doc epoch. Nothing else — no timestamps, no client/IP metadata.
-// store.contract.test.ts pins this list.
+// public keys, base64 ciphertext/sealed blobs, integer sequence numbers, a
+// random per-doc epoch, and (v2, device enrollment) fixed role/status/kind
+// words, owner-code hashes and operator/pairing expiry times. Nothing else — no
+// student or activity timestamp, no client/IP metadata. store.contract.test.ts
+// pins the exact column list; the FERPA review approved exactly that list, so
+// any new column needs a new FERPA review.
 //
 // RESTORING FROM A BACKUP: after the restore and BEFORE the relay serves
 // traffic, run ROTATE_EPOCHS_SQL (below) as the DB owner:
@@ -66,12 +69,55 @@ const MIGRATIONS: readonly { readonly version: number; readonly sql: string }[] 
         FOR EACH ROW EXECUTE FUNCTION ${SCHEMA}.reject_update_mutation();
     `,
   },
+  {
+    // Device enrollment (device-enrollment spec §5.1). No backfill: no existing
+    // key is ever promoted to owner, so a non-empty acl refuses the migration
+    // (and the relay refuses to start) until the operator empties it.
+    version: 2,
+    sql: `
+      IF EXISTS (SELECT 1 FROM ${SCHEMA}.acl) THEN
+        RAISE EXCEPTION 'sync_relay v2: acl must be empty before migration';
+      END IF;
+      CREATE TABLE ${SCHEMA}.devices (
+        device_pubkey text PRIMARY KEY,
+        role   text NOT NULL CHECK (role IN ('owner','member')),
+        status text NOT NULL DEFAULT 'active' CHECK (status IN ('active','revoked'))
+      );
+      CREATE TABLE ${SCHEMA}.scopes (
+        scope_tag text    PRIMARY KEY,
+        kind      text    NOT NULL CHECK (kind IN ('master','period')),
+        retired   boolean NOT NULL DEFAULT false
+      );
+      -- One master per deployment; also covers a retired row (EU-12 must handle it).
+      CREATE UNIQUE INDEX scopes_one_active_master ON ${SCHEMA}.scopes (kind) WHERE kind = 'master';
+      ALTER TABLE ${SCHEMA}.acl
+        ADD FOREIGN KEY (device_pubkey) REFERENCES ${SCHEMA}.devices (device_pubkey),
+        ADD FOREIGN KEY (scope_tag)     REFERENCES ${SCHEMA}.scopes (scope_tag);
+      CREATE TABLE ${SCHEMA}.owner_codes (
+        code_sha256 text PRIMARY KEY,           -- hex SHA-256 of the 128-bit code
+        expires_at  timestamptz NOT NULL,
+        used        boolean NOT NULL DEFAULT false
+      );
+      CREATE TABLE ${SCHEMA}.pairing (
+        sid            text PRIMARY KEY,         -- BLAKE2b-128 of the pairing secret
+        opener_pubkey  text NOT NULL,
+        request_pubkey text,                     -- signer of request-put
+        request_blob   text,
+        grant_blob     text,
+        expires_at     timestamptz NOT NULL
+      );
+      CREATE TABLE ${SCHEMA}.recovery_wrap (
+        id   boolean PRIMARY KEY DEFAULT true CHECK (id),   -- single row
+        blob text NOT NULL
+      );
+    `,
+  },
 ];
 
 export const LATEST_SCHEMA_VERSION = MIGRATIONS.length;
 
-function migrationScript(): string {
-  const steps = MIGRATIONS.map(
+function migrationScript(target: number): string {
+  const steps = MIGRATIONS.filter((m) => m.version <= target).map(
     (m) => `
     DO $migrate$
     BEGIN
@@ -92,11 +138,13 @@ function migrationScript(): string {
 
 /**
  * Bring the schema up to LATEST_SCHEMA_VERSION. Throws (fail closed) if the
- * database cannot be reached, a migration fails, or the database carries a
- * NEWER schema than this build knows (a rollback onto a migrated database).
+ * database cannot be reached, a migration fails (including the v2 preflight on
+ * a non-empty acl), or the database carries a NEWER schema than this build
+ * knows (a rollback onto a migrated database). `target` stops at an older
+ * version; only tests pass it (to build a v1 database for the v2 preflight).
  */
-export async function migrate(sql: SqlClient): Promise<void> {
-  await sql.exec(migrationScript());
+export async function migrate(sql: SqlClient, target = LATEST_SCHEMA_VERSION): Promise<void> {
+  await sql.exec(migrationScript(target));
   const { rows } = await sql.query<{ v: number | null }>(
     `SELECT max(version) AS v FROM ${SCHEMA}.schema_migrations`,
   );

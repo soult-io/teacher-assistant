@@ -9,6 +9,7 @@ import { sodiumReady, utf8 } from "@teacher-assistant/crypto";
 import { SYNC_HEADERS } from "@teacher-assistant/schema";
 import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
+import { seedAcl } from "@teacher-assistant/sync-relay/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { makeSigner, type Signer } from "./relay-signer.js";
 
@@ -102,13 +103,12 @@ function failingStore(): RelayStore {
     Promise.reject(
       Object.assign(new Error(`${ERR_MSG} for ${DOC} in ${SCOPE}`), { code: "08006" }),
     );
-  return {
+  return Object.assign(new InMemoryRelayStore(), {
     isAuthorized: () => Promise.resolve(true),
-    authorize: () => Promise.resolve(),
     docScope: fail,
     append: fail,
     fetch: fail,
-  };
+  });
 }
 
 describe("TEACH-55 — forced 5xx on every signed route: clean logs", () => {
@@ -149,7 +149,7 @@ describe("TEACH-55 — forced 5xx on every signed route: clean logs", () => {
         }
       });
       const signer = makeSigner();
-      await store.authorize(signer.publicKeyB64, SCOPE);
+      await seedAcl(store, signer.publicKeyB64, SCOPE);
       const req = signed(
         signer,
         method,
@@ -172,7 +172,7 @@ describe("TEACH-55 — each signed 4xx: {error, record_id} and clean logs", () =
     const app = buildApp(store, { logStream, trustProxy: TRUST });
     const owner = makeSigner();
     const stranger = makeSigner();
-    await store.authorize(owner.publicKeyB64, SCOPE);
+    await seedAcl(store, owner.publicKeyB64, SCOPE);
     const forbidden: string[] = [owner.publicKeyB64, stranger.publicKeyB64];
 
     const bad = signed(owner, "POST", SCOPE, { updates: ["not base64 BODY_T55!"] });
@@ -204,7 +204,7 @@ describe("TEACH-55 — the `control` scope is reserved", () => {
     const store = new InMemoryRelayStore();
     const app = buildApp(store);
     const signer = makeSigner();
-    await store.authorize(signer.publicKeyB64, "control");
+    await seedAcl(store, signer.publicKeyB64, "control");
     for (const method of ["GET", "POST"] as const) {
       const res = await app.inject(
         signed(
