@@ -76,6 +76,8 @@ async function main(): Promise<void> {
   const trustProxy = loadTrustProxy(process.env);
   await sodiumReady();
   const { store, kind, close } = await openStore();
+  // Expired pairing sessions and owner codes go before the port opens (spec §5.1).
+  await store.sweepExpired();
   const app = buildApp(store, trustProxy === undefined ? {} : { trustProxy });
   app.addHook("onClose", close);
   const addr = await app.listen({ host: "0.0.0.0", port: PORT });

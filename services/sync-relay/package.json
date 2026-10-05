@@ -2,7 +2,7 @@
   "name": "@teacher-assistant/sync-relay",
   "version": "0.0.0",
   "private": true,
-  "description": "M2 sync-relay: authenticated append-only encrypted-update log + fetch, keyed by opaque doc-id, per-device-pubkey ACL. NEVER decrypts — stores/serves ciphertext it cannot read. H-PUB-3 zero-existence for unauthorized streams; H-PUB-4 identity-clean surface.",
+  "description": "M2 sync-relay: authenticated append-only encrypted-update log + fetch, keyed by opaque doc-id, per-device-pubkey ACL. NEVER decrypts \u2014 stores/serves ciphertext it cannot read. H-PUB-3 zero-existence for unauthorized streams; H-PUB-4 identity-clean surface.",
   "type": "module",
   "exports": {
     "./app": {
@@ -20,6 +20,10 @@
     "./migrations": {
       "types": "./dist/migrations.d.ts",
       "import": "./dist/migrations.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
     }
   },
   "scripts": {

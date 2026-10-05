@@ -9,6 +9,7 @@
 import { sodiumReady, toBase64, utf8 } from "@teacher-assistant/crypto";
 import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { InMemoryRelayStore } from "@teacher-assistant/sync-relay/store";
+import { seedAcl } from "@teacher-assistant/sync-relay/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { makeSigner, type Signer } from "./relay-signer.js";
 
@@ -37,8 +38,8 @@ describe("HARD STOP #3 — unauthorized device gets zero bytes + zero existence"
 
     const alice = makeSigner(); // authorized for S (owns the stream)
     const bob = makeSigner(); // authorized for T only — NOT for S
-    await store.authorize(alice.publicKeyB64, scopeS);
-    await store.authorize(bob.publicKeyB64, scopeT);
+    await seedAcl(store, alice.publicKeyB64, scopeS);
+    await seedAcl(store, bob.publicKeyB64, scopeT);
 
     // Alice creates a real doc D under S.
     const docId = "doc-D";

@@ -20,6 +20,7 @@ import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { migrate, SCHEMA } from "@teacher-assistant/sync-relay/migrations";
 import { PostgresRelayStore } from "@teacher-assistant/sync-relay/postgres-store";
 import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
+import { seedAcl } from "@teacher-assistant/sync-relay/testing";
 import { beforeAll, describe, expect, it } from "vitest";
 import { EncryptedStream } from "./doc.js";
 import { SyncEngine } from "./engine.js";
@@ -67,7 +68,7 @@ async function makeDevice(
   sent: Uint8Array[],
 ): Promise<Device> {
   const signing = generateSigningKeypair();
-  await store.authorize(toBase64(signing.publicKey), period.scopeTag);
+  await seedAcl(store, toBase64(signing.publicKey), period.scopeTag);
   const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
   const relay = new RelayClient({ transport: injectTransport(app, sent), signingKeypair: signing });
   return { engine: new SyncEngine(stream, relay, new InMemoryPersistence()), stream };
@@ -235,7 +236,7 @@ describe("authorized never-synced doc pulls 200-empty (the invariant the 404-han
     const period = generatePeriodKey(newScopeTag());
 
     const signing = generateSigningKeypair();
-    await store.authorize(toBase64(signing.publicKey), period.scopeTag);
+    await seedAcl(store, toBase64(signing.publicKey), period.scopeTag);
 
     let raw: RelayHttpResponse | null = null;
     const inject = injectTransport(app, []);
@@ -262,7 +263,7 @@ describe("no silent loss under concurrency", () => {
     const docId = newOpaqueId();
 
     const signing = generateSigningKeypair();
-    await store.authorize(toBase64(signing.publicKey), period.scopeTag);
+    await seedAcl(store, toBase64(signing.publicKey), period.scopeTag);
     const base = injectTransport(app, []);
     // A transport that signals when a push begins and blocks until released —
     // this opens exactly the window the reviewer flagged (capture during push).
@@ -384,7 +385,7 @@ describe("TEACH-49 — a relay restored from an older backup does not make a cli
     const device = async () => {
       const signing = generateSigningKeypair();
       for (const s of [before, restored]) {
-        await s.authorize(toBase64(signing.publicKey), period.scopeTag);
+        await seedAcl(s, toBase64(signing.publicKey), period.scopeTag);
       }
       const transport: Transport = (req) => injectTransport(app, [])(req);
       const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
