@@ -430,6 +430,23 @@ describe("TEACH-55 — log message guard", () => {
     expect(lines.join("\n")).not.toContain("SENTINEL");
   });
 
+  it("an object-only log cannot carry msg/url/headers: only the allowed fields survive", () => {
+    const { lines, logStream } = captureLogs();
+    const app = buildApp(new InMemoryRelayStore(), { logStream });
+    app.log.info({
+      msg: "/sync/doc-SENTINEL",
+      url: "/sync/doc-SENTINEL",
+      headers: { a: "SENTINEL" },
+    });
+    app.log.info(
+      { record_id: "r1", route: "/sync/:docId", status: 400, extra: "SENTINEL" },
+      "request rejected",
+    );
+    expect(lines.join("\n")).not.toContain("SENTINEL");
+    expectCleanLogs(lines, []);
+    expect(JSON.parse(lines[1] as string)).toMatchObject({ record_id: "r1", status: 400 });
+  });
+
   it("a route that sends twice (FST_ERR_REP_ALREADY_SENT) logs no filled path", async () => {
     const { lines, logStream } = captureLogs();
     const app = buildApp(new InMemoryRelayStore(), { logStream });

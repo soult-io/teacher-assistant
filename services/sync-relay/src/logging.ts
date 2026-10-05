@@ -155,12 +155,10 @@ export function guardLogMessage(
   const msgAt = typeof args[0] === "string" ? 0 : 1;
   const msg = args[msgAt];
   if (msg === undefined) {
-    // No message: pino would use err.message (`{err}` or a bare Error) — e.g.
-    // Fastify's FST_ERR_REP_ALREADY_SENT carries the filled URL. Always supply one.
-    const first = args[0];
-    const carriesError =
-      first instanceof Error || (typeof first === "object" && first !== null && "err" in first);
-    method.apply(this, carriesError ? [first, REDACTED_MESSAGE] : args);
+    // No message: pino would fall back to err.message (`{err}`, a bare Error —
+    // Fastify's FST_ERR_REP_ALREADY_SENT carries the filled URL) or to an
+    // object's own `msg` field. Always supply the redacted one.
+    method.apply(this, [args[0], REDACTED_MESSAGE]);
     return;
   }
   const ok = typeof msg === "string" && LOG_MESSAGE_ALLOWLIST.some((re) => re.test(msg));
@@ -170,4 +168,16 @@ export function guardLogMessage(
 /** The startup line (the deploy checks for "(store: postgres)"); allowlisted above. */
 export function listeningMessage(addr: string, kind: "memory" | "postgres"): string {
   return `sync-relay listening on ${addr} (store: ${kind})`;
+}
+
+/** The only fields a log line may carry beyond pino's own (level, time, pid, hostname, reqId, msg). */
+const LOG_FIELDS: ReadonlySet<string> = new Set(["record_id", "route", "status", "sqlstate"]);
+
+/**
+ * pino `formatters.log`: keep only LOG_FIELDS from the logged object. Whatever
+ * shape a Fastify or plugin log call uses (`{url}`, `{req}`, `{err}`, …), no
+ * other field reaches the line — serializers alone only cover known keys.
+ */
+export function keepLogFields(obj: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(obj).filter(([k]) => LOG_FIELDS.has(k)));
 }

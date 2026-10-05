@@ -134,6 +134,9 @@ function overlapsIpv4Space(addr: string, prefix: number): boolean {
  * IPv4-compatible space (proxy-addr matches IPv4 peers against it).
  */
 export function isTrustedProxyEntry(entry: string): boolean {
+  if (entry.includes("%")) {
+    return false; // an IPv6 zone id: not a network, and BlockList would throw
+  }
   const slash = entry.indexOf("/");
   const addr = slash === -1 ? entry : entry.slice(0, slash);
   const family = isIP(addr);

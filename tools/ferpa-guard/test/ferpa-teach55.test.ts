@@ -182,7 +182,7 @@ describe("TEACH-55 — each signed 4xx: {error, record_id} and clean logs", () =
     forbidden.push(...requestValues(bad), "BODY_T55");
 
     const tampered = signed(owner, "GET", SCOPE);
-    tampered.headers = { ...tampered.headers, "x-ta-scope": `${SCOPE}-x` };
+    tampered.headers = { ...tampered.headers, [SYNC_HEADERS.scope]: `${SCOPE}-x` };
     const r401 = await app.inject({ ...tampered, remoteAddress: NPM_PEER });
     expect(r401.statusCode).toBe(401);
     expectErrorBody(r401, "unauthorized");

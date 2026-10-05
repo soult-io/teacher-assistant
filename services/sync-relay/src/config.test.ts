@@ -103,6 +103,10 @@ describe("loadTrustProxy (TEACH-55)", () => {
       "fd00::/16",
       "::1",
     ]);
+    expect(loadTrustProxy({ TRUST_PROXY: "fd00::/112,fd00::1/128" })).toEqual([
+      "fd00::/112",
+      "fd00::1/128",
+    ]);
     expect(loadTrustProxy({ TRUST_PROXY: "10.0.0.0/8,172.18.0.15/32" })).toEqual([
       "10.0.0.0/8",
       "172.18.0.15/32",
@@ -139,6 +143,10 @@ describe("loadTrustProxy (TEACH-55)", () => {
     "::/80",
     "::ffff:ac12:0/112",
     "::/96",
+    "::ffff:ac12:f/128",
+    // a zone id is not a network
+    "fe80::1%eth0/64",
+    "fe80::1%eth0",
   ])("rejects TRUST_PROXY=%j (never trust-all, never a name or hop count)", (raw) => {
     for (const NODE_ENV of ["production", "development"]) {
       expect(() => loadTrustProxy({ NODE_ENV, TRUST_PROXY: raw })).toThrow(ConfigError);
