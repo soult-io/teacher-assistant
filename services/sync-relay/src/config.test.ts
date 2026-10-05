@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ConfigError, loadStoreConfig } from "./config.js";
+import { ConfigError, loadStoreConfig, loadTrustProxy } from "./config.js";
 
 const DB_ENV = {
   DB_HOST: "qa-db",
@@ -79,6 +79,63 @@ describe("loadStoreConfig", () => {
       expect.unreachable();
     } catch (err) {
       expect(String(err)).not.toContain("hunter2");
+    }
+  });
+});
+
+describe("loadTrustProxy (TEACH-55)", () => {
+  it("unset outside production → no proxy trusted", () => {
+    expect(loadTrustProxy({})).toBeUndefined();
+    expect(loadTrustProxy({ NODE_ENV: "development" })).toBeUndefined();
+  });
+
+  it("unset in production → fails closed", () => {
+    expect(() => loadTrustProxy({ NODE_ENV: "production" })).toThrow(ConfigError);
+  });
+
+  it("an explicit CIDR list → the list, trimmed", () => {
+    expect(loadTrustProxy({ NODE_ENV: "production", TRUST_PROXY: "172.18.0.0/16" })).toEqual([
+      "172.18.0.0/16",
+    ]);
+    expect(loadTrustProxy({ TRUST_PROXY: " 172.18.0.0/16 , 10.0.0.5 ,fd00::/8" })).toEqual([
+      "172.18.0.0/16",
+      "10.0.0.5",
+      "fd00::/8",
+    ]);
+  });
+
+  it.each([
+    "",
+    "  ",
+    "true",
+    "TRUE",
+    "*",
+    "false",
+    "1",
+    "loopback",
+    "uniquelocal",
+    "0.0.0.0/0",
+    "::/0",
+    "172.18.0.0/33",
+    "fd00::/129",
+    "172.18.0.0/",
+    "172.18.0.0/16,",
+    "172.18.0.0/16,*",
+    "172.18.0.0/16, true",
+    "300.1.1.1/8",
+    "172.18.0.0/016",
+  ])("rejects TRUST_PROXY=%j (never trust-all, never a name or hop count)", (raw) => {
+    for (const NODE_ENV of ["production", "development"]) {
+      expect(() => loadTrustProxy({ NODE_ENV, TRUST_PROXY: raw })).toThrow(ConfigError);
+    }
+  });
+
+  it("error messages do not echo the value", () => {
+    try {
+      loadTrustProxy({ TRUST_PROXY: "SENTINEL-not-a-cidr" });
+      expect.unreachable();
+    } catch (err) {
+      expect(String(err)).not.toContain("SENTINEL");
     }
   });
 });

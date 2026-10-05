@@ -1,4 +1,4 @@
-// Store selection from the environment. Pure (env + secret reader injected) so
+// Store + trusted-proxy selection from the environment. Pure (env + secret reader injected) so
 // every branch is unit-tested; index.ts does the I/O.
 //
 // Fail closed:
@@ -10,6 +10,8 @@
 //   - otherwise              → in-memory (tests, local development).
 // The password is read from a file under SECRETS_DIR, never from the environment
 // (compose-hardening). Error messages name variables and paths, never values.
+
+import { isIP } from "node:net";
 
 export type StoreConfig =
   | { readonly kind: "memory" }
@@ -78,4 +80,47 @@ export function loadStoreConfig(env: Env, readSecret: (path: string) => string):
     user: required(env, "DB_USER"),
     password,
   };
+}
+
+/**
+ * TEACH-55: the peers whose X-Forwarded-For is believed, from TRUST_PROXY — a
+ * comma-separated list of IPs/CIDRs (the proxy-web network). Fail closed:
+ *   - unset, NODE_ENV=production → throws. Behind the NPM every client would
+ *     otherwise share the proxy's IP, so the per-IP rate limit is one global one.
+ *   - unset otherwise            → undefined (no proxy trusted; tests, local dev).
+ *   - set                        → every entry must be a literal IP or IP/prefix
+ *     with a non-zero prefix. `true`, `*`, empty entries, hop counts, proxy-addr
+ *     names (`loopback`, …) and /0 are refused: trust-all is never configurable.
+ */
+export function loadTrustProxy(env: Env): string[] | undefined {
+  const raw = env["TRUST_PROXY"];
+  if (raw === undefined) {
+    if (env["NODE_ENV"] === "production") {
+      throw new ConfigError("TRUST_PROXY is required in production (the proxy-web CIDR)");
+    }
+    return undefined;
+  }
+  const entries = raw.split(",").map((e) => e.trim());
+  if (!entries.every(isTrustedProxyEntry)) {
+    throw new ConfigError("TRUST_PROXY must be a comma-separated list of IPs or CIDRs (not /0)");
+  }
+  return entries;
+}
+
+/** A literal IP, or IP/prefix with 1..32 (IPv4) or 1..128 (IPv6), no leading zeros. */
+export function isTrustedProxyEntry(entry: string): boolean {
+  const slash = entry.indexOf("/");
+  const addr = slash === -1 ? entry : entry.slice(0, slash);
+  const family = isIP(addr);
+  if (family === 0) {
+    return false;
+  }
+  if (slash === -1) {
+    return true;
+  }
+  const prefix = entry.slice(slash + 1);
+  if (!/^[1-9][0-9]{0,2}$/.test(prefix)) {
+    return false;
+  }
+  return Number(prefix) <= (family === 4 ? 32 : 128);
 }
