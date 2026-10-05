@@ -18,6 +18,7 @@ import {
   generateMasterKey,
   generatePeriodKey,
   generateRecoveryCode,
+  generateSigningKeypair,
   NoKeyForScopeError,
   ParaKeyring,
   rotatePeriodKey,
@@ -25,7 +26,7 @@ import {
   TeacherKeyring,
   toBase64,
   utf8,
-  wrapMasterKeyWithRecoveryCode,
+  wrapRecoveryBundle,
 } from "@teacher-assistant/crypto";
 import {
   asTimestamp,
@@ -34,6 +35,7 @@ import {
   type RecordEnvelope,
 } from "@teacher-assistant/schema";
 import { beforeAll, describe, expect, it } from "vitest";
+import { containsBytes } from "./bytes.js";
 import { collectFiles, fileContains, scanCodeForPattern } from "../src/checks.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -52,22 +54,6 @@ function env(
     size: 0,
     deleted: false,
   };
-}
-
-/** True if `needle`'s bytes appear as a contiguous run inside `haystack`. */
-function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
-  if (needle.length === 0 || needle.length > haystack.length) {
-    return false;
-  }
-  outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) {
-        continue outer;
-      }
-    }
-    return true;
-  }
-  return false;
 }
 
 beforeAll(async () => {
@@ -162,9 +148,15 @@ describe("HARD STOP (M0) — the master key never reaches the wire/logs in plain
 
     // Every artifact that could cross a boundary:
     const device = generateDeviceKeypair();
-    const { request, verificationCode } = createEnrollmentRequest(device);
-    const grant = approveDeviceEnrollment(teacher, request, verificationCode);
-    const recovery = wrapMasterKeyWithRecoveryCode(mk, generateRecoveryCode());
+    const { request, verificationCode } = createEnrollmentRequest({
+      boxPublicKey: device.publicKey,
+      signingPublicKey: generateSigningKeypair().publicKey,
+    });
+    const grant = approveDeviceEnrollment(teacher, request, verificationCode, newOpaqueId());
+    const recovery = wrapRecoveryBundle(
+      { mk, masterScopeTag: masterScope, masterDocId: newOpaqueId() },
+      generateRecoveryCode(),
+    );
     const recordBlob = teacher.encryptRecord(env(masterScope, "goal"), utf8("payload"));
 
     const textArtifacts = [
