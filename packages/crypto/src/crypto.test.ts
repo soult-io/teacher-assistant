@@ -26,20 +26,26 @@ import {
   generateMasterKey,
   generatePeriodKey,
   generateRecoveryCode,
+  generateSigningKeypair,
   NoKeyForScopeError,
   normalizeRecoveryCode,
   ParaKeyring,
   rotatePeriodKey,
   sodiumReady,
   TeacherKeyring,
-  unwrapMasterKeyWithRecoveryCode,
+  unwrapRecoveryBundle,
   utf8,
-  wrapMasterKeyWithRecoveryCode,
+  wrapRecoveryBundle,
 } from "./index.js";
 
 beforeAll(async () => {
   await sodiumReady();
 });
+
+/** The two public keys an enrolling device sends (box key for the grant, signing key for the relay). */
+function enrollingKeys(box: ReturnType<typeof generateDeviceKeypair>) {
+  return { boxPublicKey: box.publicKey, signingPublicKey: generateSigningKeypair().publicKey };
+}
 
 function envelope(scope: ScopeTag, type: RecordEnvelope["record_type"]): RecordEnvelope {
   return {
@@ -86,14 +92,20 @@ describe("paper recovery code (D-ARCH-1)", () => {
   it("restores the master key on a fresh device", () => {
     const mk = generateMasterKey();
     const code = generateRecoveryCode();
-    const wrap = wrapMasterKeyWithRecoveryCode(mk, code);
-    const restored = unwrapMasterKeyWithRecoveryCode(code, wrap);
-    expect([...restored]).toEqual([...mk]);
+    const wrap = wrapRecoveryBundle(
+      { mk, masterScopeTag: newScopeTag(), masterDocId: newOpaqueId() },
+      code,
+    );
+    const restored = unwrapRecoveryBundle(code, wrap);
+    expect([...restored.mk]).toEqual([...mk]);
   });
 
   it("refuses a wrong recovery code", () => {
-    const wrap = wrapMasterKeyWithRecoveryCode(generateMasterKey(), generateRecoveryCode());
-    expect(() => unwrapMasterKeyWithRecoveryCode(generateRecoveryCode(), wrap)).toThrow();
+    const wrap = wrapRecoveryBundle(
+      { mk: generateMasterKey(), masterScopeTag: newScopeTag(), masterDocId: newOpaqueId() },
+      generateRecoveryCode(),
+    );
+    expect(() => unwrapRecoveryBundle(generateRecoveryCode(), wrap)).toThrow();
   });
 });
 
@@ -104,11 +116,11 @@ describe("device enrollment (OOB QR)", () => {
 
     // New device builds a request (QR) + shows a code.
     const newDevice = generateDeviceKeypair();
-    const { request, verificationCode } = createEnrollmentRequest(newDevice);
+    const { request, verificationCode } = createEnrollmentRequest(enrollingKeys(newDevice));
     const scanned = decodeEnrollmentRequest(encodeEnrollmentRequest(request));
 
     // Trusted device approves after confirming the OOB code.
-    const grant = approveDeviceEnrollment(trusted, scanned, verificationCode);
+    const grant = approveDeviceEnrollment(trusted, scanned, verificationCode, newOpaqueId());
     const { mk, masterScopeTag } = completeDeviceEnrollment(newDevice, grant);
 
     // The new device can now decrypt a master-scope record the trusted device wrote.
@@ -120,8 +132,8 @@ describe("device enrollment (OOB QR)", () => {
 
   it("refuses approval when the OOB verification code does not match", () => {
     const trusted = new TeacherKeyring(newScopeTag(), generateMasterKey());
-    const { request } = createEnrollmentRequest(generateDeviceKeypair());
-    expect(() => approveDeviceEnrollment(trusted, request, "000000")).toThrow(
+    const { request } = createEnrollmentRequest(enrollingKeys(generateDeviceKeypair()));
+    expect(() => approveDeviceEnrollment(trusted, request, "000000", newOpaqueId())).toThrow(
       EnrollmentConfirmationError,
     );
   });
@@ -139,8 +151,14 @@ describe("para enrollment + rotation", () => {
     teacher.addPeriodKey(period);
 
     const paraDevice = generateDeviceKeypair();
-    const { request, verificationCode } = createEnrollmentRequest(paraDevice);
-    const grant = approveParaEnrollment(teacher, period.scopeTag, request, verificationCode);
+    const { request, verificationCode } = createEnrollmentRequest(enrollingKeys(paraDevice));
+    const grant = approveParaEnrollment(
+      teacher,
+      period.scopeTag,
+      request,
+      verificationCode,
+      newOpaqueId(),
+    );
     const periodKey = completeParaEnrollment(paraDevice, grant);
 
     const para = new ParaKeyring([periodKey]);

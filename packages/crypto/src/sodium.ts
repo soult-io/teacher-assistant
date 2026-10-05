@@ -153,6 +153,25 @@ export function genericHash(data: Uint8Array, outLen: number): Uint8Array {
   return s().crypto_generichash(outLen, data, null);
 }
 
+/**
+ * Keyed BLAKE2b (a PRF): `outLen` bytes of BLAKE2b(`data`, key = `key`). libsodium
+ * requires a 16–64-byte key, so the secret is the key and a domain label is the data
+ * (used to derive the pairing sid and key from the pairing secret).
+ */
+export function keyedHash(key: Uint8Array, data: Uint8Array, outLen: number): Uint8Array {
+  return s().crypto_generichash(outLen, data, key);
+}
+
+/** X25519 public-key length (crypto_box). */
+export function boxPublicKeyBytes(): number {
+  return s().crypto_box_PUBLICKEYBYTES;
+}
+
+/** Ed25519 public-key length (crypto_sign). */
+export function signPublicKeyBytes(): number {
+  return s().crypto_sign_PUBLICKEYBYTES;
+}
+
 /** Constant-time equality for two byte arrays. */
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) {

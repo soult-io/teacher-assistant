@@ -179,8 +179,14 @@ async function synthesizeTeacherKeyring(gateway: PasskeyGateway): Promise<Teache
   const deviceKeypair = generateDeviceKeypair();
   const masterScopeTag = newScopeTag();
   const issuing = new TeacherKeyring(masterScopeTag, generateMasterKey());
-  const { request, verificationCode } = createEnrollmentRequest(deviceKeypair);
-  const grant = approveDeviceEnrollment(issuing, request, verificationCode);
+  // EU-5 API shape only: the request now carries a signing key too, and the grant a
+  // master doc id. Both are throwaway here, as before; EU-6/EU-7 replace this
+  // synthesis with the persistent device identity and the real master doc id.
+  const { request, verificationCode } = createEnrollmentRequest({
+    boxPublicKey: deviceKeypair.publicKey,
+    signingPublicKey: generateSigningKeypair().publicKey,
+  });
+  const grant = approveDeviceEnrollment(issuing, request, verificationCode, newOpaqueId());
   const authentication = await gateway.authenticate();
   return unlockTeacherKeyring({ authentication, deviceKeypair, grant });
 }
@@ -274,8 +280,17 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   // key possession: the teacher holds both keys; the para handoff carries only the
   // Period DEK, wrapped to the para device.
   const paraDeviceKeypair = generateDeviceKeypair();
-  const { request, verificationCode } = createEnrollmentRequest(paraDeviceKeypair);
-  const grant = approveParaEnrollment(keyring, periodKey.scopeTag, request, verificationCode);
+  const { request, verificationCode } = createEnrollmentRequest({
+    boxPublicKey: paraDeviceKeypair.publicKey,
+    signingPublicKey: generateSigningKeypair().publicKey,
+  });
+  const grant = approveParaEnrollment(
+    keyring,
+    periodKey.scopeTag,
+    request,
+    verificationCode,
+    paraDocId,
+  );
 
   const masterFirstThenTombstone = async (
     validated: ProgressDataPoint,
