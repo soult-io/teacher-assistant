@@ -6,6 +6,7 @@
 // sqlstate}. Also: the reserved `control` scope is never a data scope (404).
 
 import { sodiumReady, utf8 } from "@teacher-assistant/crypto";
+import { SYNC_HEADERS } from "@teacher-assistant/schema";
 import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
 import { beforeAll, describe, expect, it } from "vitest";
@@ -63,22 +64,18 @@ function signed(signer: Signer, method: "GET" | "POST", scope: string, body?: un
 function requestValues(req: Req): string[] {
   // Not the timestamp header (it can equal pino's own `time`) or content-type.
   const h = req.headers;
-  const secretish = [
-    "x-ta-device",
-    "x-ta-scope",
-    "x-ta-nonce",
-    "x-ta-signature",
+  const carried = [
+    SYNC_HEADERS.device,
+    SYNC_HEADERS.scope,
+    SYNC_HEADERS.nonce,
+    SYNC_HEADERS.signature,
     "x-forwarded-for",
-  ];
-  return [
-    DOC,
-    SCOPE,
-    CLIENT_IP,
-    CIPHERTEXT,
-    ERR_MSG,
-    `/sync/${DOC}`,
-    ...secretish.map((k) => h[k] ?? DOC),
-  ];
+  ].map((k) => {
+    const v = h[k];
+    expect(v, k).toBeDefined();
+    return v as string;
+  });
+  return [DOC, SCOPE, CLIENT_IP, CIPHERTEXT, ERR_MSG, `/sync/${DOC}`, ...carried];
 }
 
 function expectCleanLogs(lines: readonly string[], forbidden: readonly string[]): void {

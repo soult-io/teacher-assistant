@@ -114,20 +114,17 @@ export function loadTrustProxy(env: Env): string[] | undefined {
 const MIN_PREFIX = { 4: 8, 6: 16 } as const;
 
 /** IPv4-compatible (::/96) and IPv4-mapped (::ffff:0:0/96) space: a range here trusts IPv4 peers. */
-const IPV4_IN_IPV6 = [
-  { net: "::", probe: "::" },
-  { net: "::ffff:0:0", probe: "::ffff:0:0" },
-] as const;
+const IPV4_IN_IPV6 = ["::", "::ffff:0:0"] as const;
 
 /** True if the IPv6 range addr/prefix overlaps an IPv4-in-IPv6 /96. */
 function overlapsIpv4Space(addr: string, prefix: number): boolean {
-  return IPV4_IN_IPV6.some(({ net, probe }) => {
+  return IPV4_IN_IPV6.some((net) => {
     const range = new BlockList();
     const space = new BlockList();
     range.addSubnet(addr, prefix, "ipv6");
     space.addSubnet(net, 96, "ipv6");
     // Two prefix ranges overlap iff one contains the other's base address.
-    return prefix <= 96 ? range.check(probe, "ipv6") : space.check(addr, "ipv6");
+    return prefix <= 96 ? range.check(net, "ipv6") : space.check(addr, "ipv6");
   });
 }
 

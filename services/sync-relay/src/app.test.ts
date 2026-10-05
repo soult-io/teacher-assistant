@@ -10,6 +10,7 @@ import type { AddressInfo } from "node:net";
 import { connect } from "node:net";
 import { beforeAll, describe, expect, it } from "vitest";
 import { buildApp } from "./app.js";
+import { listeningMessage } from "./logging.js";
 import { sodiumReady } from "./sodium-verify.js";
 import { InMemoryRelayStore } from "./store.js";
 
@@ -406,6 +407,18 @@ describe("TEACH-55 — log message guard", () => {
       "request failed",
     ]);
     expect(lines.join("\n")).not.toContain("SENTINEL");
+  });
+
+  it("the startup line passes the guard for both stores (the deploy checks it)", () => {
+    const { lines, logStream } = captureLogs();
+    const app = buildApp(new InMemoryRelayStore(), { logStream });
+    for (const kind of ["memory", "postgres"] as const) {
+      app.log.info(listeningMessage("http://0.0.0.0:8931", kind));
+    }
+    expect(lines.map((l) => (JSON.parse(l) as { msg: string }).msg)).toEqual([
+      "sync-relay listening on http://0.0.0.0:8931 (store: memory)",
+      "sync-relay listening on http://0.0.0.0:8931 (store: postgres)",
+    ]);
   });
 
   it("an {err} or bare Error with no message cannot surface err.message as msg", () => {
