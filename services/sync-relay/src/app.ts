@@ -126,6 +126,7 @@ const ERROR_CODES: Readonly<Record<number, string>> = {
   400: "bad_request",
   401: "unauthorized",
   404: "not_found",
+  408: "timeout",
   413: "payload_too_large",
   414: "uri_too_long",
   415: "unsupported_media_type",
@@ -173,7 +174,7 @@ function clientErrorHandler(
     err.code === "HPE_HEADER_OVERFLOW" ? 431 : err.code === "ERR_HTTP_REQUEST_TIMEOUT" ? 408 : 400;
   const record_id = randomUUID();
   const body: SyncErrorBody = {
-    error: ERROR_CODES[status] ?? (status === 408 ? "timeout" : "bad_request"),
+    error: ERROR_CODES[status] ?? "bad_request",
     record_id,
   };
   this.log.info({ record_id, route: "unmatched", status }, "client error");
@@ -220,7 +221,12 @@ function guardLogMessage(
   const msgAt = typeof args[0] === "string" ? 0 : 1;
   const msg = args[msgAt];
   if (msg === undefined) {
-    method.apply(this, args);
+    // No message: pino would use err.message (`{err}` or a bare Error) — e.g.
+    // Fastify's FST_ERR_REP_ALREADY_SENT carries the filled URL. Always supply one.
+    const first = args[0];
+    const carriesError =
+      first instanceof Error || (typeof first === "object" && first !== null && "err" in first);
+    method.apply(this, carriesError ? [first, REDACTED_MESSAGE] : args);
     return;
   }
   const ok = typeof msg === "string" && LOG_MESSAGE_ALLOWLIST.some((re) => re.test(msg));

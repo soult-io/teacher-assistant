@@ -11,7 +11,7 @@
 // The password is read from a file under SECRETS_DIR, never from the environment
 // (compose-hardening). Error messages name variables and paths, never values.
 
-import { isIP } from "node:net";
+import { BlockList, isIP } from "node:net";
 
 export type StoreConfig =
   | { readonly kind: "memory" }
@@ -89,8 +89,9 @@ export function loadStoreConfig(env: Env, readSecret: (path: string) => string):
  *     otherwise share the proxy's IP, so the per-IP rate limit is one global one.
  *   - unset otherwise            → undefined (no proxy trusted; tests, local dev).
  *   - set                        → every entry must be a literal IP or IP/prefix
- *     with a non-zero prefix. `true`, `*`, empty entries, hop counts, proxy-addr
- *     names (`loopback`, …) and /0 are refused: trust-all is never configurable.
+ *     with a prefix of at least /8 (IPv4) or /16 (IPv6). `true`, `*`, empty
+ *     entries, hop counts, proxy-addr names (`loopback`, …), /0 and IPv6 ranges
+ *     over IPv4-mapped space are refused: trust-all is never configurable.
  */
 export function loadTrustProxy(env: Env): string[] | undefined {
   const raw = env["TRUST_PROXY"];
@@ -102,25 +103,56 @@ export function loadTrustProxy(env: Env): string[] | undefined {
   }
   const entries = raw.split(",").map((e) => e.trim());
   if (!entries.every(isTrustedProxyEntry)) {
-    throw new ConfigError("TRUST_PROXY must be a comma-separated list of IPs or CIDRs (not /0)");
+    throw new ConfigError(
+      "TRUST_PROXY must be a comma-separated list of IPs or CIDRs (min /8 IPv4, /16 IPv6)",
+    );
   }
   return entries;
 }
 
-/** A literal IP, or IP/prefix with 1..32 (IPv4) or 1..128 (IPv6), no leading zeros. */
+/** Narrowest-allowed prefixes: a few short ranges must not add up to trust-all. */
+const MIN_PREFIX = { 4: 8, 6: 16 } as const;
+
+/** IPv4-compatible (::/96) and IPv4-mapped (::ffff:0:0/96) space: a range here trusts IPv4 peers. */
+const IPV4_IN_IPV6 = [
+  { net: "::", probe: "::" },
+  { net: "::ffff:0:0", probe: "::ffff:0:0" },
+] as const;
+
+/** True if the IPv6 range addr/prefix overlaps an IPv4-in-IPv6 /96. */
+function overlapsIpv4Space(addr: string, prefix: number): boolean {
+  return IPV4_IN_IPV6.some(({ net, probe }) => {
+    const range = new BlockList();
+    const space = new BlockList();
+    range.addSubnet(addr, prefix, "ipv6");
+    space.addSubnet(net, 96, "ipv6");
+    // Two prefix ranges overlap iff one contains the other's base address.
+    return prefix <= 96 ? range.check(probe, "ipv6") : space.check(addr, "ipv6");
+  });
+}
+
+/**
+ * A literal IP, or IP/prefix with no leading zeros and a prefix of at least
+ * /8 (IPv4) or /16 (IPv6). An IPv6 range may not cover IPv4-mapped or
+ * IPv4-compatible space (proxy-addr matches IPv4 peers against it).
+ */
 export function isTrustedProxyEntry(entry: string): boolean {
   const slash = entry.indexOf("/");
   const addr = slash === -1 ? entry : entry.slice(0, slash);
   const family = isIP(addr);
-  if (family === 0) {
+  if (family !== 4 && family !== 6) {
     return false;
   }
   if (slash === -1) {
     return true;
   }
-  const prefix = entry.slice(slash + 1);
-  if (!/^[1-9][0-9]{0,2}$/.test(prefix)) {
+  const raw = entry.slice(slash + 1);
+  if (!/^[1-9][0-9]{0,2}$/.test(raw)) {
     return false;
   }
-  return Number(prefix) <= (family === 4 ? 32 : 128);
+  const prefix = Number(raw);
+  if (prefix < MIN_PREFIX[family] || prefix > (family === 4 ? 32 : 128)) {
+    return false;
+  }
+  return family === 4 || !overlapsIpv4Space(addr, prefix);
 }

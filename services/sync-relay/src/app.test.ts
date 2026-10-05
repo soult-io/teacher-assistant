@@ -139,6 +139,19 @@ describe("TEACH-55 — trusted proxy", () => {
     expect(res.json()).toEqual({ ip: "203.0.113.7" });
   });
 
+  it("an IPv4-mapped IPv6 peer inside the IPv4 CIDR is trusted; outside it is not", async () => {
+    const app = withIpProbe(buildApp(new InMemoryRelayStore(), { trustProxy: PROXY_CIDR }));
+    const via = (remoteAddress: string) =>
+      app.inject({
+        method: "GET",
+        url: "/__ip",
+        remoteAddress,
+        headers: { "x-forwarded-for": "203.0.113.7" },
+      });
+    expect((await via("::ffff:172.18.0.15")).json()).toEqual({ ip: "203.0.113.7" });
+    expect((await via("::ffff:198.51.100.9")).json()).toEqual({ ip: "::ffff:198.51.100.9" });
+  });
+
   it("with no TRUST_PROXY, X-Forwarded-For is never honoured", async () => {
     const app = withIpProbe(buildApp(new InMemoryRelayStore()));
     const res = await app.inject({
@@ -392,6 +405,28 @@ describe("TEACH-55 — log message guard", () => {
       "sync-relay listening on http://0.0.0.0:8931 (store: postgres)",
       "request failed",
     ]);
+    expect(lines.join("\n")).not.toContain("SENTINEL");
+  });
+
+  it("an {err} or bare Error with no message cannot surface err.message as msg", () => {
+    const { lines, logStream } = captureLogs();
+    const app = buildApp(new InMemoryRelayStore(), { logStream });
+    app.log.warn({ err: new Error("in /sync/doc-SENTINEL (POST)") });
+    app.log.warn(new Error("in /sync/doc-SENTINEL (GET)"));
+    expect(lines).toHaveLength(2);
+    expect(lines.join("\n")).not.toContain("SENTINEL");
+  });
+
+  it("a route that sends twice (FST_ERR_REP_ALREADY_SENT) logs no filled path", async () => {
+    const { lines, logStream } = captureLogs();
+    const app = buildApp(new InMemoryRelayStore(), { logStream });
+    app.get("/twice/:id", async (_req, reply) => {
+      reply.send({ ok: true });
+      return "second value";
+    });
+    const res = await app.inject({ method: "GET", url: "/twice/doc-SENTINEL?q=QSENTINEL" });
+    expect(res.statusCode).toBe(200);
+    expect(lines.length).toBeGreaterThan(0);
     expect(lines.join("\n")).not.toContain("SENTINEL");
   });
 });

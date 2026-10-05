@@ -97,10 +97,15 @@ describe("loadTrustProxy (TEACH-55)", () => {
     expect(loadTrustProxy({ NODE_ENV: "production", TRUST_PROXY: "172.18.0.0/16" })).toEqual([
       "172.18.0.0/16",
     ]);
-    expect(loadTrustProxy({ TRUST_PROXY: " 172.18.0.0/16 , 10.0.0.5 ,fd00::/8" })).toEqual([
+    expect(loadTrustProxy({ TRUST_PROXY: " 172.18.0.0/16 , 10.0.0.5 ,fd00::/16, ::1" })).toEqual([
       "172.18.0.0/16",
       "10.0.0.5",
-      "fd00::/8",
+      "fd00::/16",
+      "::1",
+    ]);
+    expect(loadTrustProxy({ TRUST_PROXY: "10.0.0.0/8,172.18.0.15/32" })).toEqual([
+      "10.0.0.0/8",
+      "172.18.0.15/32",
     ]);
   });
 
@@ -124,6 +129,16 @@ describe("loadTrustProxy (TEACH-55)", () => {
     "172.18.0.0/16, true",
     "300.1.1.1/8",
     "172.18.0.0/016",
+    // short ranges that add up to trust-all
+    "0.0.0.0/1,128.0.0.0/1",
+    "10.0.0.0/7",
+    "::/1,8000::/1",
+    "fd00::/15",
+    // IPv6 ranges over IPv4-mapped / IPv4-compatible space (match IPv4 peers)
+    "::ffff:0:0/96",
+    "::/80",
+    "::ffff:ac12:0/112",
+    "::/96",
   ])("rejects TRUST_PROXY=%j (never trust-all, never a name or hop count)", (raw) => {
     for (const NODE_ENV of ["production", "development"]) {
       expect(() => loadTrustProxy({ NODE_ENV, TRUST_PROXY: raw })).toThrow(ConfigError);
