@@ -12,7 +12,8 @@
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { buildApp } from "./app.js";
-import { loadStoreConfig, type StoreConfig } from "./config.js";
+import { listeningMessage } from "./logging.js";
+import { loadStoreConfig, loadTrustProxy, type StoreConfig } from "./config.js";
 import { migrate } from "./migrations.js";
 import { PostgresRelayStore } from "./postgres-store.js";
 import { sodiumReady } from "./sodium-verify.js";
@@ -71,12 +72,14 @@ async function openStore(): Promise<{
 }
 
 async function main(): Promise<void> {
+  // TRUST_PROXY first: a production relay without it exits 1 before touching the database.
+  const trustProxy = loadTrustProxy(process.env);
   await sodiumReady();
   const { store, kind, close } = await openStore();
-  const app = buildApp(store);
+  const app = buildApp(store, trustProxy === undefined ? {} : { trustProxy });
   app.addHook("onClose", close);
   const addr = await app.listen({ host: "0.0.0.0", port: PORT });
-  app.log.info(`sync-relay listening on ${addr} (store: ${kind})`);
+  app.log.info(listeningMessage(addr, kind));
   for (const signal of ["SIGTERM", "SIGINT"] as const) {
     process.once(signal, () => {
       app.close().then(

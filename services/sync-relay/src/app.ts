@@ -8,20 +8,31 @@
 // H-PUB-4 (hard): the public surface is identity-clean — URLs/bodies carry only
 // opaque ids + base64 ciphertext, request bodies are never logged, and every
 // 4xx/5xx references an opaque `record_id` only.
+//
+// TEACH-55 (EU-0) logging contract: see logging.ts — every error path answers
+// `{error, record_id}` and logs at most `{record_id, route, status, sqlstate}`.
 
-import { randomUUID } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import {
   canonicalRequest,
   SYNC_HEADERS,
-  type SyncErrorBody,
   type SyncPullResult,
   type SyncPushBody,
   type SyncPushResult,
 } from "@teacher-assistant/schema";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { isTrustedProxyEntry } from "./config.js";
+import {
+  clientErrorHandler,
+  failRequest,
+  guardLogMessage,
+  keepLogFields,
+  handleError,
+  LOG_LEVEL,
+  SERIALIZERS,
+  sendError,
+} from "./logging.js";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
-import { errorCode } from "./sql.js";
 import { parseCursor, type RelayStore } from "./store.js";
 
 /** Requests older/newer than this (clock skew + transit) are rejected (replay window). */
@@ -62,27 +73,14 @@ function header(req: FastifyRequest, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-/** Send the identity-clean error body; returns its opaque record_id. */
-function sendError(reply: FastifyReply, status: number, code: string): string {
-  const record_id = randomUUID();
-  const body: SyncErrorBody = { error: code, record_id };
-  reply.code(status).send(body);
-  return record_id;
-}
-
 /**
- * A store failure (e.g. the database is unreachable) → 503. The log line carries
- * the opaque record_id and, for a database error, its 5-character SQLSTATE —
- * never the error message, the doc id, or anything from the request (H-PUB-4).
- * A 503 means "outcome unknown": a timed-out append may still have committed,
- * so a client retry can append the same updates again (CRDT updates are
- * idempotent to apply, so this is safe for the sync client).
+ * A store failure (e.g. the database is unreachable) → 503. A 503 means
+ * "outcome unknown": a timed-out append may still have committed, so a client
+ * retry can append the same updates again (CRDT updates are idempotent to apply,
+ * so this is safe for the sync client).
  */
 function storeUnavailable(req: FastifyRequest, reply: FastifyReply, err: unknown): void {
-  const code = errorCode(err);
-  const sqlstate = code !== undefined && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
-  const record_id = sendError(reply, 503, "unavailable");
-  req.log.error({ record_id, sqlstate }, "sync store unavailable");
+  failRequest(req, reply, 503, "unavailable", err, "sync store unavailable");
 }
 
 /**
@@ -93,6 +91,9 @@ function storeUnavailable(req: FastifyRequest, reply: FastifyReply, err: unknown
  * case this guards.)
  */
 const MAX_ID_LENGTH = 256;
+
+/** Scope tag reserved for the enrollment control plane; never valid on /sync/:docId. */
+const RESERVED_CONTROL_SCOPE = "control";
 
 /** Ciphertext travels as base64 (standard or URL-safe alphabet). */
 const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
@@ -164,26 +165,61 @@ function rawBodyOf(req: FastifyRequest): Uint8Array {
 export interface BuildAppOptions {
   /** Where log lines go (default stdout). Tests capture them to assert what is logged. */
   readonly logStream?: { write(line: string): void };
+  /**
+   * Peers (IPs/CIDRs — the proxy-web network) whose X-Forwarded-For sets req.ip
+   * (config.ts loadTrustProxy). Omitted: no proxy is trusted. Never trust-all.
+   */
+  readonly trustProxy?: readonly string[];
+}
+
+function trustProxyOption(list: readonly string[] | undefined): string[] | false {
+  if (list === undefined) {
+    return false;
+  }
+  if (list.length === 0 || !list.every(isTrustedProxyEntry)) {
+    throw new Error("trustProxy must be a non-empty list of IPs/CIDRs (never trust-all)");
+  }
+  return [...list];
 }
 
 /** Build the relay app over a store (injected so tests can seed the ACL). */
 export function buildApp(store: RelayStore, options: BuildAppOptions = {}): FastifyInstance {
   // disableRequestLogging: bodies (opaque ciphertext) and signed headers are
   // never written to a log line (H-PUB-4, defence in depth).
-  const logger = options.logStream === undefined ? true : { stream: options.logStream };
-  const app = Fastify({ logger, disableRequestLogging: true });
+  const app = Fastify({
+    logger: {
+      level: LOG_LEVEL,
+      serializers: SERIALIZERS,
+      hooks: { logMethod: guardLogMessage },
+      formatters: { log: keepLogFields },
+      ...(options.logStream === undefined ? {} : { stream: options.logStream }),
+    },
+    disableRequestLogging: true,
+    trustProxy: trustProxyOption(options.trustProxy),
+    // 414 (doc id over maxParamLength) and a malformed URL bypass setErrorHandler
+    // unless routed here; Fastify's own bodies for them echo the filled path.
+    frameworkErrors: handleError,
+    clientErrorHandler,
+  });
+  app.setErrorHandler(handleError);
+  // The default 404 body names the method + filled path.
+  app.setNotFoundHandler((req, reply) => {
+    failRequest(req, reply, 404, "not_found", undefined, "request rejected");
+  });
   const nonces = new NonceCache();
 
   // Per-IP rate limiting (H-PUB-5) — app-level defence in depth in front of the
-  // authorizing /sync routes, additional to the NPM/WAF layer. Behind the
-  // Lexington NPM, the deploy must set Fastify `trustProxy` so req.ip is the
-  // real client. The 429 body stays identity-clean (opaque record_id only).
+  // authorizing /sync routes, additional to the NPM/WAF layer. Keyed on req.ip,
+  // which is the real client only via a TRUST_PROXY peer (else the socket peer).
+  // The thrown error reaches handleError → {error: "rate_limited", record_id}.
   // State is in-process (single-instance Phase 0; a shared store is a follow-on).
   app.register(rateLimit, {
     global: true,
     max: 300,
     timeWindow: "1 minute",
-    errorResponseBuilder: () => ({ error: "rate_limited", record_id: randomUUID() }),
+    keyGenerator: (req) => req.ip,
+    errorResponseBuilder: (_req, ctx) =>
+      Object.assign(new Error("rate limited"), { statusCode: ctx.statusCode }),
   });
 
   // libsodium (signature verification) must be initialised before any request is
@@ -219,7 +255,10 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     }
     // A doc id with a NUL (Postgres text cannot hold one) or an oversized id or
     // scope can never exist, so it gets the same 404 as any other unknown doc.
+    // The `control` scope is reserved for enrollment (device-enrollment spec
+    // §5.5, EU-0): it never carries a data stream.
     if (
+      verified.scope === RESERVED_CONTROL_SCOPE ||
       docId.includes("\u0000") ||
       verified.scope.includes("\u0000") ||
       docId.length > MAX_ID_LENGTH ||
@@ -245,50 +284,60 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     return verified;
   }
 
-  app.get("/health", async () => ({ status: "ok", service: "sync-relay" }));
+  // Routes live in a plugin registered AFTER the rate limiter: @fastify/rate-limit
+  // attaches through an onRoute hook that exists only once it has loaded, so a
+  // route added directly on `app` here would never be limited (TEACH-55 found
+  // exactly that on main 6d987a2: 305 requests from one IP, all 200).
+  app.register(async (routes) => {
+    routes.get("/health", async () => ({ status: "ok", service: "sync-relay" }));
 
-  // Fetch updates after ?since for an opaque doc id.
-  app.get("/sync/:docId", async (req, reply) => {
-    const { docId } = req.params as { docId: string };
-    try {
-      const verified = await authorizeDoc(req, reply, rawBodyOf(req), docId);
-      if (verified === null) {
-        return reply;
+    // Fetch updates after ?since for an opaque doc id.
+    routes.get("/sync/:docId", async (req, reply) => {
+      const { docId } = req.params as { docId: string };
+      try {
+        const verified = await authorizeDoc(req, reply, rawBodyOf(req), docId);
+        if (verified === null) {
+          return reply;
+        }
+        const raw = (req.query as { since?: unknown }).since;
+        const since = parseCursor(typeof raw === "string" ? raw : undefined);
+        const result = await store.fetch(docId, since);
+        const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
+        return reply.send(payload);
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
       }
-      const raw = (req.query as { since?: unknown }).since;
-      const since = parseCursor(typeof raw === "string" ? raw : undefined);
-      const result = await store.fetch(docId, since);
-      const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
-      return reply.send(payload);
-    } catch (err) {
-      return storeUnavailable(req, reply, err);
-    }
-  });
+    });
 
-  // Append encrypted updates for an opaque doc id.
-  app.post("/sync/:docId", async (req, reply) => {
-    const rawBody = rawBodyOf(req);
-    const { docId } = req.params as { docId: string };
-    try {
-      const verified = await authorizeDoc(req, reply, rawBody, docId);
-      if (verified === null) {
-        return reply;
+    // Append encrypted updates for an opaque doc id.
+    routes.post("/sync/:docId", async (req, reply) => {
+      const rawBody = rawBodyOf(req);
+      const { docId } = req.params as { docId: string };
+      try {
+        const verified = await authorizeDoc(req, reply, rawBody, docId);
+        if (verified === null) {
+          return reply;
+        }
+        const updates = parsePushUpdates(rawBody);
+        if (updates === null) {
+          // Return the reply, not sendError's record_id: an async handler that
+          // returns a value after sending makes Fastify log "Reply was already
+          // sent … in /sync/<filled doc id>".
+          sendError(reply, 400, "bad_request");
+          return reply;
+        }
+        // undefined: another scope bound this doc after authorizeDoc looked — the
+        // same zero-existence 404 as if it had been bound already.
+        const cursor = await store.append(docId, verified.scope, updates);
+        if (cursor === undefined) {
+          return notFound(reply);
+        }
+        const payload: SyncPushResult = { cursor };
+        return reply.send(payload);
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
       }
-      const updates = parsePushUpdates(rawBody);
-      if (updates === null) {
-        return sendError(reply, 400, "bad_request");
-      }
-      // undefined: another scope bound this doc after authorizeDoc looked — the
-      // same zero-existence 404 as if it had been bound already.
-      const cursor = await store.append(docId, verified.scope, updates);
-      if (cursor === undefined) {
-        return notFound(reply);
-      }
-      const payload: SyncPushResult = { cursor };
-      return reply.send(payload);
-    } catch (err) {
-      return storeUnavailable(req, reply, err);
-    }
+    });
   });
 
   return app;
