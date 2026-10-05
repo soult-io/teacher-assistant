@@ -109,12 +109,12 @@ describe("paper recovery code (D-ARCH-1)", () => {
   });
 });
 
-describe("device enrollment (OOB QR)", () => {
+describe("device enrollment (typed out-of-band code)", () => {
   it("enrolls a second teacher device cross-device and recovers MK", () => {
     const masterScope = newScopeTag();
     const trusted = new TeacherKeyring(masterScope, generateMasterKey());
 
-    // New device builds a request (QR) + shows a code.
+    // New device builds a request + shows the code the approver types.
     const newDevice = generateDeviceKeypair();
     const { request, verificationCode } = createEnrollmentRequest(enrollingKeys(newDevice));
     const scanned = decodeEnrollmentRequest(encodeEnrollmentRequest(request));

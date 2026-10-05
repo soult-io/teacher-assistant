@@ -10,7 +10,7 @@
 // (sodium.ts documents why INTERACTIVE parameters suffice for a high-entropy code).
 
 import type { OpaqueId, ScopeTag } from "@teacher-assistant/schema";
-import { encodeCrockford, groupFours, normalizeCrockford } from "./crockford.js";
+import { decodeCrockford, encodeCrockford, groupFours, normalizeCrockford } from "./crockford.js";
 import type { MasterKey } from "./keys.js";
 import {
   aeadDecrypt,
@@ -68,14 +68,19 @@ function codeKey(code: string, salt: Uint8Array): Uint8Array {
  * the two ids, so MK never passes through a JS string.
  */
 export function wrapRecoveryBundle(bundle: RecoveryBundle, code: string): RecoveryWrap {
+  // The INTERACTIVE Argon2id parameters are sound only for a full-entropy code, so a
+  // code that is not exactly 160 bits of Crockford is refused before anything is wrapped.
+  if (decodeCrockford(code, RECOVERY_ENTROPY_BYTES) === undefined) {
+    throw new Error("recovery code must be a full 160-bit code from generateRecoveryCode()");
+  }
+  const salt = randomBytes(pwhashSaltBytes());
+  const key = codeKey(code, salt);
   const ids = utf8(
     JSON.stringify({ masterScopeTag: bundle.masterScopeTag, masterDocId: bundle.masterDocId }),
   );
   const plaintext = new Uint8Array(MASTER_KEY_BYTES + ids.length);
   plaintext.set(bundle.mk, 0);
   plaintext.set(ids, MASTER_KEY_BYTES);
-  const salt = randomBytes(pwhashSaltBytes());
-  const key = codeKey(code, salt);
   try {
     const blob = aeadEncrypt(key, plaintext, utf8(BUNDLE_AAD));
     return { saltB64: toBase64(salt), blobB64: toBase64(blob) };

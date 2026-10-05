@@ -45,6 +45,7 @@ import {
   utf8,
   wrapRecoveryBundle,
 } from "./index.js";
+import { encodeCrockford } from "./crockford.js";
 
 beforeAll(async () => {
   await sodiumReady();
@@ -515,7 +516,7 @@ describe("Keyring.destroy()", () => {
       () => teacher.hasScope(masterScope),
       () => teacher.sealUpdate(period.scopeTag, aad, utf8("x")),
       () => teacher.openUpdate(period.scopeTag, aad, sealed),
-      () => teacher.sealScopeKeyToDevice(period.scopeTag, device.box.publicKey),
+      () => teacher.sealPeriodKeyToDevice(period.scopeTag, device.box.publicKey),
       () => teacher.sealMasterKeyToDevice(device.box.publicKey),
       () => teacher.wrapScopeKeyUnderMaster(period.scopeTag),
       () => teacher.addWrappedPeriodKey(newScopeTag() as ScopeTag, wrapped),
@@ -548,5 +549,56 @@ describe("Keyring.destroy()", () => {
     const { teacher } = teacherWithPeriod();
     teacher.destroy();
     expect(JSON.stringify(teacher)).toBe('{"scopes":[],"keys":"[withheld]"}');
+  });
+});
+
+// Known-answer vectors. Expected values were computed independently with Python's
+// hashlib.blake2b (same BLAKE2b, separate implementation) and by hand for Crockford,
+// so a symmetric bug in encode+decode or a wrong hash input order cannot pass.
+describe("known-answer vectors", () => {
+  it("Crockford: 0xff 0x00 encodes as ZW00", () => {
+    // 11111 11100 00000 0(+0000 pad) → Z W 0 0.
+    expect(encodeCrockford(new Uint8Array([0xff, 0x00]))).toBe("ZW00");
+  });
+
+  it("pairing sid and key over S = 00 01 … 1f", () => {
+    const secret = Uint8Array.from({ length: 32 }, (_, i) => i);
+    expect(pairingSid(secret)).toBe("18358e26b247c2b515cd6900e452f015");
+    const keyHex = Array.from(pairingKey(secret), (b) => b.toString(16).padStart(2, "0")).join("");
+    expect(keyHex).toBe("65c2a04d30526e319663e0fca8208842f7f44407af8b6a17478f1a2e3fe92d13");
+  });
+
+  it("verification code over boxPk = 01×32, signPk = 02×32, nonce = 03×16", () => {
+    expect(
+      deviceVerificationCode(
+        new Uint8Array(32).fill(1),
+        new Uint8Array(32).fill(2),
+        new Uint8Array(16).fill(3),
+      ),
+    ).toBe("1fc2-fe61-896f-b4b5");
+  });
+});
+
+describe("review hardening", () => {
+  it("wrapRecoveryBundle refuses a code that is not a full 160-bit code", () => {
+    const bundle = {
+      mk: generateMasterKey(),
+      masterScopeTag: newScopeTag(),
+      masterDocId: newOpaqueId(),
+    };
+    expect(() => wrapRecoveryBundle(bundle, "1234")).toThrow();
+    expect(() => wrapRecoveryBundle(bundle, generateRecoveryCode().slice(0, -1))).toThrow();
+  });
+
+  it("a key zeroized by another keyring's destroy() throws instead of encrypting under zeros", () => {
+    const masterScope = newScopeTag();
+    const teacher = new TeacherKeyring(masterScope, generateMasterKey());
+    const period = generatePeriodKey(newScopeTag());
+    teacher.addPeriodKey(period);
+    const para = new ParaKeyring([period]); // shares the DEK buffer with the teacher keyring
+    teacher.destroy();
+    expect(() => para.sealUpdate(period.scopeTag, updateAad(), utf8("x"))).toThrow(
+      KeyringDestroyedError,
+    );
   });
 });

@@ -18,7 +18,15 @@
 import type { RecordEnvelope, ScopeTag } from "@teacher-assistant/schema";
 import type { MasterKey, PeriodKey } from "./keys.js";
 import { decryptWithKey, encryptWithKey } from "./records.js";
-import { aeadDecrypt, aeadEncrypt, bytesEqual, sealTo, utf8, zeroize } from "./sodium.js";
+import {
+  aeadDecrypt,
+  aeadEncrypt,
+  bytesEqual,
+  isAllZero,
+  sealTo,
+  utf8,
+  zeroize,
+} from "./sodium.js";
 
 /** Thrown when a keyring is asked to use a scope it does not hold (the para boundary). */
 export class NoKeyForScopeError extends Error {
@@ -76,12 +84,19 @@ export class Keyring {
     }
   }
 
-  /** The key for a scope (for in-package subclasses that wrap it). Throws if absent. */
+  /**
+   * The key for a scope (for in-package subclasses that wrap it). Throws if absent.
+   * An all-zero key means its buffer was zeroized by another keyring's destroy() (the
+   * buffer was shared); it throws KeyringDestroyedError rather than encrypt under zeros.
+   */
   protected scopeKey(scopeTag: ScopeTag): Uint8Array {
     this.#assertLive();
     const key = this.#keys.get(scopeTag);
     if (key === undefined) {
       throw new NoKeyForScopeError(scopeTag);
+    }
+    if (isAllZero(key)) {
+      throw new KeyringDestroyedError();
     }
     return key;
   }
@@ -112,8 +127,12 @@ export class Keyring {
     return decryptWithKey(this.scopeKey(env.scope_tag), env, blob);
   }
 
-  /** Seal (wrap) a scope's key to a device public key. Throws if the scope is absent. */
-  sealScopeKeyToDevice(scopeTag: ScopeTag, devicePublicKey: Uint8Array): Uint8Array {
+  /**
+   * Seal (wrap) a scope's key to a device public key. Throws if the scope is absent.
+   * Protected: outside the package a key is sealed only through the guarded
+   * TeacherKeyring methods (sealMasterKeyToDevice, sealPeriodKeyToDevice).
+   */
+  protected sealScopeKeyToDevice(scopeTag: ScopeTag, devicePublicKey: Uint8Array): Uint8Array {
     return sealTo(this.scopeKey(scopeTag), devicePublicKey);
   }
 

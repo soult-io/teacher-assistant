@@ -181,6 +181,15 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   return s().memcmp(a, b);
 }
 
+/** True if every byte is zero (constant time over the buffer's length). */
+export function isAllZero(buf: Uint8Array): boolean {
+  let acc = 0;
+  for (const byte of buf) {
+    acc |= byte;
+  }
+  return acc === 0;
+}
+
 /** Zero a key buffer in place (best-effort hygiene; GC still holds copies). */
 export function zeroize(buf: Uint8Array): void {
   s().memzero(buf);

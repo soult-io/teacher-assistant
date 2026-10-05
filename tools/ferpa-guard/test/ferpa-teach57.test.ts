@@ -43,21 +43,9 @@ import {
 } from "@teacher-assistant/crypto";
 import { newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
 import { beforeAll, describe, expect, it } from "vitest";
+import { containsBytes } from "./bytes.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
-
-/** True if `needle`'s bytes appear as a contiguous run inside `haystack`. */
-function containsBytes(haystack: Uint8Array, needle: Uint8Array): boolean {
-  outer: for (let i = 0; i <= haystack.length - needle.length; i++) {
-    for (let j = 0; j < needle.length; j++) {
-      if (haystack[i + j] !== needle[j]) {
-        continue outer;
-      }
-    }
-    return true;
-  }
-  return false;
-}
 
 function newDevice() {
   const box = generateDeviceKeypair();

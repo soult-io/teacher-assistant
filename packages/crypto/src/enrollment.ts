@@ -19,6 +19,7 @@
 // can never derive any other key (FERPA Item-2b least-privilege).
 
 import type { OpaqueId, ScopeTag } from "@teacher-assistant/schema";
+import { groupFours } from "./crockford.js";
 import type { DeviceKeypair, MasterKey, PeriodDek, PeriodKey } from "./keys.js";
 import type { TeacherKeyring } from "./keyring.js";
 import {
@@ -111,8 +112,7 @@ export function deviceVerificationCode(
   material.set(boxPublicKey, 0);
   material.set(signingPublicKey, boxPublicKey.length);
   material.set(nonce, boxPublicKey.length + signingPublicKey.length);
-  const hex = toHex(genericHash(material, FINGERPRINT_BYTES));
-  return (hex.match(/.{1,4}/g) ?? [hex]).join("-");
+  return groupFours(toHex(genericHash(material, FINGERPRINT_BYTES)));
 }
 
 /** On the enrolling device: build the request + the code to display. */
@@ -136,9 +136,24 @@ export function encodeEnrollmentRequest(request: EnrollmentRequest): string {
   return toBase64(utf8(JSON.stringify(request)));
 }
 
+/** The request's three fields decoded, each checked for its exact length. Throws otherwise. */
+function decodeRequestKeys(request: EnrollmentRequest): {
+  readonly boxPublicKey: Uint8Array;
+  readonly signingPublicKey: Uint8Array;
+  readonly nonce: Uint8Array;
+} {
+  const boxPublicKey = fromBase64(request.devicePublicKeyB64);
+  const signingPublicKey = fromBase64(request.signingPublicKeyB64);
+  const nonce = fromBase64(request.nonceB64);
+  assertLength(boxPublicKey, boxPublicKeyBytes(), "box public key");
+  assertLength(signingPublicKey, signPublicKeyBytes(), "signing public key");
+  assertLength(nonce, NONCE_BYTES, "enrollment nonce");
+  return { boxPublicKey, signingPublicKey, nonce };
+}
+
 /**
- * Validate an untrusted parsed value as an EnrollmentRequest: exactly the three
- * base64 fields, each decoding to the right length. Throws otherwise.
+ * Validate an untrusted parsed value as an EnrollmentRequest: the three base64 fields
+ * (any others are dropped), each decoding to the right length. Throws otherwise.
  */
 export function parseEnrollmentRequest(parsed: unknown): EnrollmentRequest {
   if (typeof parsed !== "object" || parsed === null) {
@@ -152,13 +167,9 @@ export function parseEnrollmentRequest(parsed: unknown): EnrollmentRequest {
   ) {
     throw new Error("malformed enrollment request");
   }
-  // Recomputing the code checks every length (and that each field decodes).
-  deviceVerificationCode(
-    fromBase64(devicePublicKeyB64),
-    fromBase64(signingPublicKeyB64),
-    fromBase64(nonceB64),
-  );
-  return { devicePublicKeyB64, signingPublicKeyB64, nonceB64 };
+  const request = { devicePublicKeyB64, signingPublicKeyB64, nonceB64 };
+  decodeRequestKeys(request);
+  return request;
 }
 
 /** Decode a scanned enrollment-request string. Throws on any malformed or wrong-length field. */
@@ -177,13 +188,8 @@ function normalizeVerificationCode(code: string): string {
  * on a mismatch (including a substituted box or signing key) or an empty code.
  */
 function assertConfirmed(request: EnrollmentRequest, confirmedCode: string): Uint8Array {
-  const { devicePublicKeyB64, signingPublicKeyB64, nonceB64 } = parseEnrollmentRequest(request);
-  const boxPublicKey = fromBase64(devicePublicKeyB64);
-  const expected = deviceVerificationCode(
-    boxPublicKey,
-    fromBase64(signingPublicKeyB64),
-    fromBase64(nonceB64),
-  );
+  const { boxPublicKey, signingPublicKey, nonce } = decodeRequestKeys(request);
+  const expected = deviceVerificationCode(boxPublicKey, signingPublicKey, nonce);
   if (normalizeVerificationCode(expected) !== normalizeVerificationCode(confirmedCode)) {
     throw new EnrollmentConfirmationError();
   }
