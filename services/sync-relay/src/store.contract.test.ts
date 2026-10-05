@@ -18,10 +18,12 @@ import { LATEST_SCHEMA_VERSION, migrate, ROTATE_EPOCHS_SQL, SCHEMA } from "./mig
 import { PostgresRelayStore } from "./postgres-store.js";
 import { poolClient, type SqlClient } from "./sql.js";
 import {
+  type DeviceRole,
   InMemoryRelayStore,
   PAIRING_TTL_MS,
   parseCursor,
   type RelayStore,
+  type ScopeGrant,
   type StoreOptions,
 } from "./store.js";
 import { seedAcl } from "./testing.js";
@@ -526,8 +528,8 @@ describe.each(impls)("RelayStore enrollment control plane — $name", (impl) => 
     sid: string,
     opener: string,
     device: string,
-    role: "owner" | "member",
-    scopes: { tag: string; kind: "master" | "period" }[],
+    role: DeviceRole,
+    scopes: readonly ScopeGrant[],
   ) {
     expect(await s.openPairing(sid, opener)).toBe(true);
     expect(await s.putPairingRequest(sid, device, `req-${sid}`)).toBe(true);

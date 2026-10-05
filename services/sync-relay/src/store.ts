@@ -179,6 +179,28 @@ export function checkGrant(
   return "ok";
 }
 
+/**
+ * The pre-grant checks of completePairing (spec §5.3), shared so the stores
+ * cannot drift. Returns the refusal, or the device row to pass to checkGrant.
+ */
+export function checkEnrollment(
+  requestSigner: string,
+  device: string,
+  existing: { readonly role: DeviceRole; readonly status: DeviceStatus } | undefined,
+  role: DeviceRole,
+):
+  | "device_mismatch"
+  | "role_conflict"
+  | { readonly role: DeviceRole; readonly status: DeviceStatus } {
+  if (requestSigner !== device) {
+    return "device_mismatch";
+  }
+  if (existing?.status === "active" && existing.role !== role) {
+    return "role_conflict";
+  }
+  return existing ?? { role, status: "active" };
+}
+
 export interface RelayStore {
   /** Whether an ACTIVE device (by signing pubkey) may access a scope. */
   isAuthorized(devicePublicKeyB64: string, scopeTag: string): Promise<boolean>;
@@ -315,6 +337,11 @@ export class InMemoryRelayStore implements RelayStore {
     return d?.status === "active" ? d.role : undefined;
   }
 
+  #activeOwnerCount(): number {
+    return [...this.#devices.values()].filter((d) => d.role === "owner" && d.status === "active")
+      .length;
+  }
+
   #masterTag(): string | undefined {
     for (const [tag, scope] of this.#scopes) {
       if (scope.kind === "master") {
@@ -403,10 +430,8 @@ export class InMemoryRelayStore implements RelayStore {
     if (device?.status === "revoked") {
       return "refused";
     }
-    const hasOwner = [...this.#devices.values()].some(
-      (d) => d.role === "owner" && d.status === "active",
-    );
-    const mode = !hasOwner && this.#masterTag() === undefined ? "first" : "recovery";
+    const mode =
+      this.#activeOwnerCount() === 0 && this.#masterTag() === undefined ? "first" : "recovery";
     code.used = true;
     this.#devices.set(devicePublicKeyB64, { role: "owner", status: "active" });
     return mode;
@@ -445,10 +470,7 @@ export class InMemoryRelayStore implements RelayStore {
       return "ok";
     }
     if (device.role === "owner") {
-      const owners = [...this.#devices.values()].filter(
-        (d) => d.role === "owner" && d.status === "active",
-      ).length;
-      if (owners <= 1) {
+      if (this.#activeOwnerCount() <= 1) {
         return "last_owner";
       }
     }
@@ -463,9 +485,10 @@ export class InMemoryRelayStore implements RelayStore {
   }
 
   async listDevices(): Promise<DeviceListing[]> {
-    return [...this.#devices.entries()]
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([device, { role, status }]) => ({
+    // Code-unit order, the same as the Postgres store's COLLATE "C".
+    return [...this.#devices.keys()].sort().map((device) => {
+      const { role, status } = this.#devices.get(device) as StoredDevice;
+      return {
         device,
         role,
         status,
@@ -473,7 +496,8 @@ export class InMemoryRelayStore implements RelayStore {
           const scope = this.#scopes.get(tag) as StoredScope;
           return { tag, kind: scope.kind, retired: scope.retired };
         }),
-      }));
+      };
+    });
   }
 
   async openPairing(sid: string, openerPublicKeyB64: string): Promise<boolean> {
@@ -535,14 +559,16 @@ export class InMemoryRelayStore implements RelayStore {
     ) {
       return "not_found";
     }
-    if (p.request.signer !== devicePublicKeyB64) {
-      return "device_mismatch";
+    const grantee = checkEnrollment(
+      p.request.signer,
+      devicePublicKeyB64,
+      this.#devices.get(devicePublicKeyB64),
+      role,
+    );
+    if (typeof grantee === "string") {
+      return grantee;
     }
-    const existing = this.#devices.get(devicePublicKeyB64);
-    if (existing?.status === "active" && existing.role !== role) {
-      return "role_conflict";
-    }
-    const result = this.#checkGrant(existing ?? { role, status: "active" }, scopes);
+    const result = this.#checkGrant(grantee, scopes);
     if (result !== "ok") {
       return result;
     }

@@ -8,9 +8,9 @@
 // role/status/kind words, owner-code hashes and operator/pairing expiry times.
 // No student or activity timestamp, no client metadata, no plaintext column.
 //
-// Data-plane writes (append) and the pairing request write are one SQL
-// statement each, so each is atomic on its own. Every other control-plane
-// write (including the pairing take and the expiry sweep) runs in one transaction that first takes CONTROL_LOCK_KEY, so its
+// Single-statement writes (append, putPairingRequest, issueOwnerCode,
+// putRecoveryWrap) are atomic on their own. Every other control-plane write
+// (including the pairing take and the expiry sweep) runs in one transaction that first takes CONTROL_LOCK_KEY, so its
 // checks (last owner, single master, kind fixed, member never master) and its
 // writes cannot interleave with another control write. Control writes are rare
 // (enrollment, pairing, revoke), so serializing them costs nothing.
@@ -20,6 +20,7 @@ import type { SqlClient, SqlQuery } from "./sql.js";
 import {
   type CompletePairingResult,
   type Cursor,
+  checkEnrollment,
   checkGrant,
   type DeviceListing,
   type DeviceRole,
@@ -85,12 +86,6 @@ const ACTIVE_OWNER = (param: string) =>
 interface DeviceRow {
   readonly role: DeviceRole;
   readonly status: DeviceStatus;
-}
-
-interface PairingRow {
-  readonly opener_pubkey: string;
-  readonly request_pubkey: string | null;
-  readonly grant_blob: string | null;
 }
 
 export class PostgresRelayStore implements RelayStore {
@@ -374,8 +369,8 @@ export class PostgresRelayStore implements RelayStore {
     grantBlob: string,
   ): Promise<CompletePairingResult> {
     return this.#control(async (tx) => {
-      const { rows } = await tx.query<PairingRow>(
-        `SELECT opener_pubkey, request_pubkey, grant_blob FROM ${SCHEMA}.pairing
+      const { rows } = await tx.query<{ request_pubkey: string }>(
+        `SELECT request_pubkey FROM ${SCHEMA}.pairing
          WHERE sid = $1 AND opener_pubkey = $2 AND expires_at > $3
            AND request_pubkey IS NOT NULL AND grant_blob IS NULL AND ${ACTIVE_OWNER("$2")}`,
         [sid, openerPublicKeyB64, this.#now()],
@@ -384,14 +379,16 @@ export class PostgresRelayStore implements RelayStore {
       if (session === undefined) {
         return "not_found";
       }
-      if (session.request_pubkey !== devicePublicKeyB64) {
-        return "device_mismatch";
+      const grantee = checkEnrollment(
+        session.request_pubkey,
+        devicePublicKeyB64,
+        await this.#device(tx, devicePublicKeyB64),
+        role,
+      );
+      if (typeof grantee === "string") {
+        return grantee;
       }
-      const existing = await this.#device(tx, devicePublicKeyB64);
-      if (existing?.status === "active" && existing.role !== role) {
-        return "role_conflict";
-      }
-      const result = await this.#checkGrant(tx, existing ?? { role, status: "active" }, scopes);
+      const result = await this.#checkGrant(tx, grantee, scopes);
       if (result !== "ok") {
         return result;
       }
