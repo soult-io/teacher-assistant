@@ -9,7 +9,7 @@
 // No student or activity timestamp, no client metadata, no plaintext column.
 //
 // Single-statement writes (append, putPairingRequest, issueOwnerCode,
-// putRecoveryWrap) are atomic on their own. Every other control-plane write
+// invalidateOwnerCodes, putRecoveryWrap) are atomic on their own. Every other control-plane write
 // (including the pairing take and the expiry sweep) runs in one transaction that first takes CONTROL_LOCK_KEY, so its
 // checks (last owner, single master, kind fixed, member never master) and its
 // writes cannot interleave with another control write. Control writes are rare
@@ -162,30 +162,32 @@ export class PostgresRelayStore implements RelayStore {
 
   redeemOwnerCode(codeSha256: string, devicePublicKeyB64: string): Promise<RedeemResult> {
     return this.#control(async (tx) => {
-      const { rows } = await tx.query<{ usable: boolean; revoked: boolean; first: boolean }>(
+      const { rows } = await tx.query<{ usable: boolean; known: boolean; first: boolean }>(
         `SELECT
            EXISTS (SELECT 1 FROM ${SCHEMA}.owner_codes
                    WHERE code_sha256 = $1 AND NOT used AND expires_at > $3) AS usable,
-           EXISTS (SELECT 1 FROM ${SCHEMA}.devices
-                   WHERE device_pubkey = $2 AND status = 'revoked') AS revoked,
+           EXISTS (SELECT 1 FROM ${SCHEMA}.devices WHERE device_pubkey = $2) AS known,
            NOT EXISTS (SELECT 1 FROM ${SCHEMA}.devices WHERE role = 'owner' AND status = 'active')
              AND NOT EXISTS (SELECT 1 FROM ${SCHEMA}.scopes WHERE kind = 'master') AS first`,
         [codeSha256, devicePublicKeyB64, this.#now()],
       );
       const row = rows[0];
-      if (row === undefined || !row.usable || row.revoked) {
+      if (row === undefined || !row.usable || row.known) {
         return "refused";
       }
       await tx.query(`UPDATE ${SCHEMA}.owner_codes SET used = true WHERE code_sha256 = $1`, [
         codeSha256,
       ]);
-      await tx.query(
-        `INSERT INTO ${SCHEMA}.devices (device_pubkey, role) VALUES ($1, 'owner')
-         ON CONFLICT (device_pubkey) DO UPDATE SET role = 'owner'`,
-        [devicePublicKeyB64],
-      );
+      // Under the control lock the key was just checked absent, so this cannot conflict.
+      await tx.query(`INSERT INTO ${SCHEMA}.devices (device_pubkey, role) VALUES ($1, 'owner')`, [
+        devicePublicKeyB64,
+      ]);
       return row.first ? "first" : "recovery";
     });
+  }
+
+  async invalidateOwnerCodes(): Promise<void> {
+    await this.#sql.query(`DELETE FROM ${SCHEMA}.owner_codes WHERE NOT used`);
   }
 
   async deviceRole(devicePublicKeyB64: string): Promise<DeviceRole | undefined> {

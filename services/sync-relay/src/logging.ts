@@ -140,8 +140,11 @@ export const LOG_LEVEL = "info";
  * which no serializer can reach, so every other message is replaced. The
  * listening line is the deploy's startup check ("(store: postgres)").
  */
+/** Logged when the global redeem-failure limit invalidates every unused owner code (operator reissues). */
+export const OWNER_CODES_INVALIDATED = "owner codes invalidated";
+
 const LOG_MESSAGE_ALLOWLIST: readonly RegExp[] = [
-  /^(sync store unavailable|request failed|request rejected|client error)$/,
+  /^(sync store unavailable|request failed|request rejected|client error|owner codes invalidated)$/,
   /^sync-relay listening on \S+ \(store: (memory|postgres)\)$/, // = listeningMessage()
 ];
 const REDACTED_MESSAGE = "(log message redacted)";
