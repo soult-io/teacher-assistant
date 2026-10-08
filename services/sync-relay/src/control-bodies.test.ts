@@ -7,6 +7,7 @@ import {
   parseGrantBody,
   parseListBody,
   parseRecoveryWrapBody,
+  parseRedeemBody,
   parseRetireBody,
   parseRevokeBody,
 } from "./control-bodies.js";
@@ -16,6 +17,21 @@ const DEVICE = "q83vEjRWeJq83vEjRWeJq83vEjRWeJq83vEjRWeJq80";
 const TAG = "3f2b8c1e-5a4d-4e6f-9a7b-0c1d2e3f4a5b";
 
 describe("control bodies", () => {
+  it("redeem: exactly {code: string}", () => {
+    expect(parseRedeemBody(enc({ code: "ABCD-EFGH" }))).toBe("ABCD-EFGH");
+    for (const bad of [
+      { code: "x", extra: 1 },
+      {},
+      { code: 42 },
+      ["x"],
+      "null",
+      "not json",
+      '{"__proto__":"x"}',
+    ]) {
+      expect(parseRedeemBody(enc(bad)), JSON.stringify(bad)).toBeNull();
+    }
+  });
+
   it("list: exactly {}", () => {
     expect(parseListBody(enc({}))).toEqual({});
     for (const bad of [{ a: 1 }, [], "null", "1", "nope", ""]) {
