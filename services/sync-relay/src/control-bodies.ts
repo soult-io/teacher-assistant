@@ -6,8 +6,8 @@
 
 import type { ScopeGrant, ScopeKind } from "./store.js";
 
-/** Longest device key / scope tag accepted; the same bound as the data routes. */
-export const MAX_ID_LENGTH = 256;
+/** Longest device key accepted; the same bound as the data routes. */
+const MAX_KEY_LENGTH = 256;
 /** Most scopes one grant may carry (spec §5.3). */
 export const MAX_GRANT_SCOPES = 16;
 /** Largest recovery-wrap blob, in characters (spec §5.3: ≤ 4 KiB). */
@@ -15,6 +15,12 @@ export const MAX_BLOB_LENGTH = 4096;
 
 /** A device signing key as sent in x-ta-device: base64, standard or URL-safe. */
 const DEVICE_KEY = /^[A-Za-z0-9+/_-]+={0,2}$/;
+/**
+ * A scope tag is the client's `newScopeTag()` — a random UUID and nothing else,
+ * so a label, a period name or initials can never be registered as a tag (spec
+ * §5.3 "no labels"). This also rules out the reserved `control` scope.
+ */
+const SCOPE_TAG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** An opaque sealed blob: base64 alphabet plus `.` as a field separator. */
 const BLOB = /^[A-Za-z0-9+/_.=-]+$/;
 const KINDS: ReadonlySet<string> = new Set<ScopeKind>(["master", "period"]);
@@ -36,17 +42,12 @@ function exactObject(rawBody: Uint8Array, keys: readonly string[]): Record<strin
     : null;
 }
 
-function isId(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    value.length > 0 &&
-    value.length <= MAX_ID_LENGTH &&
-    !value.includes("\u0000")
-  );
+function isDeviceKey(value: unknown): value is string {
+  return typeof value === "string" && value.length <= MAX_KEY_LENGTH && DEVICE_KEY.test(value);
 }
 
-function isDeviceKey(value: unknown): value is string {
-  return isId(value) && DEVICE_KEY.test(value);
+function isScopeTag(value: unknown): value is string {
+  return typeof value === "string" && SCOPE_TAG.test(value);
 }
 
 function parseScope(value: unknown): ScopeGrant | null {
@@ -55,7 +56,7 @@ function parseScope(value: unknown): ScopeGrant | null {
   }
   const own = Object.keys(value);
   const { tag, kind } = value as { tag?: unknown; kind?: unknown };
-  return own.length === 2 && isId(tag) && typeof kind === "string" && KINDS.has(kind)
+  return own.length === 2 && isScopeTag(tag) && typeof kind === "string" && KINDS.has(kind)
     ? { tag, kind: kind as ScopeKind }
     : null;
 }
@@ -90,7 +91,7 @@ export function parseRevokeBody(rawBody: Uint8Array): string | null {
 /** POST /sync/devices/retire-scope: `{tag}`. */
 export function parseRetireBody(rawBody: Uint8Array): string | null {
   const body = exactObject(rawBody, ["tag"]);
-  return body !== null && isId(body.tag) ? body.tag : null;
+  return body !== null && isScopeTag(body.tag) ? body.tag : null;
 }
 
 /**

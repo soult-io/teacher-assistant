@@ -46,7 +46,8 @@ Every owner route is signed with `x-ta-scope: control`. A bad or missing
 signature, another scope, an unknown key, a member and a revoked device all get
 the identical 404, before the body is read (only the framework's content-type
 and 1 MiB size checks, 415/413, come earlier, as on every route). Every body is strict: an unknown
-field (a label, a name) is 400. Expired pairing sessions and owner codes are
+field (a label, a name) is 400, and a scope tag must be a UUID (what
+`newScopeTag()` mints), so a label-shaped value is 400 too. Expired pairing sessions and owner codes are
 swept at the start of every control route. Revocation is permanent, so a signed
 grant replayed after a revoke — even on a restarted relay with an empty nonce
 cache — is refused.

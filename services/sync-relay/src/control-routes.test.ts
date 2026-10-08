@@ -17,6 +17,10 @@ import { PostgresRelayStore } from "./postgres-store.js";
 import { sodiumReady } from "./sodium-verify.js";
 
 const dirs: string[] = [];
+// Scope tags are random UUIDs (newScopeTag).
+const M = "00000000-0000-4000-8000-00000000000a";
+const P = "00000000-0000-4000-8000-00000000000b";
+const Q = "00000000-0000-4000-8000-00000000000c";
 
 beforeAll(async () => {
   await sodiumReady();
@@ -84,8 +88,8 @@ describe("TEACH-59 — owner control routes on the Postgres store", () => {
       signed(owner, "/sync/devices/grant", {
         device: ownerKey,
         scopes: [
-          { tag: "M", kind: "master" },
-          { tag: "P", kind: "period" },
+          { tag: M, kind: "master" },
+          { tag: P, kind: "period" },
         ],
       }),
     );
@@ -98,7 +102,7 @@ describe("TEACH-59 — owner control routes on the Postgres store", () => {
         ownerKey,
         paraKey,
         "member",
-        [{ tag: "P", kind: "period" }],
+        [{ tag: P, kind: "period" }],
         "g",
       ),
     ).toBe("ok");
@@ -116,15 +120,15 @@ describe("TEACH-59 — owner control routes on the Postgres store", () => {
           role: "owner",
           status: "active",
           scopes: [
-            { tag: "M", kind: "master", retired: false },
-            { tag: "P", kind: "period", retired: false },
+            { tag: M, kind: "master", retired: false },
+            { tag: P, kind: "period", retired: false },
           ],
         },
         {
           device: paraKey,
           role: "member",
           status: "active",
-          scopes: [{ tag: "P", kind: "period", retired: false }],
+          scopes: [{ tag: P, kind: "period", retired: false }],
         },
       ].sort((a, b) => (a.device < b.device ? -1 : 1)),
     });
@@ -132,16 +136,16 @@ describe("TEACH-59 — owner control routes on the Postgres store", () => {
     // A second period for the para; captured for the replay below.
     const grantQ = signed(owner, "/sync/devices/grant", {
       device: paraKey,
-      scopes: [{ tag: "Q", kind: "period" }],
+      scopes: [{ tag: Q, kind: "period" }],
     });
     expect((await app.inject(grantQ)).statusCode).toBe(200);
-    expect(await store.isAuthorized(paraKey, "Q")).toBe(true);
+    expect(await store.isAuthorized(paraKey, Q)).toBe(true);
 
     expect(
-      (await app.inject(signed(owner, "/sync/devices/retire-scope", { tag: "M" }))).statusCode,
+      (await app.inject(signed(owner, "/sync/devices/retire-scope", { tag: M }))).statusCode,
     ).toBe(409);
     expect(
-      (await app.inject(signed(owner, "/sync/devices/retire-scope", { tag: "P" }))).statusCode,
+      (await app.inject(signed(owner, "/sync/devices/retire-scope", { tag: P }))).statusCode,
     ).toBe(200);
     expect(
       (await app.inject(signed(owner, "/sync/devices/recovery-wrap", { blob: "c2FsdA.YmxvYg" })))
@@ -155,12 +159,12 @@ describe("TEACH-59 — owner control routes on the Postgres store", () => {
     expect(
       (await app.inject(signed(owner, "/sync/devices/revoke", { device: paraKey }))).statusCode,
     ).toBe(200);
-    expect(await store.isAuthorized(paraKey, "Q")).toBe(false);
+    expect(await store.isAuthorized(paraKey, Q)).toBe(false);
 
     // The grant replayed on a restarted relay (empty nonce cache) is refused.
     const restarted = buildApp(store);
     expect((await restarted.inject(grantQ)).statusCode).toBe(409);
-    expect(await store.isAuthorized(paraKey, "Q")).toBe(false);
+    expect(await store.isAuthorized(paraKey, Q)).toBe(false);
     expect(await store.deviceRole(paraKey)).toBeUndefined();
 
     await app.close();

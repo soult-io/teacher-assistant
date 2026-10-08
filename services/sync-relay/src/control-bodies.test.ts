@@ -13,6 +13,7 @@ import {
 
 const enc = (v: unknown) => new TextEncoder().encode(typeof v === "string" ? v : JSON.stringify(v));
 const DEVICE = "q83vEjRWeJq83vEjRWeJq83vEjRWeJq83vEjRWeJq80";
+const TAG = "3f2b8c1e-5a4d-4e6f-9a7b-0c1d2e3f4a5b";
 
 describe("control bodies", () => {
   it("list: exactly {}", () => {
@@ -23,15 +24,12 @@ describe("control bodies", () => {
   });
 
   it("grant: {device, scopes 1..16 of exactly {tag, kind}}", () => {
-    const scope = { tag: "T", kind: "period" };
+    const scope = { tag: TAG, kind: "period" };
     expect(parseGrantBody(enc({ device: DEVICE, scopes: [scope] }))).toEqual({
       device: DEVICE,
       scopes: [scope],
     });
-    const max = Array.from({ length: MAX_GRANT_SCOPES }, (_, i) => ({
-      tag: `t${i}`,
-      kind: "master",
-    }));
+    const max = Array.from({ length: MAX_GRANT_SCOPES }, () => ({ tag: TAG, kind: "master" }));
     expect(parseGrantBody(enc({ device: DEVICE, scopes: max }))?.scopes).toHaveLength(
       MAX_GRANT_SCOPES,
     );
@@ -39,7 +37,9 @@ describe("control bodies", () => {
       { device: DEVICE, scopes: [...max, scope] },
       { device: DEVICE, scopes: [] },
       { device: DEVICE, scopes: [{ ...scope, label: "x" }] },
-      { device: DEVICE, scopes: [{ tag: "T" }] },
+      { device: DEVICE, scopes: [{ tag: TAG }] },
+      { device: DEVICE, scopes: [{ tag: "control", kind: "period" }] },
+      { device: DEVICE, scopes: [{ tag: "3rd period", kind: "period" }] },
       { device: DEVICE, scopes: [null] },
       { device: DEVICE, scopes: [[]] },
       { device: DEVICE, scopes: [scope], extra: true },
@@ -50,12 +50,14 @@ describe("control bodies", () => {
     }
   });
 
-  it("revoke and retire-scope: a single bounded identifier", () => {
+  it("revoke: a bounded device key; retire-scope: a UUID tag", () => {
     expect(parseRevokeBody(enc({ device: DEVICE }))).toBe(DEVICE);
     expect(parseRevokeBody(enc({ device: DEVICE, why: "lost" }))).toBeNull();
-    expect(parseRetireBody(enc({ tag: "x".repeat(256) }))).toBe("x".repeat(256));
-    expect(parseRetireBody(enc({ tag: "x".repeat(257) }))).toBeNull();
-    expect(parseRetireBody(enc({ tag: "a\u0000" }))).toBeNull();
+    expect(parseRetireBody(enc({ tag: TAG }))).toBe(TAG);
+    expect(parseRetireBody(enc({ tag: TAG.toUpperCase() }))).toBe(TAG.toUpperCase());
+    for (const tag of ["control", "3rd period", `${TAG}\u0000`, `${TAG}x`, "", 1]) {
+      expect(parseRetireBody(enc({ tag })), String(tag)).toBeNull();
+    }
   });
 
   it("recovery-wrap: an opaque base64 blob; over 4 KiB is too_large", () => {

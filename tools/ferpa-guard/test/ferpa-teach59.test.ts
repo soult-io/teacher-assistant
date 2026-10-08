@@ -2,8 +2,10 @@
 // §11 EU-3). The owner control routes — list, grant, revoke, retire-scope,
 // recovery-wrap — driven with signed requests:
 // - a non-owner (unknown key, member, revoked owner, bad or missing signature,
-//   non-control scope) gets the identical 404 on every route, the same bytes as
-//   an unknown route and a data-route 404;
+//   non-control scope) gets the identical 404 on every route — the same status,
+//   body shape, content type and length as an unknown route and a data-route 404
+//   (the rate-limit headers differ from an unknown route's; the route list is
+//   public, so that reveals nothing about ownership or streams);
 // - `revoked` is permanent; a revoked device gets 404 on the data routes;
 // - a grant replayed after a revoke is refused on a fresh buildApp (empty nonce
 //   cache);
@@ -35,8 +37,10 @@ const OWNER_ROUTES = [LIST, GRANT, REVOKE, RETIRE, WRAP] as const;
 const NPM_PEER = "172.18.0.15";
 const TRUST = ["172.18.0.0/16"];
 const CLIENT_IP = "203.0.113.59";
-const MASTER = "tag-T59-MASTER-SENTINEL";
-const PERIOD = "tag-T59-PERIOD-SENTINEL";
+// Scope tags are random UUIDs (newScopeTag); these are fixed ones, unique enough to
+// search the log for.
+const MASTER = "5e59a5e1-7a65-4d3a-9f00-0000000000a1";
+const PERIOD = "5e59a5e1-7a65-4d3a-9f00-0000000000b2";
 const DOC = "doc-T59-SENTINEL";
 const BLOB = "WRAPT59SENTINEL.c2FsdA";
 const ERR_MSG = "ERRMSG_T59_SENTINEL";
@@ -301,7 +305,7 @@ describe("TEACH-59 — revoke", () => {
     const { app, store, owner } = await deployment();
     const para = makeSigner();
     await enrollMember(store, owner, para);
-    const other = "tag-T59-OTHER";
+    const other = "5e59a5e1-7a65-4d3a-9f00-0000000000c3";
     const grant = control(owner, GRANT, {
       device: para.publicKeyB64,
       scopes: [{ tag: other, kind: "period" }],
@@ -333,7 +337,11 @@ describe("TEACH-59 — grant, list, retire-scope, recovery-wrap", () => {
 
     const conflicts: [string, string, unknown][] = [
       ["member gets master", member.publicKeyB64, [{ tag: MASTER, kind: "master" }]],
-      ["second master", owner.publicKeyB64, [{ tag: "tag-T59-M2", kind: "master" }]],
+      [
+        "second master",
+        owner.publicKeyB64,
+        [{ tag: "5e59a5e1-7a65-4d3a-9f00-0000000000d4", kind: "master" }],
+      ],
       ["master re-granted as period", member.publicKeyB64, [{ tag: MASTER, kind: "period" }]],
       ["unknown device", makeSigner().publicKeyB64, [{ tag: PERIOD, kind: "period" }]],
     ];
@@ -343,7 +351,7 @@ describe("TEACH-59 — grant, list, retire-scope, recovery-wrap", () => {
       expect(shape(res).body, name).toEqual({ error: "conflict" });
     }
 
-    const next = "tag-T59-NEXT";
+    const next = "5e59a5e1-7a65-4d3a-9f00-0000000000e5";
     expect((await grant(member.publicKeyB64, [{ tag: next, kind: "period" }])).statusCode).toBe(
       200,
     );
@@ -396,7 +404,9 @@ describe("TEACH-59 — grant, list, retire-scope, recovery-wrap", () => {
     expect(shape(append)).toEqual(shape(await app.inject(data(makeSigner(), "GET", PERIOD))));
     expect((await app.inject(data(member, "GET", PERIOD))).statusCode).toBe(200);
 
-    const unknown = await app.inject(control(owner, RETIRE, { tag: "tag-T59-NONE" }));
+    const unknown = await app.inject(
+      control(owner, RETIRE, { tag: "5e59a5e1-7a65-4d3a-9f00-0000000000f6" }),
+    );
     expect(shape(unknown)).toEqual(
       shape(await app.inject(control(owner, "/sync/devices/nope", {}))),
     );
@@ -429,18 +439,32 @@ describe("TEACH-59 — strict bodies: an unknown field is 400, no labels", () =>
         { device, scopes: [] },
         {
           device,
-          scopes: Array.from({ length: 17 }, (_, i) => ({ tag: `t${i}`, kind: "period" })),
+          scopes: Array.from({ length: 17 }, (_, i) => ({
+            tag: `5e59a5e1-7a65-4d3a-9f00-${String(i).padStart(12, "0")}`,
+            kind: "period",
+          })),
         },
         { device, scopes: [{ tag: PERIOD, kind: "member" }] },
         { device, scopes: [{ tag: "", kind: "period" }] },
         { device, scopes: [{ tag: "x".repeat(257), kind: "period" }] },
         { device, scopes: [{ tag: "a\u0000b", kind: "period" }] },
+        // A tag is an opaque UUID: a label-shaped value, or the reserved control scope, is 400.
+        { device, scopes: [{ tag: "P3 - J.S. IEP", kind: "period" }] },
+        { device, scopes: [{ tag: "control", kind: "period" }] },
+        { device, scopes: [{ tag: `${PERIOD} `, kind: "period" }] },
         { device, scopes: scope },
         { device: "not a key!", scopes: [scope] },
         { scopes: [scope] },
       ],
       [REVOKE]: [{ device, label: "x" }, { device: 1 }, {}, { device: "" }],
-      [RETIRE]: [{ tag: PERIOD, name: "x" }, { tag: 7 }, {}, { tag: "x".repeat(257) }],
+      [RETIRE]: [
+        { tag: PERIOD, name: "x" },
+        { tag: 7 },
+        {},
+        { tag: "x".repeat(257) },
+        { tag: "3rd period" },
+        { tag: "control" },
+      ],
       [WRAP]: [{ blob: BLOB, label: "x" }, { blob: "" }, { blob: "has space" }, { blob: 1 }, {}],
     };
     const before = await store.listDevices();
