@@ -1,8 +1,9 @@
-// Strict request bodies for the owner control routes (device-enrollment spec
-// §5.3, TEACH-59 / EU-3). Every body is a JSON object with EXACTLY the named
-// keys: an unknown field — a device label, a name, anything — is a 400, so no
-// plaintext can reach the relay through a control route. Identifiers travel
-// only here, in the signed body, never in the URL.
+// Strict request bodies for the control routes — owner-code redeem and the
+// owner routes (device-enrollment spec §5.3, TEACH-59 / EU-3). Every body is a
+// JSON object with EXACTLY the named keys: an unknown field — a device label, a
+// name, anything — is a 400, so no plaintext can reach the relay through a
+// control route. Identifiers travel only here, in the signed body, never in the
+// URL.
 
 import type { ScopeGrant, ScopeKind } from "./store.js";
 
@@ -18,12 +19,25 @@ const DEVICE_KEY = /^[A-Za-z0-9+/_-]+={0,2}$/;
 /**
  * A scope tag is the client's `newScopeTag()` — a random UUID and nothing else,
  * so a label, a period name or initials can never be registered as a tag (spec
- * §5.3 "no labels"). This also rules out the reserved `control` scope.
+ * §5.3 "no labels"). This also rules out the reserved `control` scope. Lowercase
+ * only, as randomUUID() mints: the store matches tags exactly, so an uppercase
+ * spelling would be a different scope.
  */
-const SCOPE_TAG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const SCOPE_TAG = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 /** An opaque sealed blob: base64 alphabet plus `.` as a field separator. */
 const BLOB = /^[A-Za-z0-9+/_.=-]+$/;
 const KINDS: ReadonlySet<string> = new Set<ScopeKind>(["master", "period"]);
+
+/** `value` as a record, or null unless it is a plain object with exactly `keys`. */
+function exactKeys(value: unknown, keys: readonly string[]): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  const own = Object.keys(value);
+  return own.length === keys.length && keys.every((k) => own.includes(k))
+    ? (value as Record<string, unknown>)
+    : null;
+}
 
 /** The parsed object, or null unless the body is a JSON object with exactly `keys`. */
 function exactObject(rawBody: Uint8Array, keys: readonly string[]): Record<string, unknown> | null {
@@ -33,13 +47,7 @@ function exactObject(rawBody: Uint8Array, keys: readonly string[]): Record<strin
   } catch {
     return null;
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return null;
-  }
-  const own = Object.keys(parsed);
-  return own.length === keys.length && keys.every((k) => own.includes(k))
-    ? (parsed as Record<string, unknown>)
-    : null;
+  return exactKeys(parsed, keys);
 }
 
 function isDeviceKey(value: unknown): value is string {
@@ -51,19 +59,28 @@ function isScopeTag(value: unknown): value is string {
 }
 
 function parseScope(value: unknown): ScopeGrant | null {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  const scope = exactKeys(value, ["tag", "kind"]);
+  if (scope === null || !isScopeTag(scope.tag)) {
     return null;
   }
-  const own = Object.keys(value);
-  const { tag, kind } = value as { tag?: unknown; kind?: unknown };
-  return own.length === 2 && isScopeTag(tag) && typeof kind === "string" && KINDS.has(kind)
-    ? { tag, kind: kind as ScopeKind }
+  const kind = scope.kind;
+  return typeof kind === "string" && KINDS.has(kind)
+    ? { tag: scope.tag, kind: kind as ScopeKind }
     : null;
 }
 
+/**
+ * POST /sync/enroll/redeem: `{code}`. The code is checked by the owner-code
+ * hash, not here.
+ */
+export function parseRedeemBody(rawBody: Uint8Array): string | null {
+  const body = exactObject(rawBody, ["code"]);
+  return body !== null && typeof body.code === "string" ? body.code : null;
+}
+
 /** POST /sync/devices/list: exactly `{}`. */
-export function parseListBody(rawBody: Uint8Array): boolean {
-  return exactObject(rawBody, []) !== null;
+export function parseListBody(rawBody: Uint8Array): Readonly<Record<string, never>> | null {
+  return exactObject(rawBody, []) === null ? null : {};
 }
 
 /** POST /sync/devices/grant: `{device, scopes: [{tag, kind}] (1..16)}`. */

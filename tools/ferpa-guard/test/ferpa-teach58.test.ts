@@ -21,6 +21,7 @@ import {
 } from "@teacher-assistant/sync-relay/owner-code";
 import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
 import { beforeAll, describe, expect, it } from "vitest";
+import { expectCleanLogs } from "./relay-logs.js";
 import { makeSigner, type Signer } from "./relay-signer.js";
 
 beforeAll(async () => {
@@ -33,18 +34,6 @@ const TRUST = ["172.18.0.0/16"];
 const MINUTE = 60_000;
 const ERR_MSG = "ERRMSG_T58_SENTINEL";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
-const ALLOWED_LOG_KEYS = new Set([
-  "level",
-  "time",
-  "pid",
-  "hostname",
-  "reqId",
-  "msg",
-  "record_id",
-  "route",
-  "status",
-  "sqlstate",
-]);
 
 /** One clock for the store (code expiry) and the app (lockout). */
 function testClock() {
@@ -118,17 +107,6 @@ function requestValues(req: RedeemReq): string[] {
 function codeValues(printed: string): string[] {
   const canonical = printed.replaceAll("-", "");
   return [printed, canonical, ownerCodeHash(printed) as string];
-}
-
-function expectCleanLogs(lines: readonly string[], forbidden: readonly string[]): void {
-  const all = lines.join("\n");
-  for (const value of forbidden) {
-    expect(all).not.toContain(value);
-  }
-  for (const line of lines) {
-    const extra = Object.keys(JSON.parse(line) as object).filter((k) => !ALLOWED_LOG_KEYS.has(k));
-    expect(extra).toEqual([]);
-  }
 }
 
 /** The 401 with record_id removed, plus the headers a client could compare. */

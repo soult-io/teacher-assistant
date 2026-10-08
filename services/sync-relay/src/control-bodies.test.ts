@@ -17,9 +17,9 @@ const TAG = "3f2b8c1e-5a4d-4e6f-9a7b-0c1d2e3f4a5b";
 
 describe("control bodies", () => {
   it("list: exactly {}", () => {
-    expect(parseListBody(enc({}))).toBe(true);
+    expect(parseListBody(enc({}))).toEqual({});
     for (const bad of [{ a: 1 }, [], "null", "1", "nope", ""]) {
-      expect(parseListBody(enc(bad)), JSON.stringify(bad)).toBe(false);
+      expect(parseListBody(enc(bad)), JSON.stringify(bad)).toBeNull();
     }
   });
 
@@ -54,8 +54,15 @@ describe("control bodies", () => {
     expect(parseRevokeBody(enc({ device: DEVICE }))).toBe(DEVICE);
     expect(parseRevokeBody(enc({ device: DEVICE, why: "lost" }))).toBeNull();
     expect(parseRetireBody(enc({ tag: TAG }))).toBe(TAG);
-    expect(parseRetireBody(enc({ tag: TAG.toUpperCase() }))).toBe(TAG.toUpperCase());
-    for (const tag of ["control", "3rd period", `${TAG}\u0000`, `${TAG}x`, "", 1]) {
+    for (const tag of [
+      TAG.toUpperCase(),
+      "control",
+      "3rd period",
+      `${TAG}\u0000`,
+      `${TAG}x`,
+      "",
+      1,
+    ]) {
       expect(parseRetireBody(enc({ tag })), String(tag)).toBeNull();
     }
   });

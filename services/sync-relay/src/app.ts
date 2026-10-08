@@ -26,6 +26,7 @@ import {
   parseGrantBody,
   parseListBody,
   parseRecoveryWrapBody,
+  parseRedeemBody,
   parseRetireBody,
   parseRevokeBody,
 } from "./control-bodies.js";
@@ -177,25 +178,6 @@ function parsePushUpdates(rawBody: Uint8Array): readonly string[] | null {
     return null;
   }
   return updates as string[];
-}
-
-/**
- * The redeem body's code, or null unless the body is exactly `{code: string}`
- * (spec §5.3: strict bodies, an unknown field is 400).
- */
-function parseRedeemBody(rawBody: Uint8Array): string | null {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(new TextDecoder().decode(rawBody));
-  } catch {
-    return null;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-    return null;
-  }
-  const keys = Object.keys(parsed);
-  const code: unknown = (parsed as { code?: unknown }).code;
-  return keys.length === 1 && keys[0] === "code" && typeof code === "string" ? code : null;
 }
 
 /** POST /sync/enroll/redeem success body (spec §5.3). */
@@ -493,11 +475,8 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     // read is the identical 404 (authorizeOwner); revoked is permanent, so a
     // grant replayed after a revoke — even on a restarted relay with an empty
     // nonce cache — is refused by the store (spec §5.4).
-    ownerRoute(
-      routes,
-      OWNER_ROUTES.list,
-      (raw) => (parseListBody(raw) ? {} : null),
-      async (_b, _req, reply) => reply.send({ devices: await store.listDevices() }),
+    ownerRoute(routes, OWNER_ROUTES.list, parseListBody, async (_b, _req, reply) =>
+      reply.send({ devices: await store.listDevices() }),
     );
 
     ownerRoute(

@@ -11,6 +11,7 @@ import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { InMemoryRelayStore, type RelayStore } from "@teacher-assistant/sync-relay/store";
 import { seedAcl } from "@teacher-assistant/sync-relay/testing";
 import { beforeAll, describe, expect, it } from "vitest";
+import { expectCleanLogs } from "./relay-logs.js";
 import { makeSigner, type Signer } from "./relay-signer.js";
 
 beforeAll(async () => {
@@ -25,18 +26,6 @@ const NPM_PEER = "172.18.0.15";
 const TRUST = ["172.18.0.0/16"];
 const ERR_MSG = "ERRMSG_T55_SENTINEL";
 const CIPHERTEXT = Buffer.from("CIPHERTEXT_T55_SENTINEL").toString("base64url");
-const ALLOWED_LOG_KEYS = new Set([
-  "level",
-  "time",
-  "pid",
-  "hostname",
-  "reqId",
-  "msg",
-  "record_id",
-  "route",
-  "status",
-  "sqlstate",
-]);
 
 function captureLogs() {
   const lines: string[] = [];
@@ -77,17 +66,6 @@ function requestValues(req: Req): string[] {
     return v as string;
   });
   return [DOC, SCOPE, CLIENT_IP, CIPHERTEXT, ERR_MSG, `/sync/${DOC}`, ...carried];
-}
-
-function expectCleanLogs(lines: readonly string[], forbidden: readonly string[]): void {
-  const all = lines.join("\n");
-  for (const value of forbidden) {
-    expect(all).not.toContain(value);
-  }
-  for (const line of lines) {
-    const extra = Object.keys(JSON.parse(line) as object).filter((k) => !ALLOWED_LOG_KEYS.has(k));
-    expect(extra).toEqual([]);
-  }
 }
 
 function expectErrorBody(res: { json(): unknown }, error: string): void {
