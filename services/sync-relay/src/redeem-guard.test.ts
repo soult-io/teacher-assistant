@@ -62,6 +62,18 @@ describe("RedeemGuard", () => {
     expect(g.begin("198.51.100.1")).toBeUndefined();
   });
 
+  it("a refused attempt leaves no state: a many-address flood during a lockout does not grow the map", () => {
+    const g = new RedeemGuard(clock().now);
+    for (let i = 0; i < REDEEM_LOCKOUT.maxFailures; i++) {
+      failOnce(g, `203.0.113.${i}`);
+    }
+    const before = g.size;
+    for (let i = 0; i < 20_000; i++) {
+      expect(g.begin(`2001:db8::${i.toString(16)}`)).toBeUndefined();
+    }
+    expect(g.size).toBe(before);
+  });
+
   it("in-flight attempts count: a parallel burst gets at most 5 attempts through", () => {
     const g = new RedeemGuard(clock().now);
     const started = Array.from({ length: 20 }, () => g.begin("203.0.113.1"));

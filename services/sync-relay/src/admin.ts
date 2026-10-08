@@ -23,6 +23,11 @@ import type { RelayStore } from "./store.js";
 
 export const ISSUE_OWNER_CODE = "issue-owner-code";
 
+interface AdminStore {
+  readonly store: Pick<RelayStore, "issueOwnerCode">;
+  close(): Promise<void>;
+}
+
 /** Everything the CLI touches, injected so tests run it in-process. */
 export interface AdminIo {
   readonly argv: readonly string[];
@@ -32,10 +37,7 @@ export interface AdminIo {
   readonly isTTY: boolean;
   /** stdout is the container's own log (PID 1's stdout): the one-shot-service case. */
   readonly stdoutIsContainerLog: boolean;
-  readonly openStore: () => Promise<{
-    readonly store: Pick<RelayStore, "issueOwnerCode">;
-    close(): Promise<void>;
-  }>;
+  readonly openStore: () => Promise<AdminStore>;
   readonly now?: () => Date;
   readonly newCode?: () => string;
 }
@@ -70,7 +72,7 @@ export async function runAdmin(io: AdminIo): Promise<number> {
     return 1;
   }
   const expiresAt = new Date((io.now ?? (() => new Date()))().getTime() + OWNER_CODE_TTL_MS);
-  let opened: Awaited<ReturnType<AdminIo["openStore"]>> | undefined;
+  let opened: AdminStore | undefined;
   try {
     opened = await io.openStore();
     await opened.store.issueOwnerCode(hash, expiresAt);

@@ -15,7 +15,7 @@
 //
 // State is in-process, like the rate limiter (single relay instance).
 
-export interface LockoutPolicy {
+interface LockoutPolicy {
   readonly maxFailures: number;
   readonly windowMs: number;
   readonly lockoutMs: number;
@@ -66,8 +66,10 @@ export class RedeemGuard {
   /** Reserve an attempt from `ip`, or undefined while it or the global key is locked out. */
   begin(ip: string): RedeemAttempt | undefined {
     const now = this.#now();
-    const keys = [ip, GLOBAL_KEY];
-    if (keys.some((k) => this.#blocked(this.#current(k, now), now))) {
+    const keys = [GLOBAL_KEY, ip];
+    // Look, do not insert: a refused attempt must leave no state behind, or a
+    // flood from many addresses during a lockout would grow the map unbounded.
+    if (keys.some((k) => this.#blocked(k, now))) {
       return undefined;
     }
     for (const k of keys) {
@@ -116,8 +118,25 @@ export class RedeemGuard {
     this.#burnFailures = [];
   }
 
-  #blocked(e: Entry, now: number): boolean {
-    return e.lockedUntil > now || e.failures + e.inFlight >= REDEEM_LOCKOUT.maxFailures;
+  /** Tracked keys (tests assert a refused attempt adds none). */
+  get size(): number {
+    return this.#entries.size;
+  }
+
+  #blocked(key: string, now: number): boolean {
+    const e = this.#entries.get(key);
+    if (e === undefined) {
+      return false;
+    }
+    const failures = this.#windowOver(e, now) ? 0 : e.failures;
+    return e.lockedUntil > now || failures + e.inFlight >= REDEEM_LOCKOUT.maxFailures;
+  }
+
+  /** The failure window has passed, or a lockout has run out: the next count starts afresh. */
+  #windowOver(e: Entry, now: number): boolean {
+    return e.lockedUntil === 0
+      ? now - e.windowStart > REDEEM_LOCKOUT.windowMs
+      : e.lockedUntil <= now;
   }
 
   /** The key's entry, with its failure window restarted if it has elapsed. */
@@ -129,9 +148,7 @@ export class RedeemGuard {
       }
       e = { failures: 0, windowStart: now, lockedUntil: 0, inFlight: 0 };
       this.#entries.set(key, e);
-    } else if (
-      e.lockedUntil === 0 ? now - e.windowStart > REDEEM_LOCKOUT.windowMs : e.lockedUntil <= now // a lockout that has run out starts a fresh window
-    ) {
+    } else if (this.#windowOver(e, now)) {
       e.failures = 0;
       e.windowStart = now;
       e.lockedUntil = 0;

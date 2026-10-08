@@ -134,15 +134,15 @@ export const SERIALIZERS = {
 /** Production log level, pinned (FERPA re-review N4): never debug/trace in a deploy. */
 export const LOG_LEVEL = "info";
 
+/** Logged when the global redeem-failure limit invalidates every unused owner code (operator reissues). */
+export const OWNER_CODES_INVALIDATED = "owner codes invalidated";
+
 /**
  * The only log messages that pass verbatim. Fastify interpolates the FILLED URL
  * into some of its own messages (e.g. "Reply was already sent … in /sync/<doc>"),
  * which no serializer can reach, so every other message is replaced. The
  * listening line is the deploy's startup check ("(store: postgres)").
  */
-/** Logged when the global redeem-failure limit invalidates every unused owner code (operator reissues). */
-export const OWNER_CODES_INVALIDATED = "owner codes invalidated";
-
 const LOG_MESSAGE_ALLOWLIST: readonly RegExp[] = [
   /^(sync store unavailable|request failed|request rejected|client error|owner codes invalidated)$/,
   /^sync-relay listening on \S+ \(store: (memory|postgres)\)$/, // = listeningMessage()

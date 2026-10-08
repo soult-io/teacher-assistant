@@ -11,7 +11,7 @@ import { createHash, randomInt } from "node:crypto";
 const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 export const OWNER_CODE_LENGTH = 26;
 /** A redeem body's code is at most this long before canonicalizing (separators included). */
-export const MAX_OWNER_CODE_INPUT = 64;
+const MAX_OWNER_CODE_INPUT = 64;
 
 /** Default lifetime of an issued code (spec DN-3). */
 export const OWNER_CODE_TTL_MS = 24 * 60 * 60 * 1000;
