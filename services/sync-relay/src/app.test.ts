@@ -214,6 +214,18 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
         url: `/sync/enroll/redeem?x=${QUERY}`,
         template: "/sync/enroll/redeem",
       },
+      // TEACH-59 (EU-3) owner control routes.
+      ...[
+        "/sync/devices/list",
+        "/sync/devices/grant",
+        "/sync/devices/revoke",
+        "/sync/devices/retire-scope",
+        "/sync/devices/recovery-wrap",
+      ].map((template) => ({
+        method: "POST" as const,
+        url: `${template}?x=${QUERY}`,
+        template,
+      })),
     ];
     for (const r of routes) {
       const { lines, logStream } = captureLogs();
@@ -291,6 +303,18 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
         status: 401,
         error: "unauthorized",
       },
+      // 404 — unsigned owner control route (TEACH-59): the identical not-found
+      {
+        req: {
+          method: "POST" as const,
+          url: "/sync/devices/grant",
+          headers: { "content-type": "application/json" },
+          payload: Buffer.from('{"device":"BODYSENTINEL","scopes":[]}'),
+        },
+        status: 404,
+        error: "not_found",
+        unlogged: true, // like the data-route 404 and the 401s: answered, not logged
+      },
       // 404 — no such route (the default Fastify body echoes the path)
       {
         req: { method: "GET" as const, url: `/nope/${DOC}?q=${QUERY}` },
@@ -350,7 +374,7 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
       expect(res.body).not.toContain(DOC);
       expectCleanLogs(lines, [...sentinels, "BODYSENTINEL", longDoc]);
       // Framework-raised 4xx go through the error handler and are logged safely.
-      if (c.status !== 401) {
+      if (c.status !== 401 && !("unlogged" in c)) {
         expect(lineFor(lines, recordId)).toMatchObject({ status: c.status });
         const route = lineFor(lines, recordId).route;
         expect(["/sync/:docId", "unmatched"]).toContain(route);

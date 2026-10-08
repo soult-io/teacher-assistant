@@ -23,6 +23,13 @@ import {
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { isTrustedProxyEntry } from "./config.js";
 import {
+  parseGrantBody,
+  parseListBody,
+  parseRecoveryWrapBody,
+  parseRetireBody,
+  parseRevokeBody,
+} from "./control-bodies.js";
+import {
   clientErrorHandler,
   failRequest,
   guardLogMessage,
@@ -100,6 +107,15 @@ const RESERVED_CONTROL_SCOPE = "control";
 
 /** Control routes have two or more path segments, so they never match /sync/:docId (spec DN-5). */
 const REDEEM_ROUTE = "/sync/enroll/redeem";
+
+/** The owner control routes (spec §5.3, EU-3). Identifiers travel only in the signed body. */
+const OWNER_ROUTES = {
+  list: "/sync/devices/list",
+  grant: "/sync/devices/grant",
+  revoke: "/sync/devices/revoke",
+  retireScope: "/sync/devices/retire-scope",
+  recoveryWrap: "/sync/devices/recovery-wrap",
+} as const;
 
 /** Ciphertext travels as base64 (standard or URL-safe alphabet). */
 const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
@@ -356,6 +372,66 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     return { mode, recovery_wrap: wrap ?? null };
   }
 
+  /**
+   * The owner-route preamble (spec §5.3): a valid signature under the reserved
+   * `control` scope from an ACTIVE owner, else the identical H-PUB-3 404 — a
+   * non-owner, a revoked device, a bad signature and an unknown route all look
+   * the same. Expired codes and pairing sessions are then swept (spec §5.1: at
+   * the start of every control route). Returns the raw body, or null after the
+   * 404 was sent.
+   */
+  async function authorizeOwner(
+    req: FastifyRequest,
+    reply: FastifyReply,
+  ): Promise<Uint8Array | null> {
+    const rawBody = rawBodyOf(req);
+    const verified = verifyRequest(req, rawBody, nonces);
+    if (
+      verified === null ||
+      verified.scope !== RESERVED_CONTROL_SCOPE ||
+      (await store.deviceRole(verified.devicePublicKeyB64)) !== "owner"
+    ) {
+      notFound(reply);
+      return null;
+    }
+    await store.sweepExpired();
+    return rawBody;
+  }
+
+  /** A refused control operation: `{error, record_id}` plus the one permitted log line. */
+  function conflict(req: FastifyRequest, reply: FastifyReply, code: string): FastifyReply {
+    failRequest(req, reply, 409, code, undefined, "request rejected");
+    return reply;
+  }
+
+  /**
+   * Register one owner route: the preamble, then the strict body parser (null →
+   * 400), then the handler. Any store failure is the 503 "outcome unknown".
+   */
+  function ownerRoute<T>(
+    routes: FastifyInstance,
+    path: string,
+    parse: (rawBody: Uint8Array) => T | null,
+    handle: (body: T, req: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>,
+  ): void {
+    routes.post(path, async (req, reply) => {
+      try {
+        const rawBody = await authorizeOwner(req, reply);
+        if (rawBody === null) {
+          return reply;
+        }
+        const body = parse(rawBody);
+        if (body === null) {
+          sendError(reply, 400, "bad_request");
+          return reply;
+        }
+        return await handle(body, req, reply);
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
+      }
+    });
+  }
+
   // Routes live in a plugin registered AFTER the rate limiter: @fastify/rate-limit
   // attaches through an onRoute hook that exists only once it has loaded, so a
   // route added directly on `app` here would never be limited (TEACH-55 found
@@ -412,6 +488,58 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
         attempt.release();
       }
     });
+
+    // Owner control routes (spec §5.3, F4/F5). Every refusal before the body is
+    // read is the identical 404 (authorizeOwner); revoked is permanent, so a
+    // grant replayed after a revoke — even on a restarted relay with an empty
+    // nonce cache — is refused by the store (spec §5.4).
+    ownerRoute(
+      routes,
+      OWNER_ROUTES.list,
+      (raw) => (parseListBody(raw) ? {} : null),
+      async (_b, _req, reply) => reply.send({ devices: await store.listDevices() }),
+    );
+
+    ownerRoute(
+      routes,
+      OWNER_ROUTES.grant,
+      parseGrantBody,
+      async ({ device, scopes }, req, reply) =>
+        (await store.grantScopes(device, scopes)) === "ok"
+          ? reply.send({})
+          : conflict(req, reply, "conflict"),
+    );
+
+    ownerRoute(routes, OWNER_ROUTES.revoke, parseRevokeBody, async (device, req, reply) =>
+      (await store.revoke(device)) === "ok" ? reply.send({}) : conflict(req, reply, "last_owner"),
+    );
+
+    // The master scope is never retired (FERPA re-review N3).
+    ownerRoute(routes, OWNER_ROUTES.retireScope, parseRetireBody, async (tag, req, reply) => {
+      const result = await store.retireScope(tag);
+      if (result === "master_scope") {
+        return conflict(req, reply, "master_scope");
+      }
+      if (result === "not_found") {
+        notFound(reply);
+        return reply;
+      }
+      return reply.send({});
+    });
+
+    ownerRoute(
+      routes,
+      OWNER_ROUTES.recoveryWrap,
+      parseRecoveryWrapBody,
+      async (body, _req, reply) => {
+        if (body === "too_large") {
+          sendError(reply, 413, "payload_too_large");
+          return reply;
+        }
+        await store.putRecoveryWrap(body.blob);
+        return reply.send({});
+      },
+    );
 
     // Append encrypted updates for an opaque doc id.
     routes.post("/sync/:docId", async (req, reply) => {
