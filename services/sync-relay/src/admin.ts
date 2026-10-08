@@ -46,7 +46,8 @@ const NOT_EXEC = `${ISSUE_OWNER_CODE}: refused. Run it only by exec into the run
 /** An error reduced to a SQLSTATE or its class name; never its message or detail. */
 function describeFailure(err: unknown): string {
   const code = errorCode(err);
-  if (code !== undefined && /^[0-9A-Z]{5}$/.test(code)) {
+  // A SQLSTATE class never starts with E; Node errnos (EPERM, EPIPE) do.
+  if (code !== undefined && /^[0-9A-DF-Z][0-9A-Z]{4}$/.test(code)) {
     return `SQLSTATE ${code}`;
   }
   return err instanceof Error ? err.name : "unknown error";

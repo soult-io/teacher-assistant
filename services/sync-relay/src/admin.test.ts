@@ -170,6 +170,7 @@ describe("TEACH-58 — operator CLI: issuing", () => {
         "SQLSTATE 23505",
       ],
       [Object.assign(new Error(`connect ${hash}`), { code: "ECONNREFUSED" }), "Error"],
+      [Object.assign(new Error(`pipe ${hash}`), { code: "EPIPE" }), "Error"], // 5 letters, not a SQLSTATE
       [new TypeError(`bad ${code}`), "TypeError"],
     ] as const) {
       const failing = Object.assign(new InMemoryRelayStore(), {

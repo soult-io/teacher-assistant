@@ -34,7 +34,7 @@ import {
   sendError,
 } from "./logging.js";
 import { ownerCodeHash } from "./owner-code.js";
-import { RedeemGuard } from "./redeem-guard.js";
+import { type RedeemAttempt, RedeemGuard } from "./redeem-guard.js";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
 import { parseCursor, type RedeemResult, type RelayStore } from "./store.js";
 
@@ -343,9 +343,10 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
   }
 
   /** Count a refused redeem; past the global limit, invalidate every unused code (spec §5.5). */
-  async function countRedeemFailure(req: FastifyRequest): Promise<void> {
-    if (redeemGuard.fail(req.ip)) {
-      await store.invalidateOwnerCodes();
+  async function countRedeemFailure(req: FastifyRequest, attempt: RedeemAttempt): Promise<void> {
+    if (attempt.fail()) {
+      await store.invalidateOwnerCodes(); // a throw leaves the count over the limit: the next failure retries
+      redeemGuard.burned();
       req.log.warn({ route: REDEEM_ROUTE }, OWNER_CODES_INVALIDATED);
     }
   }
@@ -387,25 +388,28 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     // the lockout. A locked-out IP (or the global key) gets 429 before the code
     // is looked at. Neither the code nor its hash is ever logged (§5.6).
     routes.post(REDEEM_ROUTE, async (req, reply) => {
+      const attempt = redeemGuard.begin(req.ip);
+      if (attempt === undefined) {
+        failRequest(req, reply, 429, "rate_limited", undefined, "request rejected");
+        return reply;
+      }
       try {
-        if (redeemGuard.locked(req.ip)) {
-          failRequest(req, reply, 429, "rate_limited", undefined, "request rejected");
-          return reply;
-        }
         const outcome = await attemptRedeem(req, rawBodyOf(req));
         if (outcome === "bad_request") {
           sendError(reply, 400, "bad_request");
           return reply;
         }
         if (outcome === "refused") {
-          await countRedeemFailure(req);
+          await countRedeemFailure(req, attempt);
           sendError(reply, 401, "unauthorized");
           return reply;
         }
-        redeemGuard.succeed(req.ip);
+        attempt.succeed();
         return reply.send(await redeemResponse(outcome));
       } catch (err) {
         return storeUnavailable(req, reply, err);
+      } finally {
+        attempt.release();
       }
     });
 

@@ -175,9 +175,15 @@ export class PostgresRelayStore implements RelayStore {
       if (row === undefined || !row.usable || row.known) {
         return "refused";
       }
-      await tx.query(`UPDATE ${SCHEMA}.owner_codes SET used = true WHERE code_sha256 = $1`, [
-        codeSha256,
-      ]);
+      // Re-checked in the write: invalidateOwnerCodes runs outside the control lock.
+      const used = await tx.query(
+        `UPDATE ${SCHEMA}.owner_codes SET used = true
+         WHERE code_sha256 = $1 AND NOT used AND expires_at > $2 RETURNING 1`,
+        [codeSha256, this.#now()],
+      );
+      if (used.rows.length === 0) {
+        return "refused";
+      }
       // Under the control lock the key was just checked absent, so this cannot conflict.
       await tx.query(`INSERT INTO ${SCHEMA}.devices (device_pubkey, role) VALUES ($1, 'owner')`, [
         devicePublicKeyB64,

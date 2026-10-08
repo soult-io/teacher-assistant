@@ -353,6 +353,59 @@ describe("TEACH-58 — lockout on the trusted req.ip and globally", () => {
   });
 });
 
+describe("TEACH-58 — lockout holds under concurrency and when the burn fails", () => {
+  it("a parallel burst from one IP: at most 5 attempts reach the store, the rest are 429", async () => {
+    let calls = 0;
+    const slow = Object.assign(new InMemoryRelayStore(), {
+      redeemOwnerCode: async () => {
+        calls += 1;
+        await new Promise((r) => setTimeout(r, 20));
+        return "refused" as const;
+      },
+    });
+    const { app } = setup(slow);
+    const results = await Promise.all(
+      Array.from({ length: 30 }, () =>
+        app.inject(redeem(makeSigner(), { code: formatOwnerCode(newOwnerCode()) })),
+      ),
+    );
+    const statuses = results.map((r) => r.statusCode);
+    expect(statuses.filter((s) => s === 401)).toHaveLength(5);
+    expect(statuses.filter((s) => s === 429)).toHaveLength(25);
+    expect(calls).toBe(5);
+  });
+
+  it("if invalidating the codes fails, the next failure retries it (fail closed)", async () => {
+    let failInvalidate = true;
+    let invalidated = 0;
+    const base = new InMemoryRelayStore();
+    const flaky = Object.assign(base, {
+      invalidateOwnerCodes: async () => {
+        if (failInvalidate) {
+          throw Object.assign(new Error(ERR_MSG), { code: "08006" });
+        }
+        invalidated += 1;
+        return InMemoryRelayStore.prototype.invalidateOwnerCodes.call(base);
+      },
+    });
+    const { app, clock, lines } = setup(flaky);
+    for (let i = 0; i < 20; i++) {
+      if (i % 4 === 0) {
+        clock.advance(QUIET);
+      }
+      await app.inject(redeem(makeSigner(), { code: "wrong" }, `203.0.113.${i}`));
+    }
+    clock.advance(QUIET);
+    const r21 = await app.inject(redeem(makeSigner(), { code: "wrong" }, "203.0.113.100"));
+    expect(r21.statusCode).toBe(503);
+    failInvalidate = false;
+    const r22 = await app.inject(redeem(makeSigner(), { code: "wrong" }, "203.0.113.101"));
+    expect(r22.statusCode).toBe(401);
+    expect(invalidated).toBe(1);
+    expectCleanLogs(lines, [ERR_MSG]);
+  });
+});
+
 describe("TEACH-58 — logs never carry the code, its hash or any request value", () => {
   it("each 4xx (400, 401, 404, 413, 415, 429): {error, record_id} bodies, clean logs", async () => {
     const { app, issue, lines, clock } = setup();
