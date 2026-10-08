@@ -74,6 +74,16 @@ describe("RedeemGuard", () => {
     expect(g.size).toBe(before);
   });
 
+  it("attempts that end without a failure (400, 5xx) leave no state from many addresses", () => {
+    const g = new RedeemGuard(clock().now);
+    for (let i = 0; i < 20_000; i++) {
+      const a = g.begin(`2001:db8::${i.toString(16)}`);
+      expect(a).toBeDefined();
+      a?.release();
+    }
+    expect(g.size).toBe(0);
+  });
+
   it("in-flight attempts count: a parallel burst gets at most 5 attempts through", () => {
     const g = new RedeemGuard(clock().now);
     const started = Array.from({ length: 20 }, () => g.begin("203.0.113.1"));

@@ -80,10 +80,7 @@ export class RedeemGuard {
       if (open) {
         open = false;
         for (const k of keys) {
-          const e = this.#entries.get(k);
-          if (e !== undefined) {
-            e.inFlight -= 1;
-          }
+          this.#endAttempt(k);
         }
       }
     };
@@ -116,6 +113,18 @@ export class RedeemGuard {
    */
   burned(): void {
     this.#burnFailures = [];
+  }
+
+  /** One attempt on `key` is over; an entry left idle (400, 5xx: no live failure) is dropped. */
+  #endAttempt(key: string): void {
+    const e = this.#entries.get(key);
+    if (e === undefined) {
+      return;
+    }
+    e.inFlight -= 1;
+    if (e.inFlight === 0 && (e.failures === 0 || this.#windowOver(e, this.#now()))) {
+      this.#entries.delete(key);
+    }
   }
 
   /** Tracked keys (tests assert a refused attempt adds none). */
