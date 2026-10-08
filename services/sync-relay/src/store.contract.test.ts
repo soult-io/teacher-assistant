@@ -587,6 +587,33 @@ describe.each(impls)("RelayStore enrollment control plane — $name", (impl) => 
     expect(await s.redeemOwnerCode("code-B", "dev-C")).toBe("recovery");
   });
 
+  it("PL ruling: a known key never redeems — an active member is not promoted, an owner burns no code", async () => {
+    const { s, issue } = await withOwner();
+    expect(await s.grantScopes("dev-A", [{ tag: "P", kind: "period" }])).toBe("ok");
+    expect(await pair(s, "sid-1", "dev-A", "dev-B", "member", [{ tag: "P", kind: "period" }])).toBe(
+      "ok",
+    );
+    await issue("code-B");
+    expect(await s.redeemOwnerCode("code-B", "dev-B")).toBe("refused"); // active member
+    expect(await s.deviceRole("dev-B")).toBe("member");
+    expect(await s.redeemOwnerCode("code-B", "dev-A")).toBe("refused"); // active owner
+    // Neither refusal used the code: a fresh key still redeems it.
+    expect(await s.redeemOwnerCode("code-B", "dev-C")).toBe("recovery");
+    expect(await s.deviceRole("dev-C")).toBe("owner");
+  });
+
+  it("invalidateOwnerCodes drops every unused code and leaves enrolled owners alone", async () => {
+    const { s, issue } = await withOwner();
+    await issue("code-B");
+    await issue("code-C");
+    await s.invalidateOwnerCodes();
+    expect(await s.redeemOwnerCode("code-B", "dev-B")).toBe("refused");
+    expect(await s.redeemOwnerCode("code-C", "dev-C")).toBe("refused");
+    expect(await s.deviceRole("dev-A")).toBe("owner");
+    await issue("code-D"); // the operator reissues
+    expect(await s.redeemOwnerCode("code-D", "dev-D")).toBe("recovery");
+  });
+
   it("a revoked device is refused at completePairing even if its request landed first", async () => {
     const { s, issue } = await withOwner();
     await issue("code-B");

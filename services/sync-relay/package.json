@@ -24,6 +24,14 @@
     "./testing": {
       "types": "./dist/testing.d.ts",
       "import": "./dist/testing.js"
+    },
+    "./admin": {
+      "types": "./dist/admin.d.ts",
+      "import": "./dist/admin.js"
+    },
+    "./owner-code": {
+      "types": "./dist/owner-code.d.ts",
+      "import": "./dist/owner-code.js"
     }
   },
   "scripts": {

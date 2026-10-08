@@ -25,6 +25,28 @@ and a minimal exposed surface. This is a **build requirement**, and the public
 posture is gated on the FERPA/security review blessing it. TLS protects
 transport; D1 protects the data itself.
 
+## Sync-relay public surface (device-enrollment spec §5.7)
+
+The relay answers exactly these routes; every other path is the identical 404.
+Control routes live under `/sync/` with two or more path segments, so they
+never match `/sync/:docId`, and carry identifiers only in signed JSON bodies.
+
+| Route | Since | Notes |
+|---|---|---|
+| `GET /health` | M2 | liveness |
+| `GET /sync/:docId`, `POST /sync/:docId` | M2 | signed; per-scope ACL; unknown and unauthorized docs are the identical 404 |
+| `POST /sync/enroll/redeem` | EU-2 (TEACH-58) | signed with `x-ta-scope: control`; body exactly `{code}`; every failure is the identical 401; lockout per trusted client IP and global (5 failures / 15 min → 15 min); more than 20 failures in 24 h invalidate every unused owner code |
+
+**Admin plane (never public, never proxied):** the operator CLI issues owner
+codes. It runs only by exec into the running relay container, on a terminal:
+
+    docker exec -it <relay container> node dist/admin.js issue-owner-code
+
+It refuses when stdout is not a TTY or is the container's own log, so it can
+never run as a compose one-shot service or container command (its output would
+land in `docker logs`). It prints the code once to that terminal and stores only
+its SHA-256 (24 h expiry, single use). Neither the code nor its hash is logged.
+
 ## FERPA build conditions (M14)
 
 Enforced mechanically by the FERPA-guard suite (`tools/ferpa-guard`, its own

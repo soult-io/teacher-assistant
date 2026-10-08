@@ -29,11 +29,14 @@ import {
   keepLogFields,
   handleError,
   LOG_LEVEL,
+  OWNER_CODES_INVALIDATED,
   SERIALIZERS,
   sendError,
 } from "./logging.js";
+import { ownerCodeHash } from "./owner-code.js";
+import { type RedeemAttempt, RedeemGuard } from "./redeem-guard.js";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
-import { parseCursor, type RelayStore } from "./store.js";
+import { parseCursor, type RedeemResult, type RelayStore } from "./store.js";
 
 /** Requests older/newer than this (clock skew + transit) are rejected (replay window). */
 const TIMESTAMP_WINDOW_MS = 300_000;
@@ -94,6 +97,9 @@ const MAX_ID_LENGTH = 256;
 
 /** Scope tag reserved for the enrollment control plane; never valid on /sync/:docId. */
 const RESERVED_CONTROL_SCOPE = "control";
+
+/** Control routes have two or more path segments, so they never match /sync/:docId (spec DN-5). */
+const REDEEM_ROUTE = "/sync/enroll/redeem";
 
 /** Ciphertext travels as base64 (standard or URL-safe alphabet). */
 const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
@@ -157,6 +163,31 @@ function parsePushUpdates(rawBody: Uint8Array): readonly string[] | null {
   return updates as string[];
 }
 
+/**
+ * The redeem body's code, or null unless the body is exactly `{code: string}`
+ * (spec §5.3: strict bodies, an unknown field is 400).
+ */
+function parseRedeemBody(rawBody: Uint8Array): string | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(rawBody));
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null;
+  }
+  const keys = Object.keys(parsed);
+  const code: unknown = (parsed as { code?: unknown }).code;
+  return keys.length === 1 && keys[0] === "code" && typeof code === "string" ? code : null;
+}
+
+/** POST /sync/enroll/redeem success body (spec §5.3). */
+interface RedeemResponse {
+  readonly mode: "first" | "recovery";
+  readonly recovery_wrap: string | null;
+}
+
 function rawBodyOf(req: FastifyRequest): Uint8Array {
   const body = req.body;
   return body instanceof Uint8Array ? body : new Uint8Array(0);
@@ -170,6 +201,8 @@ export interface BuildAppOptions {
    * (config.ts loadTrustProxy). Omitted: no proxy is trusted. Never trust-all.
    */
   readonly trustProxy?: readonly string[];
+  /** Clock (ms) for the redeem lockout; tests inject one. */
+  readonly now?: () => number;
 }
 
 function trustProxyOption(list: readonly string[] | undefined): string[] | false {
@@ -207,6 +240,7 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     failRequest(req, reply, 404, "not_found", undefined, "request rejected");
   });
   const nonces = new NonceCache();
+  const redeemGuard = new RedeemGuard(options.now);
 
   // Per-IP rate limiting (H-PUB-5) — app-level defence in depth in front of the
   // authorizing /sync routes, additional to the NPM/WAF layer. Keyed on req.ip,
@@ -284,6 +318,44 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     return verified;
   }
 
+  /**
+   * One redeem attempt, before any reply: a malformed body, a refusal (bad
+   * signature, a non-control scope, or a code the store refuses), or the mode.
+   * Expired codes are swept first (spec §5.1: at the start of every control route).
+   */
+  async function attemptRedeem(
+    req: FastifyRequest,
+    rawBody: Uint8Array,
+  ): Promise<RedeemResult | "bad_request"> {
+    const verified = verifyRequest(req, rawBody, nonces);
+    if (verified === null || verified.scope !== RESERVED_CONTROL_SCOPE) {
+      return "refused";
+    }
+    const code = parseRedeemBody(rawBody);
+    if (code === null) {
+      return "bad_request";
+    }
+    await store.sweepExpired();
+    const hash = ownerCodeHash(code);
+    return hash === undefined
+      ? "refused"
+      : store.redeemOwnerCode(hash, verified.devicePublicKeyB64);
+  }
+
+  /** Count a refused redeem; past the global limit, invalidate every unused code (spec §5.5). */
+  async function countRedeemFailure(req: FastifyRequest, attempt: RedeemAttempt): Promise<void> {
+    if (attempt.fail()) {
+      await store.invalidateOwnerCodes(); // a throw leaves the count over the limit: the next failure retries
+      redeemGuard.burned();
+      req.log.warn({ route: REDEEM_ROUTE }, OWNER_CODES_INVALIDATED);
+    }
+  }
+
+  async function redeemResponse(mode: "first" | "recovery"): Promise<RedeemResponse> {
+    const wrap = mode === "recovery" ? await store.getRecoveryWrap() : undefined;
+    return { mode, recovery_wrap: wrap ?? null };
+  }
+
   // Routes live in a plugin registered AFTER the rate limiter: @fastify/rate-limit
   // attaches through an onRoute hook that exists only once it has loaded, so a
   // route added directly on `app` here would never be limited (TEACH-55 found
@@ -306,6 +378,38 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
         return reply.send(payload);
       } catch (err) {
         return storeUnavailable(req, reply, err);
+      }
+    });
+
+    // Redeem an operator owner code (device-enrollment spec §5.3, F1/F5). The
+    // signer becomes an owner. Every failure — bad signature, a non-control
+    // scope, a wrong, used, expired or malformed code, a key the relay already
+    // knows (revoked, member or owner) — is the identical 401 and counts toward
+    // the lockout. A locked-out IP (or the global key) gets 429 before the code
+    // is looked at. Neither the code nor its hash is ever logged (§5.6).
+    routes.post(REDEEM_ROUTE, async (req, reply) => {
+      const attempt = redeemGuard.begin(req.ip);
+      if (attempt === undefined) {
+        failRequest(req, reply, 429, "rate_limited", undefined, "request rejected");
+        return reply;
+      }
+      try {
+        const outcome = await attemptRedeem(req, rawBodyOf(req));
+        if (outcome === "bad_request") {
+          sendError(reply, 400, "bad_request");
+          return reply;
+        }
+        if (outcome === "refused") {
+          await countRedeemFailure(req, attempt);
+          sendError(reply, 401, "unauthorized");
+          return reply;
+        }
+        attempt.succeed();
+        return reply.send(await redeemResponse(outcome));
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
+      } finally {
+        attempt.release();
       }
     });
 

@@ -209,6 +209,11 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
       { method: "GET" as const, url: "/health", template: "/health" },
       { method: "GET" as const, url: `/sync/${DOC}?since=${QUERY}`, template: "/sync/:docId" },
       { method: "POST" as const, url: `/sync/${DOC}?x=${QUERY}`, template: "/sync/:docId" },
+      {
+        method: "POST" as const,
+        url: `/sync/enroll/redeem?x=${QUERY}`,
+        template: "/sync/enroll/redeem",
+      },
     ];
     for (const r of routes) {
       const { lines, logStream } = captureLogs();
@@ -271,6 +276,17 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
           url: `/sync/${DOC}`,
           headers: { "content-type": "application/json" },
           payload: Buffer.from("{}"),
+        },
+        status: 401,
+        error: "unauthorized",
+      },
+      // 401 — unsigned owner-code redeem (TEACH-58)
+      {
+        req: {
+          method: "POST" as const,
+          url: "/sync/enroll/redeem",
+          headers: { "content-type": "application/json" },
+          payload: Buffer.from('{"code":"BODYSENTINEL"}'),
         },
         status: 401,
         error: "unauthorized",

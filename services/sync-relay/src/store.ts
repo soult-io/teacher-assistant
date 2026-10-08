@@ -234,9 +234,14 @@ export interface RelayStore {
   /**
    * Single-use: an unused, unexpired code is marked used and the device becomes
    * an active owner. `first` only when there is no active owner and no master
-   * scope. A revoked key is refused and the code is left unused.
+   * scope. Only a FRESH key can redeem (PL ruling 2026-10-05): a key the relay
+   * already knows — an active member, an active owner, or a revoked device — is
+   * refused and the code is left unused, so a code never changes an existing
+   * device's role (as completePairing refuses a role change).
    */
   redeemOwnerCode(codeSha256: string, devicePublicKeyB64: string): Promise<RedeemResult>;
+  /** Invalidate every unused owner code (the global redeem-failure limit, spec §5.5). */
+  invalidateOwnerCodes(): Promise<void>;
   /** The role of an ACTIVE device; undefined for an unknown or revoked one. */
   deviceRole(devicePublicKeyB64: string): Promise<DeviceRole | undefined>;
   /** Grant an active device scopes, all or nothing, under the scope-kind invariants. */
@@ -426,8 +431,7 @@ export class InMemoryRelayStore implements RelayStore {
     if (code === undefined || code.used || code.expiresAt <= this.#nowMs()) {
       return "refused";
     }
-    const device = this.#devices.get(devicePublicKeyB64);
-    if (device?.status === "revoked") {
+    if (this.#devices.has(devicePublicKeyB64)) {
       return "refused";
     }
     const mode =
@@ -435,6 +439,14 @@ export class InMemoryRelayStore implements RelayStore {
     code.used = true;
     this.#devices.set(devicePublicKeyB64, { role: "owner", status: "active" });
     return mode;
+  }
+
+  async invalidateOwnerCodes(): Promise<void> {
+    for (const [hash, code] of this.#codes) {
+      if (!code.used) {
+        this.#codes.delete(hash);
+      }
+    }
   }
 
   async deviceRole(devicePublicKeyB64: string): Promise<DeviceRole | undefined> {
