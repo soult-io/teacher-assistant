@@ -25,14 +25,17 @@ import type { ParaHandoff, ParaSession, Session } from "../data/session.js";
 import type { SyntheticSeed } from "../data/synthetic-seed.js";
 
 /**
- * Settle a fake write on a LATER macrotask, like the real session (which awaits
- * crypto + IndexedDB before the write's promise resolves). Resolving synchronously
- * let a test assert before the write's re-render landed and still pass most runs —
- * TEACH-63 failed only under CI load. With the write always landing a timer tick
- * later, a test that does not await the write's visible outcome fails EVERY run.
+ * Settle a fake write LATER, like the real session (which awaits crypto + IndexedDB
+ * before the write's promise resolves). Resolving at once let a test assert before
+ * the write's re-render landed and still pass most runs — TEACH-63 failed only under
+ * CI load. The delay outlasts Testing Library's post-findBy flush (a 0 ms timer did
+ * not: the racy tests still passed some runs), so a test that does not wait for the
+ * write's visible outcome fails EVERY run.
  */
+const WRITE_SETTLE_MS = 20;
+
 function settled(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0));
+  return new Promise((resolve) => setTimeout(resolve, WRITE_SETTLE_MS));
 }
 
 /** The fake handoff carries the shared para Yjs doc so the para session opens the same state. */

@@ -96,12 +96,12 @@ describe("DashboardScreen (U2/U3)", () => {
 
   it("the 🕐 toggle writes a bookmark via apply", () => {
     const { apply } = renderDashboard();
-    const flags = screen.getAllByRole("button", { name: "Collected — score later" });
-    const flag = flags[0];
-    if (flag === undefined) {
+    const toggles = screen.getAllByRole("button", { name: "Collected — score later" });
+    const toggle = toggles[0];
+    if (toggle === undefined) {
       throw new Error("expected a score-later button");
     }
-    fireEvent.click(flag);
+    fireEvent.click(toggle);
     expect(apply).toHaveBeenCalledOnce();
   });
 

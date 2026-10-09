@@ -87,12 +87,12 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
   it("tapping an owes row that already has a 🕐 score-later bookmark completes it in place (no duplicate)", async () => {
     await unlock();
-    const flags = screen.getAllByRole("button", { name: "Collected — score later" });
-    const flag = flags[0];
-    if (flag === undefined) {
+    const toggles = screen.getAllByRole("button", { name: "Collected — score later" });
+    const toggle = toggles[0];
+    if (toggle === undefined) {
       throw new Error("expected a score-later button");
     }
-    fireEvent.click(flag); // bookmark AB Two-step equations
+    fireEvent.click(toggle); // bookmark AB Two-step equations
     await expectTextAfterWrite("to-score", "To-score (1)");
 
     // Tap the same row to score it directly → completes the queued point in place.
@@ -131,12 +131,12 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
   it("🕐 score-later bookmarks to the To-Score queue and scoring there clears it", async () => {
     await unlock();
-    const flags = screen.getAllByRole("button", { name: "Collected — score later" });
-    const flag = flags[0];
-    if (flag === undefined) {
+    const toggles = screen.getAllByRole("button", { name: "Collected — score later" });
+    const toggle = toggles[0];
+    if (toggle === undefined) {
       throw new Error("expected a score-later button");
     }
-    fireEvent.click(flag);
+    fireEvent.click(toggle);
 
     // The queue count rises to 1.
     await expectTextAfterWrite("to-score", "To-score (1)");
