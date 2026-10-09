@@ -237,13 +237,17 @@ function trustProxyOption(list: readonly string[] | undefined): string[] | false
 }
 
 /** Who may call a control route: an active owner, or any valid signer (the store then decides). */
-type ControlSigner = "owner" | "any";
+type ControlAccess = "owner" | "any";
 
 interface ControlRouteOptions {
-  readonly signer: ControlSigner;
+  readonly access: ControlAccess;
   /** Per-route Fastify config (the pairing rate limit). */
   readonly config?: typeof PAIRING_RATE_LIMIT;
 }
+
+const OWNER: ControlRouteOptions = { access: "owner" };
+const PAIRING_OWNER: ControlRouteOptions = { access: "owner", config: PAIRING_RATE_LIMIT };
+const PAIRING_ANY: ControlRouteOptions = { access: "any", config: PAIRING_RATE_LIMIT };
 
 /**
  * The startup order (spec §5.1): expired pairing sessions and owner codes are
@@ -409,14 +413,14 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
   async function authorizeControl(
     req: FastifyRequest,
     reply: FastifyReply,
-    signer: ControlSigner,
+    access: ControlAccess,
   ): Promise<{ readonly rawBody: Uint8Array; readonly signer: string } | null> {
     const rawBody = rawBodyOf(req);
     const verified = verifyRequest(req, rawBody, nonces);
     if (
       verified === null ||
       verified.scope !== RESERVED_CONTROL_SCOPE ||
-      (signer === "owner" && (await store.deviceRole(verified.devicePublicKeyB64)) !== "owner")
+      (access === "owner" && (await store.deviceRole(verified.devicePublicKeyB64)) !== "owner")
     ) {
       notFound(reply);
       return null;
@@ -458,7 +462,7 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
       route.config === undefined ? {} : { config: route.config },
       async (req, reply) => {
         try {
-          const control = await authorizeControl(req, reply, route.signer);
+          const control = await authorizeControl(req, reply, route.access);
           if (control === null) {
             return reply;
           }
@@ -474,10 +478,6 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
       },
     );
   }
-
-  const OWNER: ControlRouteOptions = { signer: "owner" };
-  const PAIRING_OWNER: ControlRouteOptions = { signer: "owner", config: PAIRING_RATE_LIMIT };
-  const PAIRING_ANY: ControlRouteOptions = { signer: "any", config: PAIRING_RATE_LIMIT };
 
   /** A pairing read: the blob, or the identical 404 when the store has none for this signer. */
   function sendBlob(reply: FastifyReply, blob: string | undefined): FastifyReply {
@@ -542,7 +542,7 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     });
 
     // Owner control routes (spec §5.3, F4/F5). Every refusal before the body is
-    // read is the identical 404 (authorizeOwner); revoked is permanent, so a
+    // read is the identical 404 (authorizeControl); revoked is permanent, so a
     // grant replayed after a revoke — even on a restarted relay with an empty
     // nonce cache — is refused by the store (spec §5.4).
     controlRoute(routes, OWNER_ROUTES.list, OWNER, parseListBody, async (_b, _s, _req, reply) =>
@@ -581,8 +581,7 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
           return conflict(req, reply, "master_scope");
         }
         if (result === "not_found") {
-          notFound(reply);
-          return reply;
+          return notFound(reply);
         }
         return reply.send({});
       },
