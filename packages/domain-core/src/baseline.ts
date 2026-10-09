@@ -40,11 +40,6 @@ function median(values: readonly number[]): number {
     : (sorted[mid] ?? 0);
 }
 
-/**
- * Whether a baseline point counts toward the estimate (TEACH-46 C4/C8): not
- * removed, and not a mismatched total the teacher has yet to keep. A point
- * stored before TEACH-46 has no status and counts as recorded.
- */
 /** A mismatched total still waiting for "Keep" or "Use N" (C8). */
 export function needsTotalDecision(point: BaselinePoint): boolean {
   return (
@@ -54,6 +49,11 @@ export function needsTotalDecision(point: BaselinePoint): boolean {
   );
 }
 
+/**
+ * Whether a baseline point counts toward the estimate (TEACH-46 C4/C8): not
+ * removed, and not a mismatched total the teacher has yet to keep. A point
+ * stored before TEACH-46 has no status and counts as recorded.
+ */
 export function isCountedBaselinePoint(p: BaselinePoint): boolean {
   return p.status !== "removed" && !needsTotalDecision(p);
 }
