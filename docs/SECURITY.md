@@ -36,6 +36,21 @@ never match `/sync/:docId`, and carry identifiers only in signed JSON bodies.
 | `GET /health` | M2 | liveness |
 | `GET /sync/:docId`, `POST /sync/:docId` | M2 | signed; per-scope ACL; unknown and unauthorized docs are the identical 404 |
 | `POST /sync/enroll/redeem` | EU-2 (TEACH-58) | signed with `x-ta-scope: control`; body exactly `{code}`; every failure is the identical 401; lockout per trusted client IP and global (5 failures / 15 min → 15 min); more than 20 failures in 24 h invalidate every unused owner code |
+| `POST /sync/devices/list` | EU-3 (TEACH-59) | active owner only; body exactly `{}`; returns every device key, role, status and its scope tags, kinds and retired flags (no labels) |
+| `POST /sync/devices/grant` | EU-3 (TEACH-59) | active owner only; body exactly `{device, scopes: [{tag, kind}]}` (1–16 scopes); a scope-kind invariant or a revoked/unknown device is 409 `conflict` |
+| `POST /sync/devices/revoke` | EU-3 (TEACH-59) | active owner only; body exactly `{device}`; permanent and idempotent; the last active owner is 409 `last_owner` |
+| `POST /sync/devices/retire-scope` | EU-3 (TEACH-59) | active owner only; body exactly `{tag}`; the scope becomes read-only; the master scope is 409 `master_scope`; an unknown tag is the identical 404 |
+| `POST /sync/devices/recovery-wrap` | EU-3 (TEACH-59) | active owner only; body exactly `{blob}` (base64 alphabet plus `.`); over 4 KiB is 413 |
+
+Every owner route is signed with `x-ta-scope: control`. A bad or missing
+signature, another scope, an unknown key, a member and a revoked device all get
+the identical 404, before the body is read (only the framework's content-type
+and 1 MiB size checks, 415/413, come earlier, as on every route). Every body is strict: an unknown
+field (a label, a name) is 400, and a scope tag must be a UUID (what
+`newScopeTag()` mints), so a label-shaped value is 400 too. Expired pairing sessions and owner codes are
+swept at the start of every control route. Revocation is permanent, so a signed
+grant replayed after a revoke — even on a restarted relay with an empty nonce
+cache — is refused.
 
 **Admin plane (never public, never proxied):** the operator CLI issues owner
 codes. It runs only by exec into the running relay container, on a terminal:
