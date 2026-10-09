@@ -483,7 +483,6 @@ function ReadyApp({
       onAckMastery: (candidate) => void apply(acknowledgeMasteryMutator(candidate)),
       baselinePoints: records.baselinePoints,
       onFixBaselinePoint: (point, fix) => fixBaseline(g, point, fix),
-      onKeepBaselineTotal: (point) => keepBaseline(g, point),
     }),
     [
       records.goals,
@@ -496,7 +495,6 @@ function ReadyApp({
       saveGoalLabel,
       records.baselinePoints,
       fixBaseline,
-      keepBaseline,
     ],
   );
 

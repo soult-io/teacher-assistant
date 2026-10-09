@@ -255,7 +255,7 @@ describe("E4 — Remove: closed reasons, point kept, excluded, shown in History"
       {
         who: "teacher",
         when: T.when,
-        old: { status: "recorded" },
+        old: { status: "recorded", numerator: 0, denominator_used: 10 },
         new: { status: "removed", removed_reason: reason },
       },
     ]);
@@ -396,8 +396,8 @@ describe("post-adoption flag — only a changed value on an adopted point", () =
     if (first === undefined) throw new Error("seed");
     const moved = fixBaselinePoint(first, adopted, { admin_date: iso("2026-08-11") }, T);
     expect(moved.corrected_after_adoption).toBeUndefined();
-    const adoptedIds = (adopted.revisions.at(-1)?.new as { baseline_point_ids: string[] })
-      .baseline_point_ids;
+    const adoption = adopted.revisions.at(-1)?.new as { baseline_point_ids: string[] } | undefined;
+    const adoptedIds = adoption?.baseline_point_ids ?? [];
     expect(adoptedIds).not.toContain(late.baseline_point_id);
     expect(fixBaselinePoint(late, adopted, { numerator: 1 }, T).corrected_after_adoption).toBe(
       undefined,

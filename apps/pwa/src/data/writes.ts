@@ -42,6 +42,7 @@ import type { DocMutator } from "./session.js";
 import {
   deletePoint,
   readBaselinePoint,
+  readGoal,
   upsertBaselinePoint,
   upsertGoal,
   upsertObservation,
@@ -182,17 +183,20 @@ export function addBaselinePointMutator(point: BaselinePoint): DocMutator {
  * no longer allows (e.g. the point was removed on another device) is a no-op.
  */
 function editBaselinePoint(
-  pointId: OpaqueId,
-  edit: (current: BaselinePoint) => BaselinePoint,
+  point: BaselinePoint,
+  goal: IEPGoal,
+  edit: (current: BaselinePoint, currentGoal: IEPGoal) => BaselinePoint,
 ): DocMutator {
   return (doc) => {
-    const current = readBaselinePoint(doc, pointId);
+    const current = readBaselinePoint(doc, point.baseline_point_id);
+    // The goal too: it may have been adopted (another device) since the dialog opened.
+    const currentGoal = readGoal(doc, goal.goal_id) ?? goal;
     if (current === undefined) {
       return;
     }
     let next: BaselinePoint;
     try {
-      next = edit(current);
+      next = edit(current, currentGoal);
     } catch (error) {
       if (error instanceof BaselineEditError) {
         return;
@@ -211,8 +215,8 @@ export function fixBaselinePointMutator(
   fix: BaselineFix,
   when: Timestamp,
 ): DocMutator {
-  return editBaselinePoint(point.baseline_point_id, (current) =>
-    fixBaselinePoint(current, goal, fix, { who: TEACHER, when }),
+  return editBaselinePoint(point, goal, (current, currentGoal) =>
+    fixBaselinePoint(current, currentGoal, fix, { who: TEACHER, when }),
   );
 }
 
@@ -222,8 +226,8 @@ export function removeBaselinePointMutator(
   reason: BaselineRemoveReason,
   when: Timestamp,
 ): DocMutator {
-  return editBaselinePoint(point.baseline_point_id, (current) =>
-    removeBaselinePoint(current, goal, reason, { who: TEACHER, when }),
+  return editBaselinePoint(point, goal, (current, currentGoal) =>
+    removeBaselinePoint(current, currentGoal, reason, { who: TEACHER, when }),
   );
 }
 
@@ -233,8 +237,8 @@ export function keepBaselineTotalMutator(
   goal: IEPGoal,
   when: Timestamp,
 ): DocMutator {
-  return editBaselinePoint(point.baseline_point_id, (current) =>
-    keepBaselineTotal(current, goal, { who: TEACHER, when }),
+  return editBaselinePoint(point, goal, (current, currentGoal) =>
+    keepBaselineTotal(current, currentGoal, { who: TEACHER, when }),
   );
 }
 

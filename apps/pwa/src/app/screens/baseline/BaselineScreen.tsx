@@ -350,7 +350,6 @@ function ProposedCard({
       <BaselinePoints
         goal={goal}
         points={points}
-        allowRemove={true}
         onFix={(point, fix) => onFixBaselinePoint(goal, point, fix)}
         onRemove={(point, reason) => onRemoveBaselinePoint(goal, point, reason)}
         onKeep={(point) => onKeepBaselineTotal(goal, point)}

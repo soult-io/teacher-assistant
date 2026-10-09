@@ -128,6 +128,11 @@ function readBaselinePoints(doc: YDoc): BaselinePoint[] {
   );
 }
 
+/** One goal as currently stored (a baseline edit re-reads it: the goal may have been adopted since). */
+export function readGoal(doc: YDoc, goalId: OpaqueId): IEPGoal | undefined {
+  return doc.getMap<IEPGoal>(GOALS).get(goalId);
+}
+
 /** The current state of one baseline point in the doc (edits re-read it inside their transaction). */
 export function readBaselinePoint(doc: YDoc, pointId: OpaqueId): BaselinePoint | undefined {
   const stored = doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).get(pointId);
@@ -240,9 +245,9 @@ export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
   for (const observation of records.observations) {
     observations.set(observation.observation_id, observation);
   }
-  const baselinePoints = doc.getMap<BaselinePoint>(BASELINE_POINTS);
+  // Through upsertBaselinePoint so a removed point also gets its removal marker.
   for (const baselinePoint of records.baselinePoints) {
-    baselinePoints.set(baselinePoint.baseline_point_id, baselinePoint);
+    upsertBaselinePoint(doc, baselinePoint);
   }
   const catalog = doc.getMap<CatalogEntry>(CATALOG);
   for (const entry of records.catalog) {

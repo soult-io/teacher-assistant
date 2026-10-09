@@ -45,8 +45,17 @@ function median(values: readonly number[]): number {
  * removed, and not a mismatched total the teacher has yet to keep. A point
  * stored before TEACH-46 has no status and counts as recorded.
  */
+/** A mismatched total still waiting for "Keep" or "Use N" (C8). */
+export function needsTotalDecision(point: BaselinePoint): boolean {
+  return (
+    point.status !== "removed" &&
+    point.denominator_mismatch === true &&
+    point.mismatch_kept !== true
+  );
+}
+
 export function isCountedBaselinePoint(p: BaselinePoint): boolean {
-  return p.status !== "removed" && !(p.denominator_mismatch === true && p.mismatch_kept !== true);
+  return p.status !== "removed" && !needsTotalDecision(p);
 }
 
 /** The mean or median of the points' % correct (no usability check). Null for no points. */

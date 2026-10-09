@@ -26,12 +26,12 @@ import type {
   MasteryObservation,
   ProgressDataPoint,
   Revision,
-  Timestamp,
 } from "@teacher-assistant/schema";
 import type { ReactNode } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
 import { GoalLabelEditor } from "../../GoalLabelEditor.js";
+import { isoDayOfTs } from "../../../data/date.js";
 import { useIsDesktop } from "../../useIsDesktop.js";
 import { baselinePointsOldestFirst } from "../baseline/baseline-order.js";
 import { BaselinePoints } from "../baseline/BaselinePoints.js";
@@ -68,11 +68,6 @@ function indeterminateHint(statement: AutoStatement): string | null {
   }
 }
 
-/** ISO day for a millisecond audit timestamp (entry / edit time). */
-function isoDay(ts: Timestamp): string {
-  return new Date(Number(ts)).toISOString().slice(0, 10);
-}
-
 /** Compact who/when/old→new summary for an audited edit (§B audit trail). */
 function describeRevision(rev: Revision): string {
   const keysOf = (o: unknown): string[] =>
@@ -85,7 +80,7 @@ function describeRevision(rev: Revision): string {
   const diff = keys
     .map((k) => `${k}: ${String(oldR[k] ?? "—")}→${String(newR[k] ?? "—")}`)
     .join(", ");
-  return `${rev.who} · ${isoDay(rev.when)} — ${diff}`;
+  return `${rev.who} · ${isoDayOfTs(rev.when)} — ${diff}`;
 }
 
 const VARIANT_BADGE: Readonly<Record<AutoStatement["variant"], string>> = {
@@ -425,7 +420,7 @@ function HistoryTable({
                       </span>
                     ) : null}
                   </td>
-                  <td>{isoDay(p.entry_ts)}</td>
+                  <td>{isoDayOfTs(p.entry_ts)}</td>
                   <td>
                     {ct}
                     {p.denominator_original !== undefined && p.denominator_mismatch === true ? (
@@ -509,7 +504,6 @@ export interface GoalDetailScreenProps {
    */
   readonly baselinePoints?: readonly BaselinePoint[];
   readonly onFixBaselinePoint?: (point: BaselinePoint, fix: BaselineFix) => void;
-  readonly onKeepBaselineTotal?: (point: BaselinePoint) => void;
 }
 
 /** TEACH-46 — an adopted goal's baseline points: Fix only, History, the after-ARC note. */
@@ -517,26 +511,18 @@ function BaselinePointsCard({
   goal,
   points,
   onFix,
-  onKeep,
 }: {
   readonly goal: IEPGoal;
   readonly points: readonly BaselinePoint[];
   readonly onFix: (point: BaselinePoint, fix: BaselineFix) => void;
-  readonly onKeep: (point: BaselinePoint) => void;
 }) {
   return (
     <div className="card" data-testid="detail-baseline-points">
       <div className="cardhead">
         <b>Baseline points</b>
       </div>
-      <BaselinePoints
-        goal={goal}
-        points={points}
-        allowRemove={false}
-        onFix={onFix}
-        onRemove={() => undefined}
-        onKeep={onKeep}
-      />
+      {/* Fix only: no Remove and no Keep after adoption (ruling B). */}
+      <BaselinePoints goal={goal} points={points} onFix={onFix} />
     </div>
   );
 }
@@ -657,7 +643,6 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
     layout,
     baselinePoints,
     onFixBaselinePoint,
-    onKeepBaselineTotal,
   } = props;
 
   const detail = buildGoalDetail(goal, points);
@@ -699,12 +684,7 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
   );
   const baselineCard =
     ownBaseline.length > 0 && onFixBaselinePoint !== undefined && goal.status !== "proposed" ? (
-      <BaselinePointsCard
-        goal={goal}
-        points={ownBaseline}
-        onFix={onFixBaselinePoint}
-        onKeep={onKeepBaselineTotal ?? (() => undefined)}
-      />
+      <BaselinePointsCard goal={goal} points={ownBaseline} onFix={onFixBaselinePoint} />
     ) : null;
   const history = (
     <>

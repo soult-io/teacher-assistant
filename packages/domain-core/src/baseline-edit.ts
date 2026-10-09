@@ -28,7 +28,7 @@ import {
   type Timestamp,
 } from "@teacher-assistant/schema";
 import { type BaselineMethod, baselineValueOf } from "./baseline.js";
-import { computedRatio } from "./value.js";
+import { computedRatio, isDenominatorMismatch } from "./value.js";
 
 export type BaselineEditBlock =
   | "teacher_only"
@@ -150,7 +150,10 @@ export function createBaselinePoint(input: NewBaselinePointInput): BaselinePoint
     status: "recorded",
     revisions: [],
     ...(expected !== undefined
-      ? { denominator_original: expected, denominator_mismatch: expected !== input.denominator }
+      ? {
+          denominator_original: expected,
+          denominator_mismatch: isDenominatorMismatch(expected, input.denominator),
+        }
       : {}),
   };
 }
@@ -214,7 +217,7 @@ export function fixBaselinePoint(
   const { mismatch_kept: kept, ...rest } = point;
   const mismatch =
     point.denominator_original !== undefined
-      ? point.denominator_original !== denominator
+      ? isDenominatorMismatch(point.denominator_original, denominator)
       : undefined;
   // A Keep applied to the old total; a changed, still-mismatched total needs a fresh Keep.
   const keepStill = mismatch === true && denominator === point.denominator_used && kept === true;
@@ -259,7 +262,12 @@ export function removeBaselinePoint(
   const revision: Revision = {
     who: options.who,
     when: options.when,
-    old: { status: "recorded" },
+    // The values at removal, so History's "(was a/b)" survives a later merge.
+    old: {
+      status: "recorded",
+      numerator: point.numerator,
+      denominator_used: point.denominator_used,
+    },
     new: { status: "removed", removed_reason: reason },
   };
   return {
@@ -304,15 +312,6 @@ function wasAdoptedFrom(goal: IEPGoal, point: BaselinePoint): boolean {
   return ids === undefined || ids.includes(point.baseline_point_id);
 }
 
-/** A mismatched total still waiting for "Keep" or "Use N" (C8). */
-export function needsTotalDecision(point: BaselinePoint): boolean {
-  return (
-    point.status !== "removed" &&
-    point.denominator_mismatch === true &&
-    point.mismatch_kept !== true
-  );
-}
-
 /** One History row (ruling D): a fix or a removal, with the values before and after. */
 export type BaselineHistoryEntry =
   | {
@@ -350,8 +349,14 @@ export function baselineHistory(point: BaselinePoint): BaselineHistoryEntry[] {
     }
     const reason = fieldOf(rev.new, "removed_reason");
     if (isBaselineRemoveReason(reason)) {
+      // An older removal Revision may lack the values; fall back to the point's.
       return [
-        { kind: "removed", when: rev.when, reason, was: [point.numerator, point.denominator_used] },
+        {
+          kind: "removed",
+          when: rev.when,
+          reason,
+          was: was ?? [point.numerator, point.denominator_used],
+        },
       ];
     }
     return [];

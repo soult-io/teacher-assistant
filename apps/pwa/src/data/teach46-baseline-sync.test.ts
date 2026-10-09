@@ -157,6 +157,19 @@ describe("E13 — offline Fix and Remove sync without overwriting or duplicating
     expect(after?.revisions).toHaveLength(1);
   });
 
+  it("a Remove built from a pre-adoption copy of the goal is refused once the goal is adopted", () => {
+    const p = point(2);
+    const doc = new Y.Doc();
+    doc.transact(() => {
+      upsertGoal(doc, goal);
+      addBaselinePointMutator(p)(doc);
+    });
+    doc.transact(() => upsertGoal(doc, { ...goal, status: "active", baseline_value: 20 }));
+    // `goal` is the stale proposed copy an open Remove dialog would hold.
+    doc.transact(() => removeBaselinePointMutator(p, goal, "duplicate", asTimestamp(10))(doc));
+    expect(byId(doc).get(p.baseline_point_id)?.status).toBe("recorded");
+  });
+
   it("a fix after adoption writes only the point; the goal record is untouched", () => {
     const p = point(2);
     const adopted: IEPGoal = { ...goal, status: "active", baseline_value: 20 };

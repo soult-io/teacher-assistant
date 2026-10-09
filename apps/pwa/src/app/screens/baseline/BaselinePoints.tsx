@@ -13,6 +13,7 @@ import {
   checkBaselineScore,
   needsTotalDecision,
   parseBaselineCount,
+  percentCorrect,
 } from "@teacher-assistant/domain-core";
 import {
   BASELINE_REMOVE_REASONS,
@@ -20,19 +21,13 @@ import {
   type BaselineRemoveReason,
   type IEPGoal,
   type IsoDate,
-  type Timestamp,
 } from "@teacher-assistant/schema";
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { useId, useState } from "react";
+import { isoDayOfTs } from "../../../data/date.js";
+import { Sheet } from "../../Sheet.js";
 
 /** The ruling's option labels for the closed remove-reason list (C2). */
-export const REMOVE_REASON_LABELS: Readonly<Record<BaselineRemoveReason, string>> = {
+const REMOVE_REASON_LABELS: Readonly<Record<BaselineRemoveReason, string>> = {
   entered_by_mistake: "Entered by mistake",
   duplicate: "Duplicate entry",
   wrong_student_or_goal: "Wrong student or goal",
@@ -61,83 +56,6 @@ export function useScoreDraft(initialCorrect: string, initialTotal: string) {
     total,
     problem: checkBaselineScore(numerator, total),
   };
-}
-
-const isoDay = (ts: Timestamp): string => new Date(ts).toISOString().slice(0, 10);
-const pct = (n: number, d: number): number => Math.round((n / d) * 100);
-
-const FOCUSABLE = "button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex='-1'])";
-
-/**
- * A bottom sheet / modal with Escape + backdrop dismissal (the QuickScoreSheet
- * pattern). Focus moves to the first field on open, Tab stays inside the sheet,
- * and focus returns to the button that opened it on close.
- */
-function Sheet({
-  title,
-  onClose,
-  children,
-}: {
-  readonly title: string;
-  readonly onClose: () => void;
-  readonly children: ReactNode;
-}) {
-  const titleId = useId();
-  const sheetRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    globalThis.addEventListener?.("keydown", onKey);
-    return () => globalThis.removeEventListener?.("keydown", onKey);
-  }, [onClose]);
-  useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const fields = sheetRef.current?.querySelectorAll<HTMLElement>("input, [role='radio']");
-    fields?.[0]?.focus();
-    return () => opener?.focus();
-  }, []);
-  const trapTab = (e: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (e.key !== "Tab" || sheetRef.current === null) {
-      return;
-    }
-    const items = [...sheetRef.current.querySelectorAll<HTMLElement>(FOCUSABLE)];
-    const first = items[0];
-    const last = items.at(-1);
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last?.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first?.focus();
-    }
-  };
-  return (
-    <>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: decorative backdrop; Escape (above) is the keyboard control */}
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: decorative backdrop; Escape (above) is the keyboard control */}
-      <div className="scrim open" onClick={onClose} />
-      <div
-        ref={sheetRef}
-        className="sheet open"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby={titleId}
-        onKeyDown={trapTab}
-      >
-        <div className="grip" />
-        <button type="button" className="modal-close" aria-label="close" onClick={onClose}>
-          ✕
-        </button>
-        <h2 className="sheettitle" id={titleId}>
-          {title}
-        </h2>
-        {children}
-      </div>
-    </>
-  );
 }
 
 function FixDialog({
@@ -271,22 +189,22 @@ function TotalDecision({
   readonly onKeep: () => void;
   readonly onUseProbeTotal: () => void;
 }) {
-  const n = point.denominator_original;
-  const m = point.denominator_used;
-  if (n === undefined) {
+  const probeTotal = point.denominator_original;
+  const typedTotal = point.denominator_used;
+  if (probeTotal === undefined) {
     return null;
   }
   return (
     <div className="note warn bdecide" data-testid="total-mismatch">
-      This goal's probe has {n} items. Keep {m}?
+      This goal's probe has {probeTotal} items. Keep {typedTotal}?
       <span className="bdecidebtns">
         <button type="button" className="btn small" onClick={onKeep}>
-          Keep {m}
+          Keep {typedTotal}
         </button>
         {/* Using N is a Fix; it is offered only when the number correct still fits. */}
-        {point.numerator <= n ? (
+        {point.numerator <= probeTotal ? (
           <button type="button" className="btn small" onClick={onUseProbeTotal}>
-            Use {n}
+            Use {probeTotal}
           </button>
         ) : null}
       </span>
@@ -295,7 +213,7 @@ function TotalDecision({
 }
 
 function historyText(entry: BaselineHistoryEntry): string {
-  const date = isoDay(entry.when);
+  const date = isoDayOfTs(entry.when);
   const [a, b] = entry.was;
   if (entry.kind === "fixed") {
     const [c, d] = entry.now;
@@ -325,7 +243,7 @@ function BaselineHistory({ points }: { readonly points: readonly BaselinePoint[]
 }
 
 /** Ruling B: the IEP baseline stays; show what the estimate would now be. */
-export function FixedAfterArcNote({
+function FixedAfterArcNote({
   goal,
   points,
 }: {
@@ -344,22 +262,22 @@ export function FixedAfterArcNote({
   );
 }
 
-export interface BaselinePointsProps {
+interface BaselinePointsProps {
   readonly goal: IEPGoal;
   /** This goal's baseline points, oldest first (removed ones included — they go to History). */
   readonly points: readonly BaselinePoint[];
-  /** Remove is offered on a proposed goal only; after adoption a point may only be fixed. */
-  readonly allowRemove: boolean;
   readonly onFix: (point: BaselinePoint, fix: BaselineFix) => void;
-  readonly onRemove: (point: BaselinePoint, reason: BaselineRemoveReason) => void;
-  readonly onKeep: (point: BaselinePoint) => void;
+  /** Proposed goals only: after adoption a point may be fixed, never removed (no Remove button). */
+  readonly onRemove?: (point: BaselinePoint, reason: BaselineRemoveReason) => void;
+  /** Proposed goals only: C8 counting matters only before adoption (no Keep prompt). */
+  readonly onKeep?: (point: BaselinePoint) => void;
 }
 
 type OpenDialog = { readonly kind: "fix" | "remove"; readonly point: BaselinePoint } | null;
 
 /** The point list with per-point [Fix] / [Remove], the C8 prompt, History and dialogs. */
 export function BaselinePoints(props: BaselinePointsProps) {
-  const { goal, points, allowRemove, onFix, onRemove, onKeep } = props;
+  const { goal, points, onFix, onRemove, onKeep } = props;
   const [open, setOpen] = useState<OpenDialog>(null);
   const live = points.filter((p) => p.status !== "removed");
   const close = () => setOpen(null);
@@ -373,7 +291,9 @@ export function BaselinePoints(props: BaselinePointsProps) {
             return (
               <li key={p.baseline_point_id} className="bpoint" data-testid="baseline-point">
                 <span className="bpointval">
-                  <span className="dchip static">{pct(p.numerator, p.denominator_used)}%</span>
+                  <span className="dchip static">
+                    {Math.round(percentCorrect(p.numerator, p.denominator_used))}%
+                  </span>
                   <span className="bpointraw">
                     {p.numerator}/{p.denominator_used} · {p.admin_date}
                   </span>
@@ -387,7 +307,7 @@ export function BaselinePoints(props: BaselinePointsProps) {
                   >
                     Fix
                   </button>
-                  {allowRemove ? (
+                  {onRemove !== undefined ? (
                     <button
                       type="button"
                       className="editpt"
@@ -399,7 +319,7 @@ export function BaselinePoints(props: BaselinePointsProps) {
                   ) : null}
                 </span>
                 {/* C8 counting only matters before adoption; an adopted goal's value is locked. */}
-                {goal.status === "proposed" && needsTotalDecision(p) ? (
+                {onKeep !== undefined && goal.status === "proposed" && needsTotalDecision(p) ? (
                   <TotalDecision
                     point={p}
                     onKeep={() => onKeep(p)}
@@ -430,7 +350,7 @@ export function BaselinePoints(props: BaselinePointsProps) {
           }}
         />
       ) : null}
-      {open?.kind === "remove" ? (
+      {open?.kind === "remove" && onRemove !== undefined ? (
         <RemoveDialog
           onClose={close}
           onRemove={(reason) => {
