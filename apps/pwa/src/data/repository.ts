@@ -19,6 +19,7 @@ import type {
   IEPGoal,
   MasteryObservation,
   OpaqueId,
+  Revision,
   ProbeDefinition,
   ProgressDataPoint,
   Setting,
@@ -39,6 +40,13 @@ const PERIODS = "periods";
 const PROBES = "probes";
 const OBSERVATIONS = "observations";
 const BASELINE_POINTS = "baseline_points";
+/**
+ * TEACH-46 removal markers, keyed by baseline_point_id. A point record is replaced
+ * whole on every edit (last writer wins across devices), so a Fix made offline on
+ * one device could otherwise overwrite a Remove made offline on another and bring
+ * the point back. The marker makes a removal stick: readRecords re-applies it.
+ */
+const BASELINE_REMOVALS = "baseline_removals";
 const CATALOG = "catalog";
 
 // --- The `{period}/para-visible` doc (D1). A SEPARATE Yjs doc/stream under the
@@ -90,6 +98,47 @@ export function normalizeBaselinePoint(p: StoredBaselinePoint): BaselinePoint {
   return { ...p, status: p.status ?? "recorded", revisions: p.revisions ?? [] };
 }
 
+/** A removal marker: the removal fields plus its audit Revision. */
+interface BaselineRemoval {
+  readonly removed_reason: NonNullable<BaselinePoint["removed_reason"]>;
+  readonly removed_ts: NonNullable<BaselinePoint["removed_ts"]>;
+  readonly removed_by: NonNullable<BaselinePoint["removed_by"]>;
+  readonly revision: Revision;
+}
+
+/** Re-apply a removal a concurrent edit overwrote; the removal Revision is restored with it. */
+function withRemoval(p: BaselinePoint, r: BaselineRemoval | undefined): BaselinePoint {
+  if (r === undefined || p.status === "removed") {
+    return p;
+  }
+  return {
+    ...p,
+    status: "removed",
+    removed_reason: r.removed_reason,
+    removed_ts: r.removed_ts,
+    removed_by: r.removed_by,
+    revisions: [...p.revisions, r.revision],
+  };
+}
+
+function readBaselinePoints(doc: YDoc): BaselinePoint[] {
+  const removals = doc.getMap<BaselineRemoval>(BASELINE_REMOVALS);
+  return [...doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).values()].map((p) =>
+    withRemoval(normalizeBaselinePoint(p), removals.get(p.baseline_point_id)),
+  );
+}
+
+/** The current state of one baseline point in the doc (edits re-read it inside their transaction). */
+export function readBaselinePoint(doc: YDoc, pointId: OpaqueId): BaselinePoint | undefined {
+  const stored = doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).get(pointId);
+  return stored === undefined
+    ? undefined
+    : withRemoval(
+        normalizeBaselinePoint(stored),
+        doc.getMap<BaselineRemoval>(BASELINE_REMOVALS).get(pointId),
+      );
+}
+
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
 export function readRecords(doc: YDoc): DecryptedRecords {
   return {
@@ -99,9 +148,7 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     periods: [...doc.getMap<ClassPeriod>(PERIODS).values()],
     probes: [...doc.getMap<ProbeDefinition>(PROBES).values()],
     observations: [...doc.getMap<MasteryObservation>(OBSERVATIONS).values()],
-    baselinePoints: [...doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).values()].map(
-      normalizeBaselinePoint,
-    ),
+    baselinePoints: readBaselinePoints(doc),
     catalog: [...doc.getMap<CatalogEntry>(CATALOG).values()],
   };
 }
@@ -134,6 +181,23 @@ export function upsertProbe(doc: YDoc, probe: ProbeDefinition): void {
  */
 export function upsertBaselinePoint(doc: YDoc, point: BaselinePoint): void {
   doc.getMap<BaselinePoint>(BASELINE_POINTS).set(point.baseline_point_id, point);
+  const removal = [...point.revisions]
+    .reverse()
+    .find((rev) => (rev.new as { status?: unknown } | null)?.status === "removed");
+  if (
+    point.status === "removed" &&
+    point.removed_reason !== undefined &&
+    point.removed_ts !== undefined &&
+    point.removed_by !== undefined &&
+    removal !== undefined
+  ) {
+    doc.getMap<BaselineRemoval>(BASELINE_REMOVALS).set(point.baseline_point_id, {
+      removed_reason: point.removed_reason,
+      removed_ts: point.removed_ts,
+      removed_by: point.removed_by,
+      revision: removal,
+    });
+  }
 }
 
 /** Record a teacher-acknowledged mastery observation (flag for ARC). Keyed by observation id. */

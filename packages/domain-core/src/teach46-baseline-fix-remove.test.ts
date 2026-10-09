@@ -386,6 +386,39 @@ describe("E7 — a fix after adoption never touches the IEP baseline", () => {
   });
 });
 
+describe("post-adoption flag — only a changed value on an adopted point", () => {
+  it("a date-only fix, or a fix to a point not used at adoption, does not flag", () => {
+    const proposed = makeGoal();
+    const points = threePoints(proposed);
+    const late = add(proposed, 9); // added but never adopted: not in the stored ids
+    const adopted = adoptGoal(proposed, points, { who: "teacher", when: asTimestamp(5) });
+    const [first] = points;
+    if (first === undefined) throw new Error("seed");
+    const moved = fixBaselinePoint(first, adopted, { admin_date: iso("2026-08-11") }, T);
+    expect(moved.corrected_after_adoption).toBeUndefined();
+    const adoptedIds = (adopted.revisions.at(-1)?.new as { baseline_point_ids: string[] })
+      .baseline_point_ids;
+    expect(adoptedIds).not.toContain(late.baseline_point_id);
+    expect(fixBaselinePoint(late, adopted, { numerator: 1 }, T).corrected_after_adoption).toBe(
+      undefined,
+    );
+    expect(fixBaselinePoint(first, adopted, { numerator: 1 }, T).corrected_after_adoption).toBe(
+      true,
+    );
+  });
+
+  it("refuses a malformed admin date", () => {
+    const goal = makeGoal();
+    const p = add(goal, 2);
+    expect(() => fixBaselinePoint(p, goal, { admin_date: iso("next tuesday") }, T)).toThrow(
+      /invalid_date/,
+    );
+    expect(() => fixBaselinePoint(p, goal, { admin_date: iso("2026-13-45") }, T)).toThrow(
+      /invalid_date/,
+    );
+  });
+});
+
 describe("E8 — the adoption Revision records method and point ids (C6)", () => {
   it("stores baseline_method and the ids of the counted points only", () => {
     const goal = makeGoal();

@@ -165,6 +165,20 @@ describe("Fix dialog", () => {
   });
 });
 
+describe("dialog focus", () => {
+  it("moves focus into the dialog and back to the opener on close", () => {
+    renderBaseline();
+    const [opener] = screen.getAllByRole("button", { name: /^remove baseline point/ });
+    (opener as HTMLElement).focus();
+    fireEvent.click(opener as HTMLElement);
+    const dialog = screen.getByRole("dialog", { name: "Remove baseline point" });
+    expect(within(dialog).getAllByRole("radio")[0]).toHaveFocus();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(opener).toHaveFocus();
+  });
+});
+
 describe("E4 — Remove dialog and History", () => {
   it("offers exactly the four ruled reasons and requires one", () => {
     const { onRemoveBaselinePoint } = renderBaseline();

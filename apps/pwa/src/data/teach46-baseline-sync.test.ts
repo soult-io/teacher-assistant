@@ -14,7 +14,7 @@ import {
 import { describe, expect, it } from "vitest";
 import * as Y from "yjs";
 import * as repository from "./repository.js";
-import { normalizeBaselinePoint, readRecords, upsertBaselinePoint } from "./repository.js";
+import { normalizeBaselinePoint, readRecords, upsertGoal } from "./repository.js";
 import * as writes from "./writes.js";
 import {
   addBaselinePointMutator,
@@ -112,6 +112,65 @@ describe("E13 — offline Fix and Remove sync without overwriting or duplicating
     expect(synced?.revisions.map((r) => r.when)).toEqual([10, 11]);
   });
 
+  it("the same point fixed on one device and removed on another stays removed, whichever write wins", () => {
+    for (const fixFirst of [true, false]) {
+      const p = point(2);
+      const a = new Y.Doc();
+      const b = new Y.Doc();
+      a.transact(() => addBaselinePointMutator(p)(a));
+      sync(a, b);
+      const fix = () =>
+        a.transact(() => fixBaselinePointMutator(p, goal, { numerator: 3 }, asTimestamp(10))(a));
+      const remove = () =>
+        b.transact(() => removeBaselinePointMutator(p, goal, "duplicate", asTimestamp(11))(b));
+      if (fixFirst) {
+        fix();
+        remove();
+      } else {
+        remove();
+        fix();
+      }
+      sync(a, b);
+      for (const doc of [a, b]) {
+        const pts = byId(doc);
+        expect(pts.size).toBe(1);
+        const merged = pts.get(p.baseline_point_id);
+        expect(merged?.status).toBe("removed");
+        expect(merged?.removed_reason).toBe("duplicate");
+        expect(
+          merged?.revisions.some((r) => (r.new as { status?: string }).status === "removed"),
+        ).toBe(true);
+      }
+    }
+  });
+
+  it("an edit built from a stale copy re-reads the doc: a fix after a removal is a no-op", () => {
+    const p = point(2);
+    const doc = new Y.Doc();
+    doc.transact(() => addBaselinePointMutator(p)(doc));
+    doc.transact(() => removeBaselinePointMutator(p, goal, "duplicate", asTimestamp(10))(doc));
+    // `p` is the stale pre-removal copy a still-open Fix dialog would hold.
+    doc.transact(() => fixBaselinePointMutator(p, goal, { numerator: 3 }, asTimestamp(11))(doc));
+    const after = byId(doc).get(p.baseline_point_id);
+    expect(after?.status).toBe("removed");
+    expect(after?.numerator).toBe(2);
+    expect(after?.revisions).toHaveLength(1);
+  });
+
+  it("a fix after adoption writes only the point; the goal record is untouched", () => {
+    const p = point(2);
+    const adopted: IEPGoal = { ...goal, status: "active", baseline_value: 20 };
+    const doc = new Y.Doc();
+    doc.transact(() => {
+      upsertGoal(doc, adopted);
+      addBaselinePointMutator(p)(doc);
+    });
+    const before = JSON.stringify(readRecords(doc).goals);
+    doc.transact(() => fixBaselinePointMutator(p, adopted, { numerator: 9 }, asTimestamp(10))(doc));
+    expect(JSON.stringify(readRecords(doc).goals)).toBe(before);
+    expect(byId(doc).get(p.baseline_point_id)?.corrected_after_adoption).toBe(true);
+  });
+
   it("replaying the same update twice does not duplicate a point", () => {
     const p = point(5);
     const a = new Y.Doc();
@@ -149,7 +208,8 @@ describe("legacy baseline points (stored before TEACH-46)", () => {
     const { status: _s, revisions: _r, ...legacy } = point(3);
     expect(normalizeBaselinePoint(legacy)).toMatchObject({ status: "recorded", revisions: [] });
     const doc = new Y.Doc();
-    doc.transact(() => upsertBaselinePoint(doc, legacy as BaselinePoint));
+    // Written the way a pre-TEACH-46 client stored it: no status, no revisions.
+    doc.getMap("baseline_points").set(legacy.baseline_point_id, legacy);
     expect(readRecords(doc).baselinePoints[0]).toMatchObject({
       status: "recorded",
       revisions: [],

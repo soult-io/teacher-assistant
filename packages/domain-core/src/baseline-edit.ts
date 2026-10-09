@@ -34,6 +34,7 @@ export type BaselineEditBlock =
   | "teacher_only"
   | "not_proposed"
   | "invalid_score"
+  | "invalid_date"
   | "invalid_reason"
   | "already_removed"
   | "wrong_goal"
@@ -102,6 +103,13 @@ function assertTeacher(who: string): void {
   }
 }
 
+/** An admin date is a plain YYYY-MM-DD calendar date — the only string a fix may carry. */
+function assertDate(date: string): void {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || Number.isNaN(Date.parse(date))) {
+    throw new BaselineEditError("invalid_date");
+  }
+}
+
 function assertScore(numerator: number, denominator: number): void {
   if (checkBaselineScore(numerator, denominator) !== null) {
     throw new BaselineEditError("invalid_score");
@@ -126,6 +134,7 @@ export function createBaselinePoint(input: NewBaselinePointInput): BaselinePoint
     throw new BaselineEditError("not_proposed");
   }
   assertScore(input.numerator, input.denominator);
+  assertDate(input.adminDate);
   const expected = baselineTotalPrefill(input.goal, input.probe);
   return {
     baseline_point_id: newOpaqueId(),
@@ -166,8 +175,9 @@ function assertEditable(point: BaselinePoint, goal: IEPGoal, who: string): void 
 /**
  * Fix a baseline point (C3): append a Revision and resync computed_value and the
  * mismatch flag. A new total that still differs from the probe's must be kept
- * again. On an adopted goal the goal is untouched; the point is flagged
- * corrected_after_adoption (ruling B). Returns the point unchanged when nothing differs.
+ * again. On an adopted goal the goal is untouched; a changed value on a point that
+ * fed the locked baseline flags it corrected_after_adoption (ruling B). Returns the
+ * point unchanged when nothing differs.
  */
 export function fixBaselinePoint(
   point: BaselinePoint,
@@ -180,8 +190,10 @@ export function fixBaselinePoint(
   const denominator = fix.denominator_used ?? point.denominator_used;
   const adminDate = fix.admin_date ?? point.admin_date;
   assertScore(numerator, denominator);
+  assertDate(adminDate);
   const dateChanged = adminDate !== point.admin_date;
-  if (numerator === point.numerator && denominator === point.denominator_used && !dateChanged) {
+  const valueChanged = numerator !== point.numerator || denominator !== point.denominator_used;
+  if (!valueChanged && !dateChanged) {
     return point;
   }
   // Both numbers on both sides, so History can always say "was a/b, now c/d".
@@ -214,7 +226,7 @@ export function fixBaselinePoint(
     computed_value: computedRatio(numerator, denominator),
     ...(mismatch !== undefined ? { denominator_mismatch: mismatch } : {}),
     ...(keepStill ? { mismatch_kept: true } : {}),
-    ...(goal.status !== "proposed" || point.corrected_after_adoption === true
+    ...(point.corrected_after_adoption === true || (valueChanged && wasAdoptedFrom(goal, point))
       ? { corrected_after_adoption: true }
       : {}),
     revisions: [...point.revisions, revision],
@@ -277,6 +289,19 @@ export function keepBaselineTotal(
     new: { mismatch_kept: true },
   };
   return { ...point, mismatch_kept: true, revisions: [...point.revisions, revision] };
+}
+
+/**
+ * Whether the point fed the goal's locked baseline_value: the goal is past
+ * adoption and the point is one of the adopted ids (C6). An adoption from before
+ * C6 stored no ids, so every point counts as adopted.
+ */
+function wasAdoptedFrom(goal: IEPGoal, point: BaselinePoint): boolean {
+  if (goal.status === "proposed") {
+    return false;
+  }
+  const { ids } = adoptionRecord(goal);
+  return ids === undefined || ids.includes(point.baseline_point_id);
 }
 
 /** A mismatched total still waiting for "Keep" or "Use N" (C8). */
