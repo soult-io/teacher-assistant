@@ -167,6 +167,11 @@ export function boxPublicKeyBytes(): number {
   return s().crypto_box_PUBLICKEYBYTES;
 }
 
+/** Length of a 32-byte key sealed to a box public key (crypto_box_seal output). */
+export function sealedKeyBytes(): number {
+  return s().crypto_box_SEALBYTES + s().crypto_aead_xchacha20poly1305_ietf_KEYBYTES;
+}
+
 /** Ed25519 public-key length (crypto_sign). */
 export function signPublicKeyBytes(): number {
   return s().crypto_sign_PUBLICKEYBYTES;

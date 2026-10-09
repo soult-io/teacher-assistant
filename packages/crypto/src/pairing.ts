@@ -14,9 +14,24 @@
 // the purpose ("request" | "grant") binds its direction, so the relay cannot hand the
 // request blob back as a grant (both are sealed under the same K).
 
+import type { OpaqueId, ScopeTag } from "@teacher-assistant/schema";
 import { decodeCrockford, encodeCrockford, groupFours } from "./crockford.js";
-import { type EnrollmentRequest, parseEnrollmentRequest } from "./enrollment.js";
-import { aeadDecrypt, aeadEncrypt, keyedHash, randomBytes, toHex, utf8 } from "./sodium.js";
+import {
+  type DeviceEnrollmentGrant,
+  type EnrollmentRequest,
+  type ParaEnrollmentGrant,
+  parseEnrollmentRequest,
+} from "./enrollment.js";
+import {
+  aeadDecrypt,
+  aeadEncrypt,
+  fromBase64,
+  keyedHash,
+  randomBytes,
+  sealedKeyBytes,
+  toHex,
+  utf8,
+} from "./sodium.js";
 
 const PAIRING_SECRET_BYTES = 32; // 256 bits
 const SID_BYTES = 16; // 128 bits
@@ -110,6 +125,127 @@ export function openEnrollmentRequest(
   } catch {
     throw new PairingError("malformed request");
   }
+}
+
+// ── Typed grant blobs (spec rev 2.2: EU-4 typed seal/open helpers) ──
+// The grant reaches B only through these: sealed under K for the `grant` direction,
+// tagged with its type so a para device never accepts a teacher grant (or the
+// reverse), and validated on both sides — exactly the three fields, the wrapped key
+// a sealed 32-byte key, the scope tag and doc id lowercase UUIDs (what
+// newScopeTag()/newOpaqueId() mint), so no label or other plaintext can ride along.
+
+type GrantType = "teacher" | "para";
+
+/** Each grant type's fields: the sealed key, then the scope tag, then the doc id. */
+const GRANT_FIELDS = {
+  teacher: ["wrappedMasterKeyB64", "masterScopeTag", "masterDocId"],
+  para: ["wrappedDekB64", "scopeTag", "paraDocId"],
+} as const;
+
+const OPAQUE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
+function isSealedKey(value: unknown): boolean {
+  if (typeof value !== "string") {
+    return false;
+  }
+  try {
+    return fromBase64(value).length === sealedKeyBytes();
+  } catch {
+    return false;
+  }
+}
+
+function isOpaqueId(value: unknown): boolean {
+  return typeof value === "string" && OPAQUE_ID.test(value);
+}
+
+/** `value`'s three fields for `type`, in order. Throws PairingError unless it is exactly a valid grant. */
+function grantFields(value: unknown, type: GrantType): readonly [string, string, string] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new PairingError("malformed grant");
+  }
+  const record = value as Record<string, unknown>;
+  const names = GRANT_FIELDS[type];
+  const own = Object.keys(record);
+  const [wrapped, tag, docId] = names.map((n) => record[n]);
+  if (
+    own.length !== names.length ||
+    !names.every((n) => own.includes(n)) ||
+    !isSealedKey(wrapped) ||
+    !isOpaqueId(tag) ||
+    !isOpaqueId(docId)
+  ) {
+    throw new PairingError("malformed grant");
+  }
+  return [wrapped as string, tag as string, docId as string];
+}
+
+function sealGrant(key: Uint8Array, sid: string, type: GrantType, grant: unknown): Uint8Array {
+  const [wrapped, tag, docId] = grantFields(grant, type);
+  const [wrappedName, tagName, docName] = GRANT_FIELDS[type];
+  const wire = { type, [wrappedName]: wrapped, [tagName]: tag, [docName]: docId };
+  return sealPairing(key, sid, "grant", utf8(JSON.stringify(wire)));
+}
+
+function openGrant(
+  key: Uint8Array,
+  sid: string,
+  type: GrantType,
+  blob: Uint8Array,
+): readonly [string, string, string] {
+  const plaintext = openPairing(key, sid, "grant", blob);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(plaintext));
+  } catch {
+    throw new PairingError("malformed grant");
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new PairingError("malformed grant");
+  }
+  const { type: sealedType, ...fields } = parsed as Record<string, unknown>;
+  if (sealedType !== type) {
+    throw new PairingError("malformed grant");
+  }
+  return grantFields(fields, type);
+}
+
+/** A: seal a validated teacher grant for the grant slot. Throws PairingError if it is malformed. */
+export function sealTeacherGrant(
+  key: Uint8Array,
+  sid: string,
+  grant: DeviceEnrollmentGrant,
+): Uint8Array {
+  return sealGrant(key, sid, "teacher", grant);
+}
+
+/** B: open and validate a teacher grant. Throws PairingError on any failure, a para grant included. */
+export function openTeacherGrant(
+  key: Uint8Array,
+  sid: string,
+  blob: Uint8Array,
+): DeviceEnrollmentGrant {
+  const [wrappedMasterKeyB64, masterScopeTag, masterDocId] = openGrant(key, sid, "teacher", blob);
+  return {
+    wrappedMasterKeyB64,
+    masterScopeTag: masterScopeTag as ScopeTag,
+    masterDocId: masterDocId as OpaqueId,
+  };
+}
+
+/** A: seal a validated para grant for the grant slot. Throws PairingError if it is malformed. */
+export function sealParaGrant(
+  key: Uint8Array,
+  sid: string,
+  grant: ParaEnrollmentGrant,
+): Uint8Array {
+  return sealGrant(key, sid, "para", grant);
+}
+
+/** B (para): open and validate a para grant. Throws PairingError on any failure, a teacher grant included. */
+export function openParaGrant(key: Uint8Array, sid: string, blob: Uint8Array): ParaEnrollmentGrant {
+  const [wrappedDekB64, scopeTag, paraDocId] = openGrant(key, sid, "para", blob);
+  return { wrappedDekB64, scopeTag: scopeTag as ScopeTag, paraDocId: paraDocId as OpaqueId };
 }
 
 /** The typed fallback for S: 52 Crockford characters in groups of four. */

@@ -1,5 +1,5 @@
-// TEACH-59 (EU-3): the owner control routes against the Postgres store
-// (PGlite). The ferpa-guard suite drives every HARD condition on the in-memory
+// TEACH-59 (EU-3) / TEACH-60 (EU-4): the owner control routes and the pairing
+// mailbox against the Postgres store (PGlite). The ferpa-guard suite drives every HARD condition on the in-memory
 // store; this runs the same paths through PostgresRelayStore, including the
 // replayed grant on a restarted relay. Signing uses libsodium directly — never
 // @teacher-assistant/crypto, which the relay must not import.
@@ -11,7 +11,7 @@ import { PGlite } from "@electric-sql/pglite";
 import { canonicalRequest, SYNC_HEADERS } from "@teacher-assistant/schema";
 import _sodium from "libsodium-wrappers-sumo";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildApp } from "./app.js";
+import { buildApp, startApp } from "./app.js";
 import { migrate } from "./migrations.js";
 import { PostgresRelayStore } from "./postgres-store.js";
 import { sodiumReady } from "./sodium-verify.js";
@@ -64,12 +64,12 @@ function signed(kp: Keypair, url: string, body: unknown, scope = "control") {
   };
 }
 
-async function pgStore() {
+async function pgStore(now?: () => Date) {
   const dir = mkdtempSync(join(tmpdir(), "relay-control-"));
   dirs.push(dir);
   const db = await PGlite.create(dir);
   await migrate(db);
-  return { db, store: new PostgresRelayStore(db) };
+  return { db, store: new PostgresRelayStore(db, now === undefined ? {} : { now }) };
 }
 
 describe("TEACH-59 — owner control routes on the Postgres store", () => {
@@ -168,6 +168,142 @@ describe("TEACH-59 — owner control routes on the Postgres store", () => {
     expect(await store.deviceRole(paraKey)).toBeUndefined();
 
     await app.close();
+    await restarted.close();
+    await db.close();
+  });
+});
+
+// The mailbox blobs are opaque to the relay; these stand in for the AEAD blobs
+// (the real-crypto handshake is in tools/ferpa-guard, ferpa-teach60).
+const SID = "5e1d0000000000000000000000000001";
+const REQUEST_BLOB = "cmVxdWVzdA.c2VhbGVk";
+const GRANT_BLOB = "Z3JhbnQ.c2VhbGVk";
+const OPEN = "/sync/enroll/pairing/open";
+const REQUEST_PUT = "/sync/enroll/pairing/request-put";
+const REQUEST_GET = "/sync/enroll/pairing/request-get";
+const GRANT_PUT = "/sync/enroll/pairing/grant-put";
+const GRANT_GET = "/sync/enroll/pairing/grant-get";
+
+/** An owner A holding master M and period P, on a fresh Postgres store. */
+async function ownerDeployment(now?: () => Date) {
+  const { db, store } = await pgStore(now);
+  const app = buildApp(store);
+  const a = _sodium.crypto_sign_keypair();
+  const aKey = b64(a.publicKey);
+  await store.issueOwnerCode("seed", new Date("9999-01-01T00:00:00Z"));
+  expect(await store.redeemOwnerCode("seed", aKey)).toBe("first");
+  expect(
+    await store.grantScopes(aKey, [
+      { tag: M, kind: "master" },
+      { tag: P, kind: "period" },
+    ]),
+  ).toBe("ok");
+  return { db, store, app, a, aKey };
+}
+
+describe("TEACH-60 — the pairing mailbox on the Postgres store", () => {
+  it("E1 teacher handshake: open → request-put → request-get → grant-put → grant-get", async () => {
+    const { db, store, app, a } = await ownerDeployment();
+    const b = _sodium.crypto_sign_keypair();
+    const bKey = b64(b.publicKey);
+
+    expect((await app.inject(signed(a, OPEN, { sid: SID }))).json()).toEqual({});
+    const put = await app.inject(signed(b, REQUEST_PUT, { sid: SID, blob: REQUEST_BLOB }));
+    expect(put.statusCode).toBe(200);
+    // First write wins: a second request, from anyone, is the 404.
+    const late = _sodium.crypto_sign_keypair();
+    expect(
+      (await app.inject(signed(late, REQUEST_PUT, { sid: SID, blob: REQUEST_BLOB }))).statusCode,
+    ).toBe(404);
+
+    const got = await app.inject(signed(a, REQUEST_GET, { sid: SID }));
+    expect(got.json()).toEqual({ blob: REQUEST_BLOB });
+
+    const grant = {
+      sid: SID,
+      device: bKey,
+      role: "teacher",
+      scopes: [
+        { tag: M, kind: "master" },
+        { tag: P, kind: "period" },
+      ],
+      blob: GRANT_BLOB,
+    };
+    // The grantee must be the recorded request signer.
+    const wrong = await app.inject(signed(a, GRANT_PUT, { ...grant, device: b64(late.publicKey) }));
+    expect(wrong.statusCode).toBe(409);
+    expect((await app.inject(signed(a, GRANT_PUT, grant))).statusCode).toBe(200);
+    expect(await store.deviceRole(bKey)).toBe("owner");
+    expect(await store.isAuthorized(bKey, M)).toBe(true);
+
+    // Only B collects the grant, and only once.
+    expect((await app.inject(signed(late, GRANT_GET, { sid: SID }))).statusCode).toBe(404);
+    expect((await app.inject(signed(a, GRANT_GET, { sid: SID }))).statusCode).toBe(404);
+    expect((await app.inject(signed(b, GRANT_GET, { sid: SID }))).json()).toEqual({
+      blob: GRANT_BLOB,
+    });
+    expect((await app.inject(signed(b, GRANT_GET, { sid: SID }))).statusCode).toBe(404);
+    const { rows } = await db.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM sync_relay.pairing",
+    );
+    expect(rows[0]?.n).toBe(0);
+    await app.close();
+    await db.close();
+  });
+
+  it("para: member with period kind only; para + master is 409 and changes nothing", async () => {
+    const { db, store, app, a } = await ownerDeployment();
+    const para = _sodium.crypto_sign_keypair();
+    const paraKey = b64(para.publicKey);
+    await app.inject(signed(a, OPEN, { sid: SID }));
+    await app.inject(signed(para, REQUEST_PUT, { sid: SID, blob: REQUEST_BLOB }));
+    const base = { sid: SID, device: paraKey, role: "para", blob: GRANT_BLOB };
+    for (const scopes of [
+      [{ tag: M, kind: "master" }],
+      [
+        { tag: P, kind: "period" },
+        { tag: M, kind: "master" },
+      ],
+    ]) {
+      const res = await app.inject(signed(a, GRANT_PUT, { ...base, scopes }));
+      expect(res.statusCode).toBe(409);
+      expect((res.json() as { error: string }).error).toBe("conflict");
+    }
+    expect(await store.deviceRole(paraKey)).toBeUndefined();
+    const ok = await app.inject(
+      signed(a, GRANT_PUT, { ...base, scopes: [{ tag: P, kind: "period" }] }),
+    );
+    expect(ok.statusCode).toBe(200);
+    expect(await store.deviceRole(paraKey)).toBe("member");
+    expect(await store.isAuthorized(paraKey, P)).toBe(true);
+    expect(await store.isAuthorized(paraKey, M)).toBe(false);
+    await app.close();
+    await db.close();
+  });
+
+  it("TTL: a session past 10 minutes is the 404; the startup sweep deletes it", async () => {
+    let t = Date.parse("2026-10-09T12:00:00Z");
+    const { db, app, a } = await ownerDeployment(() => new Date(t));
+    const b = _sodium.crypto_sign_keypair();
+    expect((await app.inject(signed(a, OPEN, { sid: SID }))).statusCode).toBe(200);
+    t += 10 * 60_000 + 1;
+    expect(
+      (await app.inject(signed(b, REQUEST_PUT, { sid: SID, blob: REQUEST_BLOB }))).statusCode,
+    ).toBe(404);
+    await app.close();
+
+    // A fresh session, then a relay restart after it expired.
+    const sid2 = "5e1d0000000000000000000000000002";
+    const live = buildApp(new PostgresRelayStore(db, { now: () => new Date(t) }));
+    expect((await live.inject(signed(a, OPEN, { sid: sid2 }))).statusCode).toBe(200);
+    await live.close();
+    t += 11 * 60_000;
+    const count = async () =>
+      (await db.query<{ n: number }>("SELECT count(*)::int AS n FROM sync_relay.pairing")).rows[0]
+        ?.n;
+    expect(await count()).toBeGreaterThan(0);
+    const restarted = await startApp(new PostgresRelayStore(db, { now: () => new Date(t) }));
+    expect(await count()).toBe(0);
     await restarted.close();
     await db.close();
   });
