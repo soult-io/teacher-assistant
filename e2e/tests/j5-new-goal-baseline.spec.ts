@@ -280,14 +280,14 @@ test.describe("J5 — New goal → mandatory baseline", () => {
       async () => {
         await expect(
           card.getByTestId("baseline-not-usable"),
-          "with no points the card asks for more comparable probes, not a usable baseline",
+          "with no points the card asks for 3 points, not a usable baseline",
         ).toBeVisible();
         await addBaselinePoint(card, 3);
         await addBaselinePoint(card, 3);
         await expect(
           card.getByTestId("baseline-not-usable"),
           "at 2 comparable points the baseline is still not usable (needs ≥3)",
-        ).toContainText("more comparable probe");
+        ).toContainText("Need 3 points to estimate a baseline (you have 2).");
         await expect(
           card.getByTestId("baseline-estimate"),
           "no usable estimate is shown before the third comparable point",

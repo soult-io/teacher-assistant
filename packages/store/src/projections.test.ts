@@ -92,6 +92,8 @@ function baselinePoint(goal: IEPGoal, numerator: number): BaselinePoint {
     denominator_used: 10,
     probe_condition_id: newOpaqueId(),
     scorer: "teacher",
+    status: "recorded",
+    revisions: [],
   };
 }
 
@@ -166,6 +168,15 @@ describe("weekly dashboard — states, header, baseline exclusion", () => {
     expect(baseline[0]?.usable).toBe(true); // ≥3 points
     expect(baseline[0]?.estimate).toBeCloseTo(0.4); // mean of 3/10,4/10,5/10
     expect(baseline[0]?.label).toBe("estimate");
+  });
+
+  it("TEACH-46: a removed baseline point is not counted in the segregated view", () => {
+    const [first, ...rest] = baselinePoints;
+    if (first === undefined) throw new Error("seed");
+    const removed = { ...first, status: "removed" as const, removed_reason: "duplicate" as const };
+    const baseline = buildBaselineView(goals, [removed, ...rest]);
+    expect(baseline[0]?.pointCount).toBe(2);
+    expect(baseline[0]?.usable).toBe(false);
   });
 });
 

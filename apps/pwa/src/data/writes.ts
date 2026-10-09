@@ -14,13 +14,19 @@ import {
   type AdoptOptions,
   adoptGoal,
   applyEdit,
+  type BaselineFix,
+  BaselineEditError,
   bookmarkForLater,
   captureScoredPoint,
+  fixBaselinePoint,
+  keepBaselineTotal,
   type MasteryCandidate,
   recordNoData,
+  removeBaselinePoint,
 } from "@teacher-assistant/domain-core";
 import type {
   BaselinePoint,
+  BaselineRemoveReason,
   IEPGoal,
   IsoDate,
   MismatchDisposition,
@@ -35,6 +41,8 @@ import type {
 import type { DocMutator } from "./session.js";
 import {
   deletePoint,
+  readBaselinePoint,
+  readGoal,
   upsertBaselinePoint,
   upsertGoal,
   upsertObservation,
@@ -164,6 +172,74 @@ export function upsertGoalMutator(goal: IEPGoal): DocMutator {
 /** Add a baseline point (M7) to a proposed goal's segregated baseline set. */
 export function addBaselinePointMutator(point: BaselinePoint): DocMutator {
   return (doc) => upsertBaselinePoint(doc, point);
+}
+
+/**
+ * TEACH-46 audited baseline edits. Each re-reads the point from the doc INSIDE the
+ * write (so a sync that landed while a dialog was open is not overwritten from a
+ * stale copy), runs the domain rule (teacher-only, closed remove reasons, no
+ * post-adoption recompute), and upserts the SAME point id with a Revision appended
+ * — offline-first like every other write, never a delete. An edit the current state
+ * no longer allows (e.g. the point was removed on another device) is a no-op.
+ */
+function editBaselinePoint(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  edit: (current: BaselinePoint, currentGoal: IEPGoal) => BaselinePoint,
+): DocMutator {
+  return (doc) => {
+    const current = readBaselinePoint(doc, point.baseline_point_id);
+    // The goal too: it may have been adopted (another device) since the dialog opened.
+    const currentGoal = readGoal(doc, goal.goal_id) ?? goal;
+    if (current === undefined) {
+      return;
+    }
+    let next: BaselinePoint;
+    try {
+      next = edit(current, currentGoal);
+    } catch (error) {
+      if (error instanceof BaselineEditError) {
+        return;
+      }
+      throw error;
+    }
+    if (next !== current) {
+      upsertBaselinePoint(doc, next);
+    }
+  };
+}
+
+export function fixBaselinePointMutator(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  fix: BaselineFix,
+  when: Timestamp,
+): DocMutator {
+  return editBaselinePoint(point, goal, (current, currentGoal) =>
+    fixBaselinePoint(current, currentGoal, fix, { who: TEACHER, when }),
+  );
+}
+
+export function removeBaselinePointMutator(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  reason: BaselineRemoveReason,
+  when: Timestamp,
+): DocMutator {
+  return editBaselinePoint(point, goal, (current, currentGoal) =>
+    removeBaselinePoint(current, currentGoal, reason, { who: TEACHER, when }),
+  );
+}
+
+/** "Keep {M}": the teacher confirms a total that differs from the probe's (C8). */
+export function keepBaselineTotalMutator(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  when: Timestamp,
+): DocMutator {
+  return editBaselinePoint(point, goal, (current, currentGoal) =>
+    keepBaselineTotal(current, currentGoal, { who: TEACHER, when }),
+  );
 }
 
 /**

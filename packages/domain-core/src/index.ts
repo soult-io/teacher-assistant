@@ -35,6 +35,8 @@ export * from "./ic-export.js";
 
 // M7 — baseline / proposed-goal track + ARC/IEP dates (phase1-spec §3).
 export * from "./baseline.js";
+// TEACH-46 — audited baseline point Fix / Remove / Keep (SME ruling 2026-10-09).
+export * from "./baseline-edit.js";
 export * from "./lifecycle.js";
 export * from "./arc-window.js";
 

@@ -6,16 +6,18 @@
 // not the UI (architecture/para-doc-topology.md).
 
 import {
+  type BaselineFix,
   type BaselineMethod,
+  createBaselinePoint,
   duplicateGoalLabels,
   editArcDate,
   setGoalLabel,
 } from "@teacher-assistant/domain-core";
 import {
   type BaselinePoint,
+  type BaselineRemoveReason,
   type IEPGoal,
   type IsoDate,
-  newOpaqueId,
   normalizeInitials,
   type OpaqueId,
   type ProgressDataPoint,
@@ -73,6 +75,9 @@ import {
   addBaselinePointMutator,
   adoptGoalMutator,
   createGoalMutator,
+  fixBaselinePointMutator,
+  keepBaselineTotalMutator,
+  removeBaselinePointMutator,
   upsertGoalMutator,
 } from "./data/writes.js";
 
@@ -323,21 +328,40 @@ function ReadyApp({
   // id as their comparable condition; adoption + arc-date edits go through the engine.
   const addBaselinePoint = useCallback(
     (goal: IEPGoal, numerator: number, denominator: number) => {
-      const point: BaselinePoint = {
-        baseline_point_id: newOpaqueId(),
-        goal_id: goal.goal_id,
-        student_id: goal.student_id,
-        admin_date: today,
-        entry_ts: nowTs(),
+      // TEACH-46: the engine builds the point (proposed-only, teacher-only, whole
+      // numbers, 0 ≤ n ≤ d) and flags a total that differs from the probe's (C8).
+      const point = createBaselinePoint({
+        goal,
+        probe: records.probes.find((p) => p.goal_id === goal.goal_id),
+        adminDate: today,
         numerator,
-        denominator_used: denominator,
-        computed_value: numerator / denominator,
-        probe_condition_id: goal.probe_definition_id ?? goal.goal_id,
-        scorer: "teacher",
-      };
+        denominator,
+        who: "teacher",
+        entryTs: nowTs(),
+      });
       void apply(addBaselinePointMutator(point));
     },
-    [apply, today],
+    [apply, today, records.probes],
+  );
+
+  // TEACH-46 audited baseline edits — each appends a Revision; nothing is deleted.
+  const fixBaseline = useCallback(
+    (goal: IEPGoal, point: BaselinePoint, fix: BaselineFix) => {
+      void apply(fixBaselinePointMutator(point, goal, fix, nowTs()));
+    },
+    [apply],
+  );
+  const removeBaseline = useCallback(
+    (goal: IEPGoal, point: BaselinePoint, reason: BaselineRemoveReason) => {
+      void apply(removeBaselinePointMutator(point, goal, reason, nowTs()));
+    },
+    [apply],
+  );
+  const keepBaseline = useCallback(
+    (goal: IEPGoal, point: BaselinePoint) => {
+      void apply(keepBaselineTotalMutator(point, goal, nowTs()));
+    },
+    [apply],
   );
 
   const adopt = useCallback(
@@ -457,6 +481,8 @@ function ReadyApp({
       onAddPoint: () => setSheetTarget(targetForGoal(g, lk, today)),
       onEditPoint: (point) => setSheetTarget(targetForGoal(g, lk, today, point)),
       onAckMastery: (candidate) => void apply(acknowledgeMasteryMutator(candidate)),
+      baselinePoints: records.baselinePoints,
+      onFixBaselinePoint: (point, fix) => fixBaseline(g, point, fix),
     }),
     [
       records.goals,
@@ -467,6 +493,8 @@ function ReadyApp({
       today,
       apply,
       saveGoalLabel,
+      records.baselinePoints,
+      fixBaseline,
     ],
   );
 
@@ -518,6 +546,9 @@ function ReadyApp({
           onAdopt={adopt}
           onEditArcDate={editArc}
           onSetGoalLabel={saveGoalLabel}
+          onFixBaselinePoint={fixBaseline}
+          onRemoveBaselinePoint={removeBaseline}
+          onKeepBaselineTotal={keepBaseline}
         />
       );
     }

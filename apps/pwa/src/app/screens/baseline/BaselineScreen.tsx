@@ -4,23 +4,37 @@
 // + median-of-3, always an ESTIMATE), canAdopt (the ≥3-comparable-point gate), and
 // computeBaselineWindowStart (arc_date − ~6 instructional weeks). The UI collects +
 // calls — no baseline / adoption / window rules live here.
+//
+// TEACH-46: "# correct" starts EMPTY (a typed 0 is a real score; an untouched box
+// is not), "of N" is prefilled from the probe (never a hardcoded 5), and each point
+// can be fixed or removed through the audited BaselinePoints panel.
 
 import {
   type AdoptionCheck,
   type ArcDateAlert,
+  type BaselineFix,
   type BaselineMethod,
+  baselineTotalPrefill,
   canAdopt,
   computeBaselineWindowStart,
   deriveBaseline,
   goalLabelConflicts,
+  takesBaselineScore,
 } from "@teacher-assistant/domain-core";
-import type { BaselinePoint, IEPGoal, OpaqueId } from "@teacher-assistant/schema";
-import { useState } from "react";
+import type {
+  BaselinePoint,
+  BaselineRemoveReason,
+  IEPGoal,
+  OpaqueId,
+  ProbeDefinition,
+} from "@teacher-assistant/schema";
+import { useId, useState } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
 import { GoalLabelEditor } from "../../GoalLabelEditor.js";
 import type { DecryptedRecords } from "../../../data/repository.js";
 import { baselinePointsOldestFirst, orderProposedGoals } from "./baseline-order.js";
+import { BaselinePoints, SCORE_PROBLEM_TEXT, useScoreDraft } from "./BaselinePoints.js";
 
 export interface BaselineScreenProps {
   readonly records: DecryptedRecords;
@@ -39,43 +53,81 @@ export interface BaselineScreenProps {
   readonly onEditArcDate: (goal: IEPGoal, newArcDate: string) => ArcDateAlert;
   /** Save a changed IEP goal label (undefined = cleared); the caller audits via setGoalLabel. */
   readonly onSetGoalLabel: (goal: IEPGoal, label: string | undefined) => void;
+  /** TEACH-46 audited edits; the caller routes each through the domain-core rule. */
+  readonly onFixBaselinePoint: (goal: IEPGoal, point: BaselinePoint, fix: BaselineFix) => void;
+  readonly onRemoveBaselinePoint: (
+    goal: IEPGoal,
+    point: BaselinePoint,
+    reason: BaselineRemoveReason,
+  ) => void;
+  readonly onKeepBaselineTotal: (goal: IEPGoal, point: BaselinePoint) => void;
 }
 
+/**
+ * "# correct of N" + Add (C7, ruling D). # correct starts empty and the button
+ * stays disabled, with its reason, until a whole number is typed (0 is fine).
+ * N is the probe's total on a fixed-total goal, empty and required otherwise.
+ */
 function AddPointRow({
   goal,
+  probe,
   onAdd,
 }: {
   readonly goal: IEPGoal;
+  readonly probe: ProbeDefinition | undefined;
   readonly onAdd: (goal: IEPGoal, numerator: number, denominator: number) => void;
 }) {
-  const [correct, setCorrect] = useState(0);
-  const [total, setTotal] = useState(5);
+  const prefill = baselineTotalPrefill(goal, probe);
+  const initialTotal = prefill !== undefined ? String(prefill) : "";
+  const draft = useScoreDraft("", initialTotal);
+  const reasonId = useId();
+  const { numerator, total, problem } = draft;
   return (
-    <div className="baddrow">
-      <span className="baddlabel"># correct</span>
-      <input
-        className="numin"
-        inputMode="numeric"
-        aria-label="baseline correct"
-        value={correct}
-        onChange={(e) => setCorrect(Math.max(0, Number.parseInt(e.target.value, 10) || 0))}
-      />
-      <span>of</span>
-      <input
-        className="ofin"
-        inputMode="numeric"
-        aria-label="baseline total"
-        value={total}
-        onChange={(e) => setTotal(Math.max(1, Number.parseInt(e.target.value, 10) || 1))}
-      />
-      <button
-        type="button"
-        className="btn small primary"
-        onClick={() => onAdd(goal, Math.min(correct, total), total)}
-      >
-        + Add baseline point
-      </button>
-    </div>
+    <>
+      <div className="baddrow">
+        <span className="baddlabel"># correct</span>
+        <input
+          className="numin"
+          inputMode="numeric"
+          aria-label="baseline correct"
+          value={draft.correctText}
+          onChange={(e) => draft.setCorrectText(e.target.value)}
+        />
+        <span>of</span>
+        <input
+          className="ofin"
+          inputMode="numeric"
+          aria-label="baseline total"
+          value={draft.totalText}
+          onChange={(e) => draft.setTotalText(e.target.value)}
+        />
+        <button
+          type="button"
+          className="btn small primary"
+          data-testid="add-baseline-point"
+          disabled={problem !== null}
+          aria-describedby={problem !== null ? reasonId : undefined}
+          onClick={() => {
+            if (numerator !== undefined && total !== undefined) {
+              onAdd(goal, numerator, total);
+              draft.setCorrectText("");
+              draft.setTotalText(initialTotal);
+            }
+          }}
+        >
+          + Add baseline point
+        </button>
+      </div>
+      {problem !== null ? (
+        <div
+          className={`note${problem === "over_total" ? " warn" : ""}`}
+          id={reasonId}
+          data-testid="add-point-reason"
+        >
+          {SCORE_PROBLEM_TEXT[problem]}
+        </div>
+      ) : null}
+    </>
   );
 }
 
@@ -110,11 +162,10 @@ function EstimateBlock({
       </>
     );
   }
-  const need = Math.max(0, 3 - estimate.n);
   return (
     <div className="note owestext" data-testid="baseline-not-usable">
       {estimate.comparable
-        ? `Needs ${need} more comparable probe${need === 1 ? "" : "s"} before a usable baseline.`
+        ? `Need 3 points to estimate a baseline (you have ${estimate.n}).`
         : "Points span more than one probe condition — not comparable. Re-collect on one probe."}
     </div>
   );
@@ -211,6 +262,7 @@ function ProposedCard({
   goal,
   allGoals,
   points,
+  probe,
   initials,
   periodLabel,
   useMedian,
@@ -219,11 +271,15 @@ function ProposedCard({
   onAdopt,
   onEditArcDate,
   onSetGoalLabel,
+  onFixBaselinePoint,
+  onRemoveBaselinePoint,
+  onKeepBaselineTotal,
 }: {
   readonly goal: IEPGoal;
   /** Every goal on record — the duplicate-label checks read the student's other goals. */
   readonly allGoals: readonly IEPGoal[];
   readonly points: readonly BaselinePoint[];
+  readonly probe: ProbeDefinition | undefined;
   readonly initials: string;
   readonly periodLabel: string | null;
   readonly useMedian: boolean;
@@ -236,6 +292,9 @@ function ProposedCard({
   ) => void;
   readonly onEditArcDate: (goal: IEPGoal, newArcDate: string) => ArcDateAlert;
   readonly onSetGoalLabel: (goal: IEPGoal, label: string | undefined) => void;
+  readonly onFixBaselinePoint: BaselineScreenProps["onFixBaselinePoint"];
+  readonly onRemoveBaselinePoint: BaselineScreenProps["onRemoveBaselinePoint"];
+  readonly onKeepBaselineTotal: BaselineScreenProps["onKeepBaselineTotal"];
 }) {
   const [alert, setAlert] = useState<ArcDateAlert>(null);
   const estimate = deriveBaseline(goal, points, useMedian ? "median" : "mean");
@@ -292,21 +351,26 @@ function ProposedCard({
       </div>
       <ArcAlertNote alert={alert} />
 
-      <div className="chips bchips">
-        {points.length > 0 ? (
-          points.map((p) => (
-            <span key={p.baseline_point_id} className="dchip static">
-              {Math.round((p.numerator / p.denominator_used) * 100)}%
-            </span>
-          ))
-        ) : (
-          <span className="note">no points yet</span>
-        )}
-      </div>
+      <BaselinePoints
+        goal={goal}
+        points={points}
+        onFix={(point, fix) => onFixBaselinePoint(goal, point, fix)}
+        onRemove={(point, reason) => onRemoveBaselinePoint(goal, point, reason)}
+        onKeep={(point) => onKeepBaselineTotal(goal, point)}
+      />
 
       <EstimateBlock estimate={estimate} useMedian={useMedian} />
 
-      <AddPointRow goal={goal} onAdd={onAddBaselinePoint} />
+      {/* C7: the "# correct of N" row serves %-scored goals only. Keyed by the
+          prefill so a probe-total change resets the empty draft. */}
+      {takesBaselineScore(goal) ? (
+        <AddPointRow
+          key={baselineTotalPrefill(goal, probe) ?? "none"}
+          goal={goal}
+          probe={probe}
+          onAdd={onAddBaselinePoint}
+        />
+      ) : null}
 
       <AdoptLabelWarning
         goal={goal}
@@ -337,6 +401,7 @@ export function BaselineScreen(props: BaselineScreenProps) {
       periodLabelOf: periodLabelByStudent,
     },
   );
+  const probeByGoal = new Map(records.probes.map((p) => [p.goal_id, p]));
   const pointsByGoal = new Map<string, BaselinePoint[]>();
   for (const p of baselinePointsOldestFirst(records.baselinePoints)) {
     const bucket = pointsByGoal.get(p.goal_id) ?? [];
@@ -395,6 +460,7 @@ export function BaselineScreen(props: BaselineScreenProps) {
               goal={goal}
               allGoals={records.goals}
               points={pointsByGoal.get(goal.goal_id) ?? []}
+              probe={probeByGoal.get(goal.goal_id)}
               initials={initialsById.get(goal.student_id) ?? "??"}
               periodLabel={periodLabelByStudent(goal.student_id)}
               useMedian={useMedian}
@@ -403,6 +469,9 @@ export function BaselineScreen(props: BaselineScreenProps) {
               onAdopt={props.onAdopt}
               onEditArcDate={props.onEditArcDate}
               onSetGoalLabel={props.onSetGoalLabel}
+              onFixBaselinePoint={props.onFixBaselinePoint}
+              onRemoveBaselinePoint={props.onRemoveBaselinePoint}
+              onKeepBaselineTotal={props.onKeepBaselineTotal}
             />
           ))}
         </div>

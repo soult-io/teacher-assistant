@@ -19,6 +19,7 @@ import type {
   IEPGoal,
   MasteryObservation,
   OpaqueId,
+  Revision,
   ProbeDefinition,
   ProgressDataPoint,
   Setting,
@@ -39,6 +40,13 @@ const PERIODS = "periods";
 const PROBES = "probes";
 const OBSERVATIONS = "observations";
 const BASELINE_POINTS = "baseline_points";
+/**
+ * TEACH-46 removal markers, keyed by baseline_point_id. A point record is replaced
+ * whole on every edit (last writer wins across devices), so a Fix made offline on
+ * one device could otherwise overwrite a Remove made offline on another and bring
+ * the point back. The marker makes a removal stick: readRecords re-applies it.
+ */
+const BASELINE_REMOVALS = "baseline_removals";
 const CATALOG = "catalog";
 
 // --- The `{period}/para-visible` doc (D1). A SEPARATE Yjs doc/stream under the
@@ -81,6 +89,61 @@ export interface DecryptedRecords {
   readonly catalog: readonly CatalogEntry[];
 }
 
+/** A baseline point as stored: one written before TEACH-46 has no status or revisions. */
+type StoredBaselinePoint = Omit<BaselinePoint, "status" | "revisions"> &
+  Partial<Pick<BaselinePoint, "status" | "revisions">>;
+
+/** Read a stored baseline point with the TEACH-46 defaults: recorded, no revisions yet. */
+export function normalizeBaselinePoint(p: StoredBaselinePoint): BaselinePoint {
+  return { ...p, status: p.status ?? "recorded", revisions: p.revisions ?? [] };
+}
+
+/** A removal marker: the removal fields plus its audit Revision. */
+interface BaselineRemoval {
+  readonly removed_reason: NonNullable<BaselinePoint["removed_reason"]>;
+  readonly removed_ts: NonNullable<BaselinePoint["removed_ts"]>;
+  readonly removed_by: NonNullable<BaselinePoint["removed_by"]>;
+  readonly revision: Revision;
+}
+
+/** Re-apply a removal a concurrent edit overwrote; the removal Revision is restored with it. */
+function withRemoval(p: BaselinePoint, r: BaselineRemoval | undefined): BaselinePoint {
+  if (r === undefined || p.status === "removed") {
+    return p;
+  }
+  return {
+    ...p,
+    status: "removed",
+    removed_reason: r.removed_reason,
+    removed_ts: r.removed_ts,
+    removed_by: r.removed_by,
+    revisions: [...p.revisions, r.revision],
+  };
+}
+
+function readBaselinePoints(doc: YDoc): BaselinePoint[] {
+  const removals = doc.getMap<BaselineRemoval>(BASELINE_REMOVALS);
+  return [...doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).values()].map((p) =>
+    withRemoval(normalizeBaselinePoint(p), removals.get(p.baseline_point_id)),
+  );
+}
+
+/** One goal as currently stored (a baseline edit re-reads it: the goal may have been adopted since). */
+export function readGoal(doc: YDoc, goalId: OpaqueId): IEPGoal | undefined {
+  return doc.getMap<IEPGoal>(GOALS).get(goalId);
+}
+
+/** The current state of one baseline point in the doc (edits re-read it inside their transaction). */
+export function readBaselinePoint(doc: YDoc, pointId: OpaqueId): BaselinePoint | undefined {
+  const stored = doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).get(pointId);
+  return stored === undefined
+    ? undefined
+    : withRemoval(
+        normalizeBaselinePoint(stored),
+        doc.getMap<BaselineRemoval>(BASELINE_REMOVALS).get(pointId),
+      );
+}
+
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
 export function readRecords(doc: YDoc): DecryptedRecords {
   return {
@@ -90,7 +153,7 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     periods: [...doc.getMap<ClassPeriod>(PERIODS).values()],
     probes: [...doc.getMap<ProbeDefinition>(PROBES).values()],
     observations: [...doc.getMap<MasteryObservation>(OBSERVATIONS).values()],
-    baselinePoints: [...doc.getMap<BaselinePoint>(BASELINE_POINTS).values()],
+    baselinePoints: readBaselinePoints(doc),
     catalog: [...doc.getMap<CatalogEntry>(CATALOG).values()],
   };
 }
@@ -115,9 +178,31 @@ export function upsertProbe(doc: YDoc, probe: ProbeDefinition): void {
   doc.getMap<ProbeDefinition>(PROBES).set(probe.probe_definition_id, probe);
 }
 
-/** Upsert one baseline point (M7) for a proposed goal. Keyed by baseline_point_id. */
+/**
+ * Upsert one baseline point (M7) — a new point, or its audited Fix / Remove / Keep
+ * (TEACH-46). Keyed by baseline_point_id, so an edit replaces the same entry and
+ * never duplicates it. There is deliberately NO baseline delete: a removed point
+ * stays in the map with status=removed.
+ */
 export function upsertBaselinePoint(doc: YDoc, point: BaselinePoint): void {
   doc.getMap<BaselinePoint>(BASELINE_POINTS).set(point.baseline_point_id, point);
+  const removal = [...point.revisions]
+    .reverse()
+    .find((rev) => (rev.new as { status?: unknown } | null)?.status === "removed");
+  if (
+    point.status === "removed" &&
+    point.removed_reason !== undefined &&
+    point.removed_ts !== undefined &&
+    point.removed_by !== undefined &&
+    removal !== undefined
+  ) {
+    doc.getMap<BaselineRemoval>(BASELINE_REMOVALS).set(point.baseline_point_id, {
+      removed_reason: point.removed_reason,
+      removed_ts: point.removed_ts,
+      removed_by: point.removed_by,
+      revision: removal,
+    });
+  }
 }
 
 /** Record a teacher-acknowledged mastery observation (flag for ARC). Keyed by observation id. */
@@ -160,9 +245,9 @@ export function writeRecords(doc: YDoc, records: DecryptedRecords): void {
   for (const observation of records.observations) {
     observations.set(observation.observation_id, observation);
   }
-  const baselinePoints = doc.getMap<BaselinePoint>(BASELINE_POINTS);
+  // Through upsertBaselinePoint so a removed point also gets its removal marker.
   for (const baselinePoint of records.baselinePoints) {
-    baselinePoints.set(baselinePoint.baseline_point_id, baselinePoint);
+    upsertBaselinePoint(doc, baselinePoint);
   }
   const catalog = doc.getMap<CatalogEntry>(CATALOG);
   for (const entry of records.catalog) {
