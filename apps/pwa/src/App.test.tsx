@@ -14,7 +14,7 @@ function bootstrap(options: BootstrapOptions) {
 }
 
 // A write settles asynchronously: the real session awaits crypto + IndexedDB, and the
-// fake settles a timer tick later. The element being asserted on is often already
+// fake settles WRITE_SETTLE_MS (20 ms) later. The element being asserted on is often already
 // rendered with its PRE-write text, so `await findByTestId(...)` resolves at once and
 // a one-shot text check races the write (TEACH-63). Wait for the post-write text.
 async function expectTextAfterWrite(testId: string, text: string) {
