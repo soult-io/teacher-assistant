@@ -221,6 +221,12 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
         "/sync/devices/revoke",
         "/sync/devices/retire-scope",
         "/sync/devices/recovery-wrap",
+        // TEACH-60 (EU-4) pairing mailbox routes.
+        "/sync/enroll/pairing/open",
+        "/sync/enroll/pairing/request-put",
+        "/sync/enroll/pairing/request-get",
+        "/sync/enroll/pairing/grant-put",
+        "/sync/enroll/pairing/grant-get",
       ].map((template) => ({
         method: "POST" as const,
         url: `${template}?x=${QUERY}`,
@@ -314,6 +320,18 @@ describe("TEACH-55 — error responses are {error, record_id}; logs carry no req
         status: 404,
         error: "not_found",
         unlogged: true, // like the data-route 404 and the 401s: answered, not logged
+      },
+      // 404 — unsigned pairing route (TEACH-60): the same identical not-found
+      {
+        req: {
+          method: "POST" as const,
+          url: "/sync/enroll/pairing/request-put",
+          headers: { "content-type": "application/json" },
+          payload: Buffer.from('{"sid":"BODYSENTINEL","blob":"BODYSENTINEL"}'),
+        },
+        status: 404,
+        error: "not_found",
+        unlogged: true,
       },
       // 404 — no such route (the default Fastify body echoes the path)
       {

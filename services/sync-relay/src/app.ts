@@ -25,6 +25,9 @@ import { isTrustedProxyEntry } from "./config.js";
 import {
   parseGrantBody,
   parseListBody,
+  parsePairingGrantBody,
+  parsePairingRequestBody,
+  parsePairingSidBody,
   parseRecoveryWrapBody,
   parseRedeemBody,
   parseRetireBody,
@@ -118,12 +121,32 @@ const OWNER_ROUTES = {
   recoveryWrap: "/sync/devices/recovery-wrap",
 } as const;
 
+/**
+ * The pairing mailbox (spec §4.2, §5.3, EU-4). No route has a path parameter:
+ * the sid travels only in the signed body, so it never reaches an access log.
+ */
+const PAIRING_ROUTES = {
+  open: "/sync/enroll/pairing/open",
+  requestPut: "/sync/enroll/pairing/request-put",
+  requestGet: "/sync/enroll/pairing/request-get",
+  grantPut: "/sync/enroll/pairing/grant-put",
+  grantGet: "/sync/enroll/pairing/grant-get",
+} as const;
+
+/**
+ * Pairing routes: 30 requests a minute per trusted client IP, per route (spec
+ * §5.5) — tighter than the global 300 because the devices poll them, and the
+ * Postgres grant-get waits for the control lock while holding a pool connection.
+ */
+const PAIRING_RATE_LIMIT = { rateLimit: { max: 30, timeWindow: "1 minute" } } as const;
+
 /** Ciphertext travels as base64 (standard or URL-safe alphabet). */
 const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
 
 /** Identical response for "unknown doc" and "unauthorized" — the H-PUB-3 zero-existence guarantee. */
-function notFound(reply: FastifyReply): void {
+function notFound(reply: FastifyReply): FastifyReply {
   sendError(reply, 404, "not_found");
+  return reply;
 }
 
 interface VerifiedRequest {
@@ -211,6 +234,27 @@ function trustProxyOption(list: readonly string[] | undefined): string[] | false
     throw new Error("trustProxy must be a non-empty list of IPs/CIDRs (never trust-all)");
   }
   return [...list];
+}
+
+/** Who may call a control route: an active owner, or any valid signer (the store then decides). */
+type ControlSigner = "owner" | "any";
+
+interface ControlRouteOptions {
+  readonly signer: ControlSigner;
+  /** Per-route Fastify config (the pairing rate limit). */
+  readonly config?: typeof PAIRING_RATE_LIMIT;
+}
+
+/**
+ * The startup order (spec §5.1): expired pairing sessions and owner codes are
+ * swept before the app exists, so none outlives a restart into the first request.
+ */
+export async function startApp(
+  store: RelayStore,
+  options: BuildAppOptions = {},
+): Promise<FastifyInstance> {
+  await store.sweepExpired();
+  return buildApp(store, options);
 }
 
 /** Build the relay app over a store (injected so tests can seed the ACL). */
@@ -355,29 +399,30 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
   }
 
   /**
-   * The owner-route preamble (spec §5.3): a valid signature under the reserved
-   * `control` scope from an ACTIVE owner, else the identical H-PUB-3 404 — a
-   * non-owner, a revoked device, a bad signature and an unknown route all look
-   * the same. Expired codes and pairing sessions are then swept (spec §5.1: at
-   * the start of every control route). Returns the raw body, or null after the
-   * 404 was sent.
+   * The control-route preamble (spec §5.3): a valid signature under the reserved
+   * `control` scope — from an ACTIVE owner on an owner route — else the identical
+   * H-PUB-3 404: a non-owner, a revoked device, a bad signature and an unknown
+   * route all look the same. Expired codes and pairing sessions are then swept
+   * (spec §5.1: at the start of every control route). Returns the raw body and
+   * the signer, or null after the 404 was sent.
    */
-  async function authorizeOwner(
+  async function authorizeControl(
     req: FastifyRequest,
     reply: FastifyReply,
-  ): Promise<Uint8Array | null> {
+    signer: ControlSigner,
+  ): Promise<{ readonly rawBody: Uint8Array; readonly signer: string } | null> {
     const rawBody = rawBodyOf(req);
     const verified = verifyRequest(req, rawBody, nonces);
     if (
       verified === null ||
       verified.scope !== RESERVED_CONTROL_SCOPE ||
-      (await store.deviceRole(verified.devicePublicKeyB64)) !== "owner"
+      (signer === "owner" && (await store.deviceRole(verified.devicePublicKeyB64)) !== "owner")
     ) {
       notFound(reply);
       return null;
     }
     await store.sweepExpired();
-    return rawBody;
+    return { rawBody, signer: verified.devicePublicKeyB64 };
   }
 
   /** A refused control operation: `{error, record_id}` plus the one permitted log line. */
@@ -386,32 +431,57 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     return reply;
   }
 
+  function payloadTooLarge(reply: FastifyReply): FastifyReply {
+    sendError(reply, 413, "payload_too_large");
+    return reply;
+  }
+
   /**
-   * Register one owner route: the preamble, then the strict body parser (null →
-   * 400), then the handler. Any store failure is the 503 "outcome unknown".
+   * Register one control route: the preamble, then the strict body parser (null →
+   * 400), then the handler with the verified signer. Any store failure is the
+   * 503 "outcome unknown".
    */
-  function ownerRoute<T>(
+  function controlRoute<T>(
     routes: FastifyInstance,
     path: string,
+    route: ControlRouteOptions,
     parse: (rawBody: Uint8Array) => T | null,
-    handle: (body: T, req: FastifyRequest, reply: FastifyReply) => Promise<FastifyReply>,
+    handle: (
+      body: T,
+      signer: string,
+      req: FastifyRequest,
+      reply: FastifyReply,
+    ) => Promise<FastifyReply>,
   ): void {
-    routes.post(path, async (req, reply) => {
-      try {
-        const rawBody = await authorizeOwner(req, reply);
-        if (rawBody === null) {
-          return reply;
+    routes.post(
+      path,
+      route.config === undefined ? {} : { config: route.config },
+      async (req, reply) => {
+        try {
+          const control = await authorizeControl(req, reply, route.signer);
+          if (control === null) {
+            return reply;
+          }
+          const body = parse(control.rawBody);
+          if (body === null) {
+            sendError(reply, 400, "bad_request");
+            return reply;
+          }
+          return await handle(body, control.signer, req, reply);
+        } catch (err) {
+          return storeUnavailable(req, reply, err);
         }
-        const body = parse(rawBody);
-        if (body === null) {
-          sendError(reply, 400, "bad_request");
-          return reply;
-        }
-        return await handle(body, req, reply);
-      } catch (err) {
-        return storeUnavailable(req, reply, err);
-      }
-    });
+      },
+    );
+  }
+
+  const OWNER: ControlRouteOptions = { signer: "owner" };
+  const PAIRING_OWNER: ControlRouteOptions = { signer: "owner", config: PAIRING_RATE_LIMIT };
+  const PAIRING_ANY: ControlRouteOptions = { signer: "any", config: PAIRING_RATE_LIMIT };
+
+  /** A pairing read: the blob, or the identical 404 when the store has none for this signer. */
+  function sendBlob(reply: FastifyReply, blob: string | undefined): FastifyReply {
+    return blob === undefined ? notFound(reply) : reply.send({ blob });
   }
 
   // Routes live in a plugin registered AFTER the rate limiter: @fastify/rate-limit
@@ -475,49 +545,141 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     // read is the identical 404 (authorizeOwner); revoked is permanent, so a
     // grant replayed after a revoke — even on a restarted relay with an empty
     // nonce cache — is refused by the store (spec §5.4).
-    ownerRoute(routes, OWNER_ROUTES.list, parseListBody, async (_b, _req, reply) =>
+    controlRoute(routes, OWNER_ROUTES.list, OWNER, parseListBody, async (_b, _s, _req, reply) =>
       reply.send({ devices: await store.listDevices() }),
     );
 
-    ownerRoute(
+    controlRoute(
       routes,
       OWNER_ROUTES.grant,
+      OWNER,
       parseGrantBody,
-      async ({ device, scopes }, req, reply) =>
+      async ({ device, scopes }, _s, req, reply) =>
         (await store.grantScopes(device, scopes)) === "ok"
           ? reply.send({})
           : conflict(req, reply, "conflict"),
     );
 
-    ownerRoute(routes, OWNER_ROUTES.revoke, parseRevokeBody, async (device, req, reply) =>
-      (await store.revoke(device)) === "ok" ? reply.send({}) : conflict(req, reply, "last_owner"),
+    controlRoute(
+      routes,
+      OWNER_ROUTES.revoke,
+      OWNER,
+      parseRevokeBody,
+      async (device, _s, req, reply) =>
+        (await store.revoke(device)) === "ok" ? reply.send({}) : conflict(req, reply, "last_owner"),
     );
 
     // The master scope is never retired (FERPA re-review N3).
-    ownerRoute(routes, OWNER_ROUTES.retireScope, parseRetireBody, async (tag, req, reply) => {
-      const result = await store.retireScope(tag);
-      if (result === "master_scope") {
-        return conflict(req, reply, "master_scope");
-      }
-      if (result === "not_found") {
-        notFound(reply);
-        return reply;
-      }
-      return reply.send({});
-    });
+    controlRoute(
+      routes,
+      OWNER_ROUTES.retireScope,
+      OWNER,
+      parseRetireBody,
+      async (tag, _s, req, reply) => {
+        const result = await store.retireScope(tag);
+        if (result === "master_scope") {
+          return conflict(req, reply, "master_scope");
+        }
+        if (result === "not_found") {
+          notFound(reply);
+          return reply;
+        }
+        return reply.send({});
+      },
+    );
 
-    ownerRoute(
+    controlRoute(
       routes,
       OWNER_ROUTES.recoveryWrap,
+      OWNER,
       parseRecoveryWrapBody,
-      async (body, _req, reply) => {
+      async (body, _s, _req, reply) => {
         if (body === "too_large") {
-          sendError(reply, 413, "payload_too_large");
-          return reply;
+          return payloadTooLarge(reply);
         }
         await store.putRecoveryWrap(body.blob);
         return reply.send({});
       },
+    );
+
+    // The pairing mailbox (spec §4.2, §5.3, F2/F3). Every refusal is the
+    // identical 404 — an unknown, expired or taken session, a wrong signer —
+    // except a grant-put the store refuses for a known session (409). The sid,
+    // the keys, the tags and the blobs are never logged (§5.6).
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.open,
+      PAIRING_OWNER,
+      parsePairingSidBody,
+      async (sid, opener, _req, reply) => {
+        if (!(await store.openPairing(sid, opener))) {
+          return notFound(reply);
+        }
+        return reply.send({});
+      },
+    );
+
+    // B posts its sealed request; first write wins (a taken slot is the 404).
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.requestPut,
+      PAIRING_ANY,
+      parsePairingRequestBody,
+      async (body, signer, _req, reply) => {
+        if (body === "too_large") {
+          return payloadTooLarge(reply);
+        }
+        if (!(await store.putPairingRequest(body.sid, signer, body.blob))) {
+          return notFound(reply);
+        }
+        return reply.send({});
+      },
+    );
+
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.requestGet,
+      PAIRING_OWNER,
+      parsePairingSidBody,
+      async (sid, opener, _req, reply) =>
+        sendBlob(reply, await store.getPairingRequest(sid, opener)),
+    );
+
+    // A enrolls the request signer and posts the sealed grant, in one store step.
+    // The grantee must be the recorded request signer (else 409), and a para is
+    // a member with period scopes only (a master scope is 409, from the store).
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.grantPut,
+      PAIRING_OWNER,
+      parsePairingGrantBody,
+      async (body, opener, req, reply) => {
+        if (body === "too_large") {
+          return payloadTooLarge(reply);
+        }
+        const result = await store.completePairing(
+          body.sid,
+          opener,
+          body.device,
+          body.role,
+          body.scopes,
+          body.blob,
+        );
+        if (result === "not_found") {
+          return notFound(reply);
+        }
+        return result === "ok" ? reply.send({}) : conflict(req, reply, "conflict");
+      },
+    );
+
+    // B collects the grant; only the recorded request signer gets it, once.
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.grantGet,
+      PAIRING_ANY,
+      parsePairingSidBody,
+      async (sid, signer, _req, reply) =>
+        sendBlob(reply, await store.takePairingGrant(sid, signer)),
     );
 
     // Append encrypted updates for an opaque doc id.

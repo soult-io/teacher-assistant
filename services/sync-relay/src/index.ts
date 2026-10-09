@@ -11,7 +11,7 @@
 
 import { readFileSync } from "node:fs";
 import pg from "pg";
-import { buildApp } from "./app.js";
+import { startApp } from "./app.js";
 import { listeningMessage } from "./logging.js";
 import { loadStoreConfig, loadTrustProxy, type StoreConfig } from "./config.js";
 import { migrate } from "./migrations.js";
@@ -77,8 +77,7 @@ async function main(): Promise<void> {
   await sodiumReady();
   const { store, kind, close } = await openStore();
   // Expired pairing sessions and owner codes go before the port opens (spec §5.1).
-  await store.sweepExpired();
-  const app = buildApp(store, trustProxy === undefined ? {} : { trustProxy });
+  const app = await startApp(store, trustProxy === undefined ? {} : { trustProxy });
   app.addHook("onClose", close);
   const addr = await app.listen({ host: "0.0.0.0", port: PORT });
   app.log.info(listeningMessage(addr, kind));
