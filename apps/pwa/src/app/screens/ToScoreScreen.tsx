@@ -1,4 +1,4 @@
-// To-Score queue (U3) — the score-later ⚑ bookmarks land here as queued points
+// To-Score queue (U3) — the score-later 🕐 bookmarks land here as queued points
 // (buildToScoreQueue). Each row opens the FULL Quick-Score editor (not a reduced
 // form), keeping the collected admin date. Scoring from the queue writes via M5
 // (an audited queued→scored edit) and clears the flag.

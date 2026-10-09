@@ -434,7 +434,7 @@ button.btn:disabled {
   margin-top: 0.3rem;
 }
 
-/* per-row action buttons (score-later flag) */
+/* per-row action buttons (score-later 🕐 toggle) */
 .rowactions {
   display: flex;
   align-items: center;

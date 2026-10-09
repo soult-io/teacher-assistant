@@ -24,6 +24,17 @@ import { deriveParaQueue, paraPeriodId, publishParaVisible } from "../data/para-
 import type { ParaHandoff, ParaSession, Session } from "../data/session.js";
 import type { SyntheticSeed } from "../data/synthetic-seed.js";
 
+/**
+ * Settle a fake write on a LATER macrotask, like the real session (which awaits
+ * crypto + IndexedDB before the write's promise resolves). Resolving synchronously
+ * let a test assert before the write's re-render landed and still pass most runs —
+ * TEACH-63 failed only under CI load. With the write always landing a timer tick
+ * later, a test that does not await the write's visible outcome fails EVERY run.
+ */
+function settled(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
 /** The fake handoff carries the shared para Yjs doc so the para session opens the same state. */
 interface FakeParaHandoff {
   readonly __fakeParaDoc: Y.Doc;
@@ -57,7 +68,7 @@ export function makeFakeSession(seed: SyntheticSeed): Session {
     capture: (mutator) => {
       master.transact(() => mutator(master));
       republish(master, para);
-      return Promise.resolve();
+      return settled();
     },
     readRecords: () => readRecords(master),
     refreshPara: () => Promise.resolve(),
@@ -66,14 +77,14 @@ export function makeFakeSession(seed: SyntheticSeed): Session {
       const { validated } = validateParaPoint(pending, { who: "teacher", when });
       master.transact(() => upsertPoint(master, validated));
       para.transact(() => setParaTombstone(para, pending.data_point_id, when));
-      return Promise.resolve();
+      return settled();
     },
     validateParaWithEdit: (pending, changes, when) => {
       const corrected = applyEdit(pending, changes, "teacher", when);
       const { validated } = validateParaPoint(corrected, { who: "teacher", when });
       master.transact(() => upsertPoint(master, validated));
       para.transact(() => setParaTombstone(para, pending.data_point_id, when));
-      return Promise.resolve();
+      return settled();
     },
     paraHandoff: handoff,
     sync: () => Promise.resolve(false),
@@ -88,7 +99,7 @@ export function makeFakeParaSession(handoff: ParaHandoff): Promise<ParaSession> 
     paraRecords: readParaVisible(para),
     capturePara: (mutator) => {
       para.transact(() => mutator(para));
-      return Promise.resolve();
+      return settled();
     },
     // The fake shares the para doc instance, so a re-read is always current — no-op.
     refreshRecords: () => Promise.resolve(),

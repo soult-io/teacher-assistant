@@ -66,14 +66,14 @@ describe("DashboardScreen (U2/U3)", () => {
     expect(within(body).getByText("Done this week")).toBeInTheDocument();
   });
 
-  it("by-student owes rows carry the ⚑ flag and a status-coloured value (C1/C3)", () => {
+  it("by-student owes rows carry the 🕐 score-later toggle and a status-coloured value (C1/C3)", () => {
     renderDashboard();
     const toggle = screen.getByTestId("group-toggle");
     fireEvent.click(toggle); // by period
     fireEvent.click(toggle); // by student
-    expect(screen.getAllByRole("button", { name: "Gave it, score later" }).length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByRole("button", { name: "Collected — score later" }).length,
+    ).toBeGreaterThan(0);
     const owesValues = screen.getAllByText("owes");
     expect(
       owesValues.some((el) => el.className.includes("sval") && el.className.includes("owes")),
@@ -94,9 +94,9 @@ describe("DashboardScreen (U2/U3)", () => {
     expect(onOpenDetail).toHaveBeenCalledOnce();
   });
 
-  it("the ⚑ flag writes a bookmark via apply", () => {
+  it("the 🕐 toggle writes a bookmark via apply", () => {
     const { apply } = renderDashboard();
-    const flags = screen.getAllByRole("button", { name: "Gave it, score later" });
+    const flags = screen.getAllByRole("button", { name: "Collected — score later" });
     const flag = flags[0];
     if (flag === undefined) {
       throw new Error("expected a score-later button");

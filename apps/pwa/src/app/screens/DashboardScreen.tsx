@@ -2,13 +2,13 @@
 // 3-lens owes-first list over the M3 store projections.
 //
 // MOBILE (<900px): the validated single column — tapping an owes row opens the
-// Quick-Score sheet; tapping a scored row opens it for an audited [Fix]; the ⚑ flag
+// Quick-Score sheet; tapping a scored row opens it for an audited [Fix]; the 🕐 toggle
 // WRITES a score-later bookmark; a "To-score (N)" button opens the queue.
 //
 // DESKTOP (>=900px): every lens renders the full-width StudentCard grid (TEACH-43) —
 // no graph on the dashboard. Owes-first splits into "Owes a point" / "Done this week"
 // card sections, by-period into one card section per period, by-student is the plain
-// grid. Goal text opens Quick-Score, ⚑ marks score-later, ↗ opens the full-screen
+// grid. Goal text opens Quick-Score, 🕐 marks score-later, ↗ opens the full-screen
 // Goal Detail. Pending para points render as a full-width table strip above the cards.
 //
 // The grouping lens is owned by App (kept across Goal Detail and Back, reset on
@@ -270,7 +270,7 @@ export function DashboardScreen(props: DashboardScreenProps) {
   const openScore = useCallback(
     (vm: RowVM) => {
       // Resolve any existing point for this goal/week: a scored row opens for a
-      // [Fix]; an owes row that already has a ⚑ queued placeholder opens THAT
+      // [Fix]; an owes row that already has a 🕐 queued placeholder opens THAT
       // placeholder (so scoring completes it in place — never a duplicate point).
       const existing: ProgressDataPoint | undefined =
         vm.state === "has_point"
