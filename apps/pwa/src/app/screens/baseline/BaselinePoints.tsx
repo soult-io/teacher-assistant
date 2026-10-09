@@ -92,6 +92,11 @@ function FixDialog({
           onChange={(e) => draft.setTotalText(e.target.value)}
         />
       </div>
+      {problem !== null ? (
+        <div className="note warn" id={problemId} data-testid="fix-problem">
+          {SCORE_PROBLEM_TEXT[problem]}
+        </div>
+      ) : null}
       <label className="arcedit">
         <span className="nghint">Date given</span>
         <input
@@ -102,11 +107,6 @@ function FixDialog({
           onChange={(e) => setDate(e.target.value)}
         />
       </label>
-      {problem !== null ? (
-        <div className="note warn" id={problemId} data-testid="fix-problem">
-          {SCORE_PROBLEM_TEXT[problem]}
-        </div>
-      ) : null}
       <div className="btnrow">
         <button type="button" className="btn wide" onClick={onClose}>
           Cancel
@@ -289,7 +289,12 @@ export function BaselinePoints(props: BaselinePointsProps) {
           {live.map((p) => {
             const label = `${p.admin_date} ${p.numerator}/${p.denominator_used}`;
             return (
-              <li key={p.baseline_point_id} className="bpoint" data-testid="baseline-point">
+              <li
+                key={p.baseline_point_id}
+                // A total awaiting Keep / Use is not counted yet (C8): shown dimmed until decided.
+                className={`bpoint${needsTotalDecision(p) ? " pending" : ""}`}
+                data-testid="baseline-point"
+              >
                 <span className="bpointval">
                   <span className="dchip static">
                     {Math.round(percentCorrect(p.numerator, p.denominator_used))}%

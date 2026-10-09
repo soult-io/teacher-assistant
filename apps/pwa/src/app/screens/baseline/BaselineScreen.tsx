@@ -119,7 +119,11 @@ function AddPointRow({
         </button>
       </div>
       {problem !== null ? (
-        <div className="note" id={reasonId} data-testid="add-point-reason">
+        <div
+          className={`note${problem === "over_total" ? " warn" : ""}`}
+          id={reasonId}
+          data-testid="add-point-reason"
+        >
           {SCORE_PROBLEM_TEXT[problem]}
         </div>
       ) : null}

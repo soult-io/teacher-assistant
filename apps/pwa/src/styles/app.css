@@ -1321,6 +1321,9 @@ button.rowmain {
   font-size: 0.78rem;
   color: var(--text-dim);
 }
+.bpoint.pending > .bpointval {
+  opacity: 0.55;
+}
 .bpointacts {
   display: flex;
   gap: 0.3rem;
