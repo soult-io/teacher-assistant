@@ -2,13 +2,14 @@
 // initials + period(s) + a to-do/done tally, with their goals nested under a
 // matching-hue colour rail. Status dominates each nested row (glyph + a
 // status-coloured value, §E.3); owes/scored rows are tappable to score/[Fix], and
-// owes rows carry the score-later ⚑ flag — same behavior as the flat row.
+// owes rows carry the score-later 🕐 toggle — same behavior as the flat row.
 
 import { Avatar } from "../../../design/Avatar.js";
 import { chipForDashboardState } from "../../../design/glyphs.js";
 import { DuplicateLabelCue, GoalTitle, goalLabelSpoken } from "../../../design/GoalTitle.js";
 import { hueClassForInitials } from "../../../design/hues.js";
 import { type RowVM, rowValueText, type StudentCardVM } from "./dashboard-vm.js";
+import { ScoreLaterButton } from "./ScoreLaterButton.js";
 import { TrendHistoryButton } from "./TrendHistoryButton.js";
 
 function nestedValue(vm: RowVM) {
@@ -65,16 +66,7 @@ function NestedGoal({
       )}
       {nestedValue(vm)}
       {vm.state === "owes" ? (
-        <button
-          type="button"
-          className={`minibtn book${scoreLater ? " on" : ""}`}
-          title="Gave it — score later"
-          aria-label="Gave it, score later"
-          aria-pressed={scoreLater}
-          onClick={() => onScoreLater(vm)}
-        >
-          ⚑
-        </button>
+        <ScoreLaterButton vm={vm} on={scoreLater} onScoreLater={onScoreLater} />
       ) : null}
       <TrendHistoryButton vm={vm} onOpenDetail={onOpenDetail} />
     </div>

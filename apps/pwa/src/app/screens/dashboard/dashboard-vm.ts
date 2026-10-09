@@ -268,7 +268,7 @@ export function orderValidationQueue(
 /**
  * The right-hand value text for a row, shared by the flat GoalRow and the nested
  * StudentCard: the scored % or the ⊘ no-data reason, or null when the goal owes
- * (the flat row hides the value and shows the score-later flag; the card renders
+ * (the flat row hides the value and shows the score-later 🕐 toggle; the card renders
  * a plain "owes"). One source of truth for state → value display.
  */
 export function rowValueText(vm: RowVM): string | null {

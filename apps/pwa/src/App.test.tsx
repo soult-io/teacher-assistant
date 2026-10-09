@@ -13,6 +13,14 @@ function bootstrap(options: BootstrapOptions) {
   return Promise.resolve(makeFakeSession(buildSyntheticSeed(options.now)));
 }
 
+// A write settles asynchronously: the real session awaits crypto + IndexedDB, and the
+// fake settles WRITE_SETTLE_MS (20 ms) later. The element being asserted on is often already
+// rendered with its PRE-write text, so `await findByTestId(...)` resolves at once and
+// a one-shot text check races the write (TEACH-63). Wait for the post-write text.
+async function expectTextAfterWrite(testId: string, text: string) {
+  await waitFor(() => expect(screen.getByTestId(testId)).toHaveTextContent(text));
+}
+
 async function unlock() {
   render(<App bootstrap={bootstrap} bootstrapPara={makeFakeParaSession} />);
   fireEvent.click(screen.getByTestId("unlock"));
@@ -44,8 +52,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     // scored 2 → 3, owe 2 → 1.
-    const header = await screen.findByTestId("header-line");
-    expect(header).toHaveTextContent("3 of 4 collectable scored · 1 excused · 1 owe");
+    await expectTextAfterWrite("header-line", "3 of 4 collectable scored · 1 excused · 1 owe");
   });
 
   it("gates Save behind the F-2 mismatch acknowledgment on a genuine mismatch", async () => {
@@ -60,8 +67,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
     // One tap picks the disposition (and acknowledges) → the point saves.
     fireEvent.click(screen.getByRole("button", { name: "Count it in the trend" }));
-    const header = await screen.findByTestId("header-line");
-    expect(header).toHaveTextContent("3 of 4 collectable scored");
+    await expectTextAfterWrite("header-line", "3 of 4 collectable scored");
   });
 
   it("records a no-data ⊘ with a required reason", async () => {
@@ -76,19 +82,18 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.click(record);
 
     // The excused ⊘ raises the excused count (2) and drops owe to 1.
-    const header = await screen.findByTestId("header-line");
-    expect(header).toHaveTextContent("2 of 3 collectable scored · 2 excused · 1 owe");
+    await expectTextAfterWrite("header-line", "2 of 3 collectable scored · 2 excused · 1 owe");
   });
 
-  it("tapping an owes row that already has a ⚑ bookmark completes it in place (no duplicate)", async () => {
+  it("tapping an owes row that already has a 🕐 score-later bookmark completes it in place (no duplicate)", async () => {
     await unlock();
-    const flags = screen.getAllByRole("button", { name: "Gave it, score later" });
-    const flag = flags[0];
-    if (flag === undefined) {
+    const toggles = screen.getAllByRole("button", { name: "Collected — score later" });
+    const toggle = toggles[0];
+    if (toggle === undefined) {
       throw new Error("expected a score-later button");
     }
-    fireEvent.click(flag); // bookmark AB Two-step equations
-    expect(await screen.findByTestId("to-score")).toHaveTextContent("To-score (1)");
+    fireEvent.click(toggle); // bookmark AB Two-step equations
+    await expectTextAfterWrite("to-score", "To-score (1)");
 
     // Tap the same row to score it directly → completes the queued point in place.
     fireEvent.click(screen.getByRole("button", { name: "score Goal 1, Two-step equations" }));
@@ -96,7 +101,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
     // Exactly one scored point results: the queue empties (not left stranded) and
     // the scored count rises by one.
-    expect(await screen.findByTestId("to-score")).toHaveTextContent("To-score (0)");
+    await expectTextAfterWrite("to-score", "To-score (0)");
     expect(screen.getByTestId("header-line")).toHaveTextContent("3 of 4 collectable scored");
   });
 
@@ -124,20 +129,19 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(await screen.findByTestId("header-line")).toBeInTheDocument();
   });
 
-  it("⚑ bookmarks to the To-Score queue and scoring there clears it", async () => {
+  it("🕐 score-later bookmarks to the To-Score queue and scoring there clears it", async () => {
     await unlock();
-    const flags = screen.getAllByRole("button", { name: "Gave it, score later" });
-    const flag = flags[0];
-    if (flag === undefined) {
+    const toggles = screen.getAllByRole("button", { name: "Collected — score later" });
+    const toggle = toggles[0];
+    if (toggle === undefined) {
       throw new Error("expected a score-later button");
     }
-    fireEvent.click(flag);
+    fireEvent.click(toggle);
 
     // The queue count rises to 1.
-    const toScore = await screen.findByTestId("to-score");
-    expect(toScore).toHaveTextContent("To-score (1)");
+    await expectTextAfterWrite("to-score", "To-score (1)");
 
-    fireEvent.click(toScore);
+    fireEvent.click(screen.getByTestId("to-score"));
     fireEvent.click(await screen.findByRole("button", { name: /full editor/ }));
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -163,7 +167,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
 
     // Lands on the segregated baseline/proposed track, showing the new proposed goal.
     expect(await screen.findByText("Baseline / proposed goals")).toBeInTheDocument();
-    expect(screen.getAllByText(/count coins to a dollar/).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText(/count coins to a dollar/)).length).toBeGreaterThan(0);
 
     // Back on the active dashboard, the proposed goal is NOT a row (never mixed in).
     fireEvent.click(screen.getByRole("button", { name: "‹ Dashboard" }));
@@ -191,7 +195,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     fireEvent.click(screen.getByRole("button", { name: "Start baselining →" }));
 
     expect(await screen.findByText("Baseline / proposed goals")).toBeInTheDocument();
-    expect(screen.getAllByRole("img", { name: "student ZQZ" }).length).toBeGreaterThan(0);
+    expect((await screen.findAllByRole("img", { name: "student ZQZ" })).length).toBeGreaterThan(0);
     expect(screen.queryByText(/z\.q\.z\./i)).toBeNull();
   });
 
