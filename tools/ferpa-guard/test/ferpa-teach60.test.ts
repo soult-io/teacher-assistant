@@ -619,11 +619,13 @@ describe("TEACH-60 — sweep and rate limit", () => {
   it("every pairing route is limited at 30 a minute per IP", async () => {
     const env = await deployment();
     for (const route of PAIRING_ROUTES) {
-      let status = 0;
+      const statuses: number[] = [];
       for (let i = 0; i < 31; i++) {
-        status = (await env.app.inject(control(makeSigner(), route, {}))).statusCode;
+        statuses.push((await env.app.inject(control(makeSigner(), route, {}))).statusCode);
       }
-      expect(status, route).toBe(429);
+      // Each route has its own counter: the first 30 pass, the 31st is limited.
+      expect(statuses.slice(0, 30).includes(429), route).toBe(false);
+      expect(statuses[30], route).toBe(429);
     }
   });
 });
@@ -787,6 +789,7 @@ describe("TEACH-60 — static: key sealing and pairing blobs stay inside package
 
   it("outside packages/crypto, no code seals or opens a raw pairing blob — the typed helpers only", () => {
     const clients = outside.filter((f) => fileContains(f, "@teacher-assistant/crypto"));
-    expect(scanCodeForPattern(clients, /(^|[^.\w])(sealPairing|openPairing)\s*\(/)).toEqual([]);
+    // Any mention — a call, a member access (`c.sealPairing`), or an import, aliased or not.
+    expect(scanCodeForPattern(clients, /\b(sealPairing|openPairing)\b/)).toEqual([]);
   });
 });
