@@ -257,6 +257,33 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
     expect(screen.queryAllByTestId("dup-label-cue")).toHaveLength(0);
   });
 
+  it("TEACH-46: a typed 0 is saved, then removed with a reason — kept in History, out of the count", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "Baseline / proposed goals" }));
+    await screen.findByText("Baseline / proposed goals", { selector: "h1" });
+    fireEvent.change(screen.getByLabelText("baseline correct"), { target: { value: "0" } });
+    fireEvent.click(screen.getByTestId("add-baseline-point"));
+    await waitFor(() => expect(screen.getAllByTestId("baseline-point")).toHaveLength(4));
+    const zero = screen.getAllByRole("button", { name: /^remove baseline point .* 0\/5$/ });
+    fireEvent.click(zero[0] as HTMLElement);
+    fireEvent.click(screen.getByRole("radio", { name: "Entered by mistake" }));
+    fireEvent.click(screen.getByTestId("confirm-remove"));
+    await waitFor(() => expect(screen.getAllByTestId("baseline-point")).toHaveLength(3));
+    expect(screen.getByTestId("baseline-history")).toHaveTextContent(
+      /Removed \d{4}-\d{2}-\d{2}: Entered by mistake \(was 0\/5\)/,
+    );
+    expect(screen.getByTestId("baseline-estimate")).toHaveTextContent("33%");
+  });
+
+  it("TEACH-46 E10: the para surface has no baseline Fix or Remove", async () => {
+    await unlock();
+    fireEvent.click(screen.getByRole("button", { name: "Para (JT)" }));
+    expect(await screen.findByText("Your students today")).toBeInTheDocument();
+    expect(screen.queryByTestId("baseline-points")).toBeNull();
+    expect(screen.queryByRole("button", { name: /baseline point/ })).toBeNull();
+    expect(screen.queryByText(/Baseline \/ proposed/)).toBeNull();
+  });
+
   it("switching to the Para role shows the period-scoped para surface", async () => {
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "Para (JT)" }));

@@ -10,6 +10,7 @@
 
 import {
   type AutoStatement,
+  type BaselineFix,
   buildGoalDetail,
   compareArcNewestFirst,
   computeAutoStatement,
@@ -20,6 +21,7 @@ import {
   MIN_SCORED_POINTS,
 } from "@teacher-assistant/domain-core";
 import type {
+  BaselinePoint,
   IEPGoal,
   MasteryObservation,
   ProgressDataPoint,
@@ -31,6 +33,8 @@ import { Avatar } from "../../../design/Avatar.js";
 import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
 import { GoalLabelEditor } from "../../GoalLabelEditor.js";
 import { useIsDesktop } from "../../useIsDesktop.js";
+import { baselinePointsOldestFirst } from "../baseline/baseline-order.js";
+import { BaselinePoints } from "../baseline/BaselinePoints.js";
 import { TrendChart } from "./TrendChart.js";
 
 /** Copy text to the clipboard when available — a no-op elsewhere (guarded for jsdom/older browsers). */
@@ -498,6 +502,43 @@ export interface GoalDetailScreenProps {
   readonly onAddPoint: () => void;
   readonly onEditPoint: (point: ProgressDataPoint) => void;
   readonly onAckMastery: (candidate: MasteryCandidate) => void;
+  /**
+   * TEACH-46: this goal's baseline points and their audited Fix / Keep. After ARC
+   * adoption a point may be fixed (never removed) and the IEP baseline_value never
+   * recomputes — the card shows the "Fixed after ARC" note instead. Omitted → no card.
+   */
+  readonly baselinePoints?: readonly BaselinePoint[];
+  readonly onFixBaselinePoint?: (point: BaselinePoint, fix: BaselineFix) => void;
+  readonly onKeepBaselineTotal?: (point: BaselinePoint) => void;
+}
+
+/** TEACH-46 — an adopted goal's baseline points: Fix only, History, the after-ARC note. */
+function BaselinePointsCard({
+  goal,
+  points,
+  onFix,
+  onKeep,
+}: {
+  readonly goal: IEPGoal;
+  readonly points: readonly BaselinePoint[];
+  readonly onFix: (point: BaselinePoint, fix: BaselineFix) => void;
+  readonly onKeep: (point: BaselinePoint) => void;
+}) {
+  return (
+    <div className="card" data-testid="detail-baseline-points">
+      <div className="cardhead">
+        <b>Baseline points</b>
+      </div>
+      <BaselinePoints
+        goal={goal}
+        points={points}
+        allowRemove={false}
+        onFix={onFix}
+        onRemove={() => undefined}
+        onKeep={onKeep}
+      />
+    </div>
+  );
 }
 
 /** The trend card (chart + the ⊘-as-gap note) — shared by every layout. */
@@ -614,6 +655,9 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
     onEditPoint,
     onAckMastery,
     layout,
+    baselinePoints,
+    onFixBaselinePoint,
+    onKeepBaselineTotal,
   } = props;
 
   const detail = buildGoalDetail(goal, points);
@@ -650,8 +694,23 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
       onAckMastery={onAckMastery}
     />
   );
+  const ownBaseline = baselinePointsOldestFirst(
+    (baselinePoints ?? []).filter((p) => p.goal_id === goal.goal_id),
+  );
+  const baselineCard =
+    ownBaseline.length > 0 && onFixBaselinePoint !== undefined && goal.status !== "proposed" ? (
+      <BaselinePointsCard
+        goal={goal}
+        points={ownBaseline}
+        onFix={onFixBaselinePoint}
+        onKeep={onKeepBaselineTotal ?? (() => undefined)}
+      />
+    ) : null;
   const history = (
-    <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+    <>
+      <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+      {baselineCard}
+    </>
   );
 
   if (layout === "full") {

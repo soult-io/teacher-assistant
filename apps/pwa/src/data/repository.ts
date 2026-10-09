@@ -81,6 +81,15 @@ export interface DecryptedRecords {
   readonly catalog: readonly CatalogEntry[];
 }
 
+/** A baseline point as stored: one written before TEACH-46 has no status or revisions. */
+type StoredBaselinePoint = Omit<BaselinePoint, "status" | "revisions"> &
+  Partial<Pick<BaselinePoint, "status" | "revisions">>;
+
+/** Read a stored baseline point with the TEACH-46 defaults: recorded, no revisions yet. */
+export function normalizeBaselinePoint(p: StoredBaselinePoint): BaselinePoint {
+  return { ...p, status: p.status ?? "recorded", revisions: p.revisions ?? [] };
+}
+
 /** Read every record out of the doc as typed arrays (order is the doc's insertion order). */
 export function readRecords(doc: YDoc): DecryptedRecords {
   return {
@@ -90,7 +99,9 @@ export function readRecords(doc: YDoc): DecryptedRecords {
     periods: [...doc.getMap<ClassPeriod>(PERIODS).values()],
     probes: [...doc.getMap<ProbeDefinition>(PROBES).values()],
     observations: [...doc.getMap<MasteryObservation>(OBSERVATIONS).values()],
-    baselinePoints: [...doc.getMap<BaselinePoint>(BASELINE_POINTS).values()],
+    baselinePoints: [...doc.getMap<StoredBaselinePoint>(BASELINE_POINTS).values()].map(
+      normalizeBaselinePoint,
+    ),
     catalog: [...doc.getMap<CatalogEntry>(CATALOG).values()],
   };
 }
@@ -115,7 +126,12 @@ export function upsertProbe(doc: YDoc, probe: ProbeDefinition): void {
   doc.getMap<ProbeDefinition>(PROBES).set(probe.probe_definition_id, probe);
 }
 
-/** Upsert one baseline point (M7) for a proposed goal. Keyed by baseline_point_id. */
+/**
+ * Upsert one baseline point (M7) — a new point, or its audited Fix / Remove / Keep
+ * (TEACH-46). Keyed by baseline_point_id, so an edit replaces the same entry and
+ * never duplicates it. There is deliberately NO baseline delete: a removed point
+ * stays in the map with status=removed.
+ */
 export function upsertBaselinePoint(doc: YDoc, point: BaselinePoint): void {
   doc.getMap<BaselinePoint>(BASELINE_POINTS).set(point.baseline_point_id, point);
 }

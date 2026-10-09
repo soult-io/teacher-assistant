@@ -107,6 +107,27 @@ export type MismatchDisposition = Member<typeof MISMATCH_DISPOSITIONS>;
  * pause (never break) the consistency run. The para path may write only a
  * restricted subset (§4) — enforced on the write projection, not here.
  */
+/**
+ * Baseline point lifecycle (data-model §2.2, TEACH-46 C1). A baseline point is
+ * never hard-deleted: a removed point keeps its values, stays visible in the
+ * card's History, and is excluded from the baseline estimate, n and canAdopt.
+ */
+export const BASELINE_POINT_STATUSES = ["recorded", "removed"] as const;
+export type BaselinePointStatus = Member<typeof BASELINE_POINT_STATUSES>;
+
+/**
+ * Why a baseline point was removed (TEACH-46 C2). A CLOSED list — no free text,
+ * no "Other" (ky-sped-lbd-sdi-sme ruling 2026-10-09). Any addition must re-clear
+ * the SME and the privacy gate.
+ */
+export const BASELINE_REMOVE_REASONS = [
+  "entered_by_mistake",
+  "duplicate",
+  "wrong_student_or_goal",
+  "probe_not_per_goal_condition",
+] as const;
+export type BaselineRemoveReason = Member<typeof BASELINE_REMOVE_REASONS>;
+
 export const NO_DATA_REASONS = ["no_time", "absent", "testing", "behavior", "no_school"] as const;
 export type NoDataReason = Member<typeof NO_DATA_REASONS>;
 

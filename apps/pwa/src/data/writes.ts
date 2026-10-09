@@ -14,13 +14,18 @@ import {
   type AdoptOptions,
   adoptGoal,
   applyEdit,
+  type BaselineFix,
   bookmarkForLater,
   captureScoredPoint,
+  fixBaselinePoint,
+  keepBaselineTotal,
   type MasteryCandidate,
   recordNoData,
+  removeBaselinePoint,
 } from "@teacher-assistant/domain-core";
 import type {
   BaselinePoint,
+  BaselineRemoveReason,
   IEPGoal,
   IsoDate,
   MismatchDisposition,
@@ -164,6 +169,41 @@ export function upsertGoalMutator(goal: IEPGoal): DocMutator {
 /** Add a baseline point (M7) to a proposed goal's segregated baseline set. */
 export function addBaselinePointMutator(point: BaselinePoint): DocMutator {
   return (doc) => upsertBaselinePoint(doc, point);
+}
+
+/**
+ * TEACH-46 audited baseline edits. Each runs the domain rule (teacher-only, closed
+ * remove reasons, no post-adoption recompute) and upserts the SAME point id with a
+ * Revision appended — offline-first like every other write, never a delete.
+ */
+export function fixBaselinePointMutator(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  fix: BaselineFix,
+  when: Timestamp,
+): DocMutator {
+  const fixed = fixBaselinePoint(point, goal, fix, { who: TEACHER, when });
+  return (doc) => upsertBaselinePoint(doc, fixed);
+}
+
+export function removeBaselinePointMutator(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  reason: BaselineRemoveReason,
+  when: Timestamp,
+): DocMutator {
+  const removed = removeBaselinePoint(point, goal, reason, { who: TEACHER, when });
+  return (doc) => upsertBaselinePoint(doc, removed);
+}
+
+/** "Keep {M}": the teacher confirms a total that differs from the probe's (C8). */
+export function keepBaselineTotalMutator(
+  point: BaselinePoint,
+  goal: IEPGoal,
+  when: Timestamp,
+): DocMutator {
+  const kept = keepBaselineTotal(point, goal, { who: TEACHER, when });
+  return (doc) => upsertBaselinePoint(doc, kept);
 }
 
 /**

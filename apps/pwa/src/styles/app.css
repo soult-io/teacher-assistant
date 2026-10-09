@@ -1293,6 +1293,58 @@ button.rowmain {
   margin-top: 0.4rem;
 }
 
+/* TEACH-46 — the Baseline card's point list (Fix / Remove), the Keep prompt, History. */
+.bpoints {
+  list-style: none;
+  margin: 0.4rem 0;
+  padding: 0;
+}
+.bpoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.3rem 0.5rem;
+  padding: 0.25rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.bpoint:last-child {
+  border-bottom: none;
+}
+.bpointval {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+}
+.bpointraw {
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+.bpointacts {
+  display: flex;
+  gap: 0.3rem;
+}
+.bdecide {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.2rem 0 0;
+}
+.bdecidebtns {
+  display: flex;
+  gap: 0.3rem;
+}
+.bhist {
+  margin: 0.4rem 0;
+}
+.sheettitle {
+  margin: 0.2rem 0 0.5rem;
+  font-size: 1.05rem;
+}
+
 /* ── U6 Para surface + teacher validation queue ─────────────────────────────── */
 .para h1,
 .validation-queue h1 {

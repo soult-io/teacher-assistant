@@ -2,8 +2,12 @@
 // usable only at ≥3 COMPARABLE points (same probe condition). The value is the
 // MEAN by default with a median-of-3 option (the PM convention); it is always an
 // ESTIMATE, never a trend (KY Decision Rules need 6–8 points for a trend).
+//
+// TEACH-46: a REMOVED point, and a point whose total differs from the probe's
+// that the teacher has not kept, never count — not toward n, the value, the
+// condition check or canAdopt.
 
-import type { BaselinePoint, IEPGoal } from "@teacher-assistant/schema";
+import type { BaselinePoint, IEPGoal, OpaqueId } from "@teacher-assistant/schema";
 import { percentCorrect } from "./value.js";
 
 export type BaselineMethod = "mean" | "median";
@@ -18,6 +22,8 @@ export interface BaselineEstimate {
   /** False when the points span more than one probe condition (not comparable). */
   readonly comparable: boolean;
   readonly method: BaselineMethod;
+  /** The ids of the points counted (stored on the adoption Revision, C6). */
+  readonly pointIds: readonly OpaqueId[];
   /** Always an ESTIMATE — never presented as a trend. */
   readonly label: "estimate";
 }
@@ -35,17 +41,41 @@ function median(values: readonly number[]): number {
 }
 
 /**
+ * Whether a baseline point counts toward the estimate (TEACH-46 C4/C8): not
+ * removed, and not a mismatched total the teacher has yet to keep. A point
+ * stored before TEACH-46 has no status and counts as recorded.
+ */
+export function isCountedBaselinePoint(p: BaselinePoint): boolean {
+  return p.status !== "removed" && !(p.denominator_mismatch === true && p.mismatch_kept !== true);
+}
+
+/** The mean or median of the points' % correct (no usability check). Null for no points. */
+export function baselineValueOf(
+  points: readonly BaselinePoint[],
+  method: BaselineMethod,
+): number | null {
+  if (points.length === 0) {
+    return null;
+  }
+  const percents = points.map((p) => percentCorrect(p.numerator, p.denominator_used));
+  return method === "median" ? median(percents) : mean(percents);
+}
+
+/**
  * Derive the baseline ESTIMATE for a proposed goal from its baseline points.
- * Points are "comparable" only if they share one probe condition; mixed
- * conditions are not comparable and yield an unusable estimate. Usable requires
- * ≥3 comparable points. Default method is the mean; median-of-3 is offered.
+ * Only counted points (isCountedBaselinePoint) are considered. Points are
+ * "comparable" only if they share one probe condition; mixed conditions are not
+ * comparable and yield an unusable estimate. Usable requires ≥3 comparable
+ * points. Default method is the mean; median-of-3 is offered.
  */
 export function deriveBaseline(
   goal: IEPGoal,
   baselinePoints: readonly BaselinePoint[],
   method: BaselineMethod = "mean",
 ): BaselineEstimate {
-  const cohort = baselinePoints.filter((p) => p.goal_id === goal.goal_id);
+  const cohort = baselinePoints.filter(
+    (p) => p.goal_id === goal.goal_id && isCountedBaselinePoint(p),
+  );
   const conditions = new Set(
     cohort
       .map((p) => p.probe_condition_id)
@@ -54,17 +84,18 @@ export function deriveBaseline(
   const comparable = conditions.size <= 1;
   const n = cohort.length;
   const usable = comparable && n >= 3;
+  const pointIds = cohort.map((p) => p.baseline_point_id);
 
   if (!usable) {
-    return { value: null, n, usable: false, comparable, method, label: "estimate" };
+    return { value: null, n, usable: false, comparable, method, pointIds, label: "estimate" };
   }
-  const percents = cohort.map((p) => percentCorrect(p.numerator, p.denominator_used));
   return {
-    value: method === "median" ? median(percents) : mean(percents),
+    value: baselineValueOf(cohort, method),
     n,
     usable: true,
     comparable: true,
     method,
+    pointIds,
     label: "estimate",
   };
 }
