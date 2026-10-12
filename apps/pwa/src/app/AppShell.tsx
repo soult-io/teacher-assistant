@@ -152,7 +152,12 @@ function MobileChrome(props: AppShellProps) {
             glyph="●"
             onClick={() => onTab("track")}
           />
-          <TabButton active={tab === "plan"} label="Plan" glyph="☰" onClick={() => onTab("plan")} />
+          <TabButton
+            active={tab === "plan"}
+            label="Plan"
+            glyph="☰"
+            onClick={() => onTab("plan")}
+          />
         </div>
       ) : null}
 
