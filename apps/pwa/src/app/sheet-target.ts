@@ -4,12 +4,14 @@
 // the To-Score queue, keeping the collected admin date + the existing point).
 
 import type { IEPGoal, IsoDate, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
-import type { Lookups, RowVM } from "./screens/dashboard/dashboard-vm.js";
+import { type Lookups, periodLabelOf, type RowVM } from "./screens/dashboard/dashboard-vm.js";
 
 export interface SheetTarget {
   readonly goalId: OpaqueId;
   readonly studentId: OpaqueId;
   readonly initials: string;
+  /** The IEP goal label ("2"), or null when unlabeled (TEACH-41) — shown in the sheet header. */
+  readonly goalLabel: string | null;
   readonly goalText: string;
   readonly periodLabel: string | null;
   readonly probeLabel: string;
@@ -30,11 +32,6 @@ function probeOf(goalId: OpaqueId, lk: Lookups): { label: string; expectedDenomi
   return lk.probeByGoal.get(goalId) ?? { label: "probe", expectedDenominator: 5 };
 }
 
-function periodLabelOf(studentId: OpaqueId, lk: Lookups): string | null {
-  const periodId = lk.periodByStudent(studentId);
-  return periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
-}
-
 /** Sheet target for scoring a dashboard row directly, dated to `adminDate` (today). */
 export function targetForRow(vm: RowVM, lk: Lookups, adminDate: IsoDate): SheetTarget {
   const probe = probeOf(vm.goalId, lk);
@@ -42,6 +39,7 @@ export function targetForRow(vm: RowVM, lk: Lookups, adminDate: IsoDate): SheetT
     goalId: vm.goalId,
     studentId: vm.studentId,
     initials: vm.initials,
+    goalLabel: vm.goalLabel,
     goalText: vm.goalText,
     periodLabel: vm.periodLabel,
     probeLabel: probe.label,
@@ -67,6 +65,7 @@ export function targetForGoal(
     goalId: goal.goal_id,
     studentId: goal.student_id,
     initials: lk.initialsById.get(goal.student_id) ?? "??",
+    goalLabel: goal.goal_label ?? null,
     goalText: goal.goal_text,
     periodLabel: periodLabelOf(goal.student_id, lk),
     probeLabel: probe.label,
@@ -84,6 +83,7 @@ export function targetForQueued(point: ProgressDataPoint, lk: Lookups): SheetTar
     goalId: point.goal_id,
     studentId: point.student_id,
     initials: lk.initialsById.get(point.student_id) ?? "??",
+    goalLabel: lk.goalLabelById.get(point.goal_id) ?? null,
     goalText: lk.goalTextById.get(point.goal_id) ?? "(goal)",
     periodLabel: periodLabelOf(point.student_id, lk),
     probeLabel: probe.label,

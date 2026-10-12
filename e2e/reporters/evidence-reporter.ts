@@ -28,7 +28,9 @@ import type {
 // v2 adds steps[].screenshot (always present: a still record, or null = no still).
 // Additive, still v2: optional top-level `mode` + `commitSha` (see EvidenceFile).
 // v3: a still is full-height and its record carries `width`, `height` and `truncated`.
-export const EVIDENCE_SCHEMA = "journey-evidence/3";
+// v4: top-level `baseURL`, the origin the run tested; the dashboard refuses any run not
+// of the local synthetic build. Namespaced (`ta/`): payroll-app's tag has the same name.
+export const EVIDENCE_SCHEMA = "ta/journey-evidence/4";
 
 /** Which run produced the file: the fast gating run, or the human-pace walkthrough. */
 export type EvidenceMode = "gating" | "walkthrough";
@@ -114,6 +116,9 @@ interface EvidenceFile {
   // can never be shown as this commit's.
   mode: EvidenceMode;
   commitSha: string | null;
+  // The origin every project tested, or null when the projects disagree with the
+  // configured one — the dashboard refuses anything but the local build.
+  baseURL: string | null;
   generatedAt: string;
   stats: {
     expected: number;
@@ -252,19 +257,31 @@ export default class EvidenceReporter implements Reporter {
   private readonly outputFile: string;
   private readonly mode: EvidenceMode;
   private readonly commitSha: string | null;
+  private readonly configuredBaseURL: string | null;
+  private baseURL: string | null = null;
   // Keyed by test.id → the highest-retry (final) result seen for that test.
   private readonly finals = new Map<string, { test: TestCase; result: TestResult }>();
 
   constructor(
-    options: { outputFile?: string; mode?: EvidenceMode; commitSha?: string | null } = {},
+    options: {
+      outputFile?: string;
+      mode?: EvidenceMode;
+      commitSha?: string | null;
+      baseURL?: string | null;
+    } = {},
   ) {
     this.outputFile = resolve(options.outputFile ?? "test-results/journey-evidence.json");
     this.mode = options.mode ?? "gating";
     this.commitSha = options.commitSha ?? null;
+    this.configuredBaseURL = options.baseURL ?? null;
   }
 
-  onBegin(_config: FullConfig, _suite: Suite): void {
+  onBegin(config: FullConfig, _suite: Suite): void {
     this.finals.clear();
+    // Stamp the configured origin only if every project really used it: a project
+    // overriding baseURL makes the stamp null, never a claim the run did not earn.
+    const used = config.projects.map((p) => p.use.baseURL);
+    this.baseURL = used.every((u) => u === this.configuredBaseURL) ? this.configuredBaseURL : null;
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
@@ -287,6 +304,7 @@ export default class EvidenceReporter implements Reporter {
       schema: EVIDENCE_SCHEMA,
       mode: this.mode,
       commitSha: this.commitSha,
+      baseURL: this.baseURL,
       generatedAt: new Date().toISOString(),
       stats: {
         ...stats,

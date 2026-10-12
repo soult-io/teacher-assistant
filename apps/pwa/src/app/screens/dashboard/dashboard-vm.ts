@@ -4,13 +4,30 @@
 // @teacher-assistant/store (buildWeeklyDashboard / groupDashboard). This module
 // only resolves opaque ids → display attributes (initials, goal text, period
 // label, scored %), marks the pending-para rows (from the para-doc queue), and
-// orders the GROUPS for display (student cards owes-first then by initials;
-// period groups by label) — presentation sequencing of engine-grouped data.
+// orders rows and GROUPS for display with the shared display-order comparators
+// (TEACH-25) — presentation sequencing of engine-grouped data.
 
-import { compareCodePoints } from "@teacher-assistant/domain-core";
-import type { NoDataReason, OpaqueId } from "@teacher-assistant/schema";
-import type { DashboardGroup, DashboardRow, DashboardState } from "@teacher-assistant/store";
+import {
+  compareArcOldestFirst,
+  compareCodePoints,
+  duplicateLabelGoalIds,
+} from "@teacher-assistant/domain-core";
+import type { NoDataReason, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
+import type {
+  DashboardGroup,
+  DashboardRow,
+  DashboardState,
+  QueueEntry,
+} from "@teacher-assistant/store";
 import type { DecryptedRecords } from "../../../data/repository.js";
+import {
+  compareNumberAware,
+  compareOptionalText,
+  compareStudentGoal,
+  compareDisplayText,
+  type StudentResolvers,
+  studentGoalKey,
+} from "../../display-order.js";
 
 /** Goal-definition display fields shown in the owes-row meta (from the goal entity). */
 interface GoalMeta {
@@ -25,7 +42,11 @@ export interface RowVM {
   readonly goalId: OpaqueId;
   readonly studentId: OpaqueId;
   readonly initials: string;
+  /** The IEP goal label ("2"), or null when the goal has none (TEACH-41). */
+  readonly goalLabel: string | null;
   readonly goalText: string;
+  /** Another goal of this student, same cohort, shares the label — the lasting duplicate cue. */
+  readonly duplicateLabel: boolean;
   readonly state: DashboardState;
   readonly periodLabel: string | null;
   readonly value: number | undefined;
@@ -51,6 +72,10 @@ export interface StudentCardVM {
 export interface Lookups {
   readonly initialsById: ReadonlyMap<string, string>;
   readonly goalTextById: ReadonlyMap<string, string>;
+  /** IEP goal label per goal; a goal with no label is absent (TEACH-41). */
+  readonly goalLabelById: ReadonlyMap<string, string>;
+  /** Goals whose label is duplicated within their student's cohort (the lasting cue). */
+  readonly duplicateLabelGoalIds: ReadonlySet<string>;
   readonly periodLabelById: ReadonlyMap<string, string>;
   readonly valueByGoal: ReadonlyMap<string, number>;
   readonly metaByGoal: ReadonlyMap<string, GoalMeta>;
@@ -77,6 +102,9 @@ export function buildLookups(
 ): Lookups {
   const initialsById = new Map(records.students.map((s) => [s.student_id, s.initials]));
   const goalTextById = new Map(records.goals.map((g) => [g.goal_id, g.goal_text]));
+  const goalLabelById = new Map(
+    records.goals.flatMap((g) => (g.goal_label !== undefined ? [[g.goal_id, g.goal_label]] : [])),
+  );
   const periodLabelById = new Map(records.periods.map((p) => [p.period_id, p.label]));
   const membershipByStudent = new Map(
     records.students.map((s) => [s.student_id, s.period_memberships[0] ?? null]),
@@ -94,7 +122,7 @@ export function buildLookups(
   );
 
   const valueByGoal = new Map<string, number>();
-  for (const p of records.points) {
+  for (const p of oldestFirst(records.points)) {
     if (p.state === "scored" && p.computed_value !== undefined) {
       valueByGoal.set(p.goal_id, p.computed_value);
     }
@@ -113,6 +141,8 @@ export function buildLookups(
   return {
     initialsById,
     goalTextById,
+    goalLabelById,
+    duplicateLabelGoalIds: duplicateLabelGoalIds(records.goals),
     periodLabelById,
     valueByGoal,
     metaByGoal,
@@ -121,6 +151,15 @@ export function buildLookups(
     pendingGoalIds,
     periodByStudent: (studentId) => membershipByStudent.get(studentId) ?? null,
   };
+}
+
+/**
+ * Points oldest first (the reverse of the ARC history order), so a per-goal
+ * "last one wins" Map keeps the NEWEST point rather than whichever came last in
+ * record order (TEACH-25).
+ */
+export function oldestFirst(points: readonly ProgressDataPoint[]): ProgressDataPoint[] {
+  return [...points].sort(compareArcOldestFirst);
 }
 
 export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {
@@ -132,7 +171,9 @@ export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {
     goalId: row.goalId,
     studentId: row.studentId,
     initials: lk.initialsById.get(row.studentId) ?? "??",
+    goalLabel: lk.goalLabelById.get(row.goalId) ?? null,
     goalText: lk.goalTextById.get(row.goalId) ?? "(goal)",
+    duplicateLabel: lk.duplicateLabelGoalIds.has(row.goalId),
     state: row.state,
     periodLabel,
     value: lk.valueByGoal.get(row.goalId),
@@ -144,20 +185,90 @@ export function toRowVM(row: DashboardRow, lk: Lookups): RowVM {
 }
 
 /**
- * Order a group's rows for display: a student's goals stay ADJACENT and
- * alphabetized (design D1 / §E) — sort by initials, then a stable goal-id
- * tiebreak. Presentation sequencing only; the store's grouping is untouched.
+ * Order a group's rows for display: a student's goals stay ADJACENT and in IEP
+ * order (design D1 / §E; TEACH-25, TEACH-41) — initials, period label, studentId,
+ * goal label (unlabeled last), goal text, with goalId only for true duplicates. Presentation sequencing only;
+ * the store's grouping is untouched.
  */
 export function orderRowsByStudent(rows: readonly RowVM[]): RowVM[] {
   return [...rows].sort(
-    (a, b) => compareCodePoints(a.initials, b.initials) || compareCodePoints(a.goalId, b.goalId),
+    (a, b) => compareStudentGoal(a, b) || compareCodePoints(a.goalId, b.goalId),
+  );
+}
+
+/** A student's period label (their first membership), or null when unassigned. */
+export function periodLabelOf(studentId: OpaqueId, lk: Lookups): string | null {
+  const periodId = lk.periodByStudent(studentId);
+  return periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
+}
+
+/** The display resolvers for the shared student-goal key, off the lookups. */
+function resolversOf(lk: Lookups): StudentResolvers {
+  return {
+    initialsOf: (studentId) => lk.initialsById.get(studentId) ?? "??",
+    periodLabelOf: (studentId) => periodLabelOf(studentId, lk),
+  };
+}
+
+/** Compare two {studentId, goalId} entries by the shared student-goal order, then goalId (one goal's entries stay together). */
+function byStudentGoal(lk: Lookups) {
+  const r = resolversOf(lk);
+  const key = (studentId: OpaqueId, goalId: OpaqueId) =>
+    studentGoalKey(
+      studentId,
+      {
+        goalLabel: lk.goalLabelById.get(goalId) ?? null,
+        goalText: lk.goalTextById.get(goalId) ?? "(goal)",
+      },
+      r,
+    );
+  return (
+    a: { readonly studentId: OpaqueId; readonly goalId: OpaqueId },
+    b: { readonly studentId: OpaqueId; readonly goalId: OpaqueId },
+  ) =>
+    compareStudentGoal(key(a.studentId, a.goalId), key(b.studentId, b.goalId)) ||
+    compareCodePoints(a.goalId, b.goalId);
+}
+
+/**
+ * The To-Score queue in display order: the dashboard's student-goal order, then
+ * the collected admin date (oldest first), then the point id for true duplicates.
+ * The store's buildToScoreQueue keeps record order, which is not stable.
+ */
+export function orderToScoreQueue(queue: readonly QueueEntry[], lk: Lookups): QueueEntry[] {
+  const studentGoal = byStudentGoal(lk);
+  return [...queue].sort(
+    (a, b) =>
+      studentGoal(a, b) ||
+      compareCodePoints(a.adminDate, b.adminDate) ||
+      compareCodePoints(a.dataPointId, b.dataPointId),
+  );
+}
+
+/**
+ * The para-validation queue in display order: admin date first (like
+ * orderPendingForValidation's batch order), then the student-goal order, then
+ * entry time, then the point id for true duplicates.
+ */
+export function orderValidationQueue(
+  queue: readonly ProgressDataPoint[],
+  lk: Lookups,
+): ProgressDataPoint[] {
+  const studentGoal = byStudentGoal(lk);
+  const ids = (p: ProgressDataPoint) => ({ studentId: p.student_id, goalId: p.goal_id });
+  return [...queue].sort(
+    (a, b) =>
+      compareCodePoints(a.admin_date, b.admin_date) ||
+      studentGoal(ids(a), ids(b)) ||
+      a.entry_ts - b.entry_ts ||
+      compareCodePoints(a.data_point_id, b.data_point_id),
   );
 }
 
 /**
  * The right-hand value text for a row, shared by the flat GoalRow and the nested
  * StudentCard: the scored % or the ⊘ no-data reason, or null when the goal owes
- * (the flat row hides the value and shows the score-later flag; the card renders
+ * (the flat row hides the value and shows the score-later 🕐 toggle; the card renders
  * a plain "owes"). One source of truth for state → value display.
  */
 export function rowValueText(vm: RowVM): string | null {
@@ -179,37 +290,77 @@ export function periodLabelOfGroup(group: DashboardGroup, lk: Lookups): string {
   return lk.periodLabelById.get(group.key) ?? "Unassigned";
 }
 
-/** Order by-period groups by their period label (presentation ordering). */
+/**
+ * Order by-period groups by their period label, number-aware ("Period 2" before
+ * "Period 10"), then the group key (periodId) for equal labels.
+ */
 export function orderPeriodGroups(
   groups: readonly DashboardGroup[],
   lk: Lookups,
 ): DashboardGroup[] {
-  return [...groups].sort((a, b) =>
-    compareCodePoints(periodLabelOfGroup(a, lk), periodLabelOfGroup(b, lk)),
+  return [...groups].sort(
+    (a, b) =>
+      compareNumberAware(periodLabelOfGroup(a, lk), periodLabelOfGroup(b, lk)) ||
+      compareCodePoints(a.key, b.key),
   );
+}
+
+/** Store rows → row VMs in orderRowsByStudent order (the one ordering every lens renders in). */
+export function orderedRowVMs(rows: readonly DashboardRow[], lk: Lookups): RowVM[] {
+  return orderRowsByStudent(rows.map((row) => toRowVM(row, lk)));
+}
+
+/**
+ * Group already-ordered rows into student cards, one per student, in the order each
+ * student first appears (TEACH-43: the desktop owes-first and by-period sections).
+ * It never re-sorts: pass rows through orderRowsByStudent first, so a student's goals
+ * stay adjacent and in IEP order (TEACH-41). buildStudentCards (shared with mobile)
+ * keeps its own card order.
+ */
+export function cardsFromOrderedRows(rows: readonly RowVM[]): StudentCardVM[] {
+  const rowsByStudent = new Map<OpaqueId, RowVM[]>();
+  for (const row of rows) {
+    const studentRows = rowsByStudent.get(row.studentId);
+    if (studentRows === undefined) {
+      rowsByStudent.set(row.studentId, [row]);
+    } else {
+      studentRows.push(row);
+    }
+  }
+  return [...rowsByStudent].map(([studentId, studentRows]) =>
+    toStudentCard(studentId, studentRows),
+  );
+}
+
+/** One card over a student's rows, kept in the order given. */
+function toStudentCard(studentId: OpaqueId, rows: readonly RowVM[]): StudentCardVM {
+  return {
+    studentId,
+    initials: rows[0]?.initials ?? "??",
+    periodLabels: [...new Set(rows.map((r) => r.periodLabel).filter((l) => l !== null))],
+    todo: rows.filter((r) => r.state === "owes").length,
+    rows,
+  };
 }
 
 /**
  * Build by-student cards from the store's by-student groups. Card order is
- * presentation: students who owe a point first, then by initials (design §E.4).
- * Rows within a card are ordered by initials → goal-id (orderRowsByStudent) so a
- * student's goals stay adjacent (§E); the store's grouping is untouched.
+ * presentation: students who owe a point first, then initials, then the card's
+ * first period label (none last), then studentId (design §E.4; TEACH-25). Rows
+ * within a card follow orderRowsByStudent, so a student's goals read in IEP order.
  */
 export function buildStudentCards(groups: readonly DashboardGroup[], lk: Lookups): StudentCardVM[] {
-  const cards: StudentCardVM[] = groups.map((group) => {
-    const rows = orderRowsByStudent(group.rows.map((r) => toRowVM(r, lk)));
-    const periodLabels = [...new Set(rows.map((r) => r.periodLabel).filter((l) => l !== null))];
-    return {
-      studentId: group.key as OpaqueId,
-      initials: rows[0]?.initials ?? "??",
-      periodLabels,
-      todo: rows.filter((r) => r.state === "owes").length,
-      rows,
-    };
-  });
+  const cards: StudentCardVM[] = groups.map((group) =>
+    toStudentCard(group.key as OpaqueId, orderedRowVMs(group.rows, lk)),
+  );
   return cards.sort((a, b) => {
     const aTodo = a.todo > 0 ? 0 : 1;
     const bTodo = b.todo > 0 ? 0 : 1;
-    return aTodo - bTodo || compareCodePoints(a.initials, b.initials);
+    return (
+      aTodo - bTodo ||
+      compareDisplayText(a.initials, b.initials) ||
+      compareOptionalText(a.periodLabels[0] ?? null, b.periodLabels[0] ?? null) ||
+      compareCodePoints(a.studentId, b.studentId)
+    );
   });
 }

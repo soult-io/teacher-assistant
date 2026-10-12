@@ -11,7 +11,7 @@
 # SECURITY: nginx-unprivileged runs as non-root (uid 101) on port 8080. Public exposure,
 # TLS, and the access gate are the Lexington NPM's job (mirrors the pwa-static image);
 # this server is reached by the proxy over the shared docker network.
-FROM nginxinc/nginx-unprivileged:1.27-alpine AS runtime
+FROM nginxinc/nginx-unprivileged:1.30-alpine AS runtime
 COPY tools/verify-dashboard/nginx.conf /etc/nginx/conf.d/default.conf
 COPY dist-dashboard /usr/share/nginx/html
 EXPOSE 8080

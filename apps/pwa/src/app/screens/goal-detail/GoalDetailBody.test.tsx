@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { buildSyntheticSeed } from "../../../data/synthetic-seed.js";
 import { GoalDetailBody, type GoalDetailLayout } from "./GoalDetailScreen.js";
@@ -27,6 +27,8 @@ function renderBody(layout: GoalDetailLayout) {
         onAddPoint={vi.fn()}
         onEditPoint={vi.fn()}
         onAckMastery={vi.fn()}
+        labelDuplicates={[]}
+        onSetGoalLabel={vi.fn()}
         layout={layout}
       />
     </div>,
@@ -34,15 +36,15 @@ function renderBody(layout: GoalDetailLayout) {
 }
 
 describe("GoalDetailBody — layout reflow (U7)", () => {
-  it("full layout uses two columns; pane layout is a single stacked column", () => {
+  it("full layout uses two columns; mobile layout is a single column", () => {
     const full = renderBody("full");
     expect(full.container.querySelector(".twocol")).not.toBeNull();
     full.unmount();
-    const pane = renderBody("pane");
-    expect(pane.container.querySelector(".twocol")).toBeNull();
+    const mobile = renderBody("mobile");
+    expect(mobile.container.querySelector(".twocol")).toBeNull();
   });
 
-  it.each<GoalDetailLayout>(["mobile", "pane", "full"])(
+  it.each<GoalDetailLayout>(["mobile", "full"])(
     "preserves the honesty surfaces verbatim in the %s layout",
     (layout) => {
       const { getByTestId, getAllByText } = renderBody(layout);
@@ -54,4 +56,37 @@ describe("GoalDetailBody — layout reflow (U7)", () => {
       expect(getAllByText(/never plotted as a zero/).length).toBeGreaterThan(0);
     },
   );
+
+  it("an open goal # draft never carries over when the body switches goal (TEACH-41)", () => {
+    const records = buildSyntheticSeed(NOW).master;
+    const [a, b] = records.goals.filter((g) => g.status === "active");
+    if (a === undefined || b === undefined) {
+      throw new Error("expected two active goals");
+    }
+    const onSetGoalLabel = vi.fn();
+    const body = (goal: typeof a) => (
+      <GoalDetailBody
+        key={goal.goal_id}
+        goal={goal}
+        points={records.points}
+        observations={records.observations}
+        initials="AB"
+        periodLabel="P2"
+        probeLabel="5-item probe"
+        isNonInstructional={() => false}
+        onAddPoint={vi.fn()}
+        onEditPoint={vi.fn()}
+        onAckMastery={vi.fn()}
+        labelDuplicates={[]}
+        onSetGoalLabel={onSetGoalLabel}
+        layout="full"
+      />
+    );
+    const view = render(body(a));
+    fireEvent.click(view.getByTestId("goal-label-edit"));
+    fireEvent.change(view.getByTestId("goal-label-input"), { target: { value: "Goal 2" } });
+    view.rerender(body(b));
+    expect(view.queryByTestId("goal-label-input")).toBeNull();
+    expect(onSetGoalLabel).not.toHaveBeenCalled();
+  });
 });

@@ -1,0 +1,381 @@
+// Output check: the last gate before the dashboard is written. The image it lands in
+// (ghcr.io/soult-io/teacher-assistant-verify) and the Actions artifacts are PUBLIC, so
+// everything the page is built from is scanned for student-data shapes, and every
+// trace.zip's network log must show only the local synthetic build.
+//
+// The inputs are synthetic by construction (the PWA's synthetic seed, run against the
+// local vite preview). This is defence in depth for the accidental case — a real value
+// in a test, a run pointed at a live URL. A hit refuses the whole build.
+//
+// The logs of a public Actions run are public too: a finding records the file, the
+// pattern type and the location — NEVER the matched value.
+//
+// Not covered here: videos and stills (pixels). Their guard is the origin stamp
+// (checkRunOrigin in ingest.mjs); the gating run's own traces back it at network level.
+// The walkthrough records a trace too (in its artifact, never copied into the page):
+// its network log is the same proof for the walkthrough videos. This scan checks every
+// request that is logged; it cannot tell a trace that logged none because snapshots were
+// off (Playwright then writes empty *.network entries) from a test that made no request.
+//
+// Deliberately NOT scanned: a name blocklist (student initials are the only identity
+// the app holds) and bare digit runs as student IDs (they collide with timestamps,
+// durations and sizes).
+
+import { readFileSync } from "node:fs";
+import { readZipEntries } from "./zip.mjs";
+
+/** RFC 2606 / RFC 6761 names that can never resolve to a real server. */
+const UNRESOLVABLE_TLDS = [".test", ".example", ".invalid"];
+/** Reserved names never counted as a real address (`.localhost` resolves, locally). */
+const RESERVED_TLDS = [...UNRESOLVABLE_TLDS, ".localhost"];
+const RESERVED_DOMAINS = ["example.com", "example.net", "example.org"];
+// A match whose "TLD" is a file extension is a file name, not an address — Playwright
+// names every screencast frame `page@<id>-<time>.jpeg`, and assets go `icon@2x.png`.
+// Never a real TLD (`.zip` is one, so it is not listed).
+const FILE_EXTENSIONS = new Set(
+  "jpeg jpg png webp gif svg ico webm mp4 js mjs cjs ts tsx css map json html woff woff2 ttf".split(
+    " ",
+  ),
+);
+
+// Bounded, unambiguous (a dot only as a label separator) so matching stays linear on
+// untrusted input. Group 1 is the domain.
+const EMAIL_RE = /[a-z0-9._%+-]{1,64}@([a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,9}\.[a-z]{2,24})\b/gi;
+const SSN_RE = /\b\d{3}-\d{2}-\d{4}\b/g;
+const PHONE_RE = /(?:\+?1[-.\s]?)?\(?\b\d{3}\)?[-.\s]\d{3}[-.\s]\d{4}\b/g;
+
+// A student's initials: two or three capital letters, nothing else. An empty string
+// (a blank form's default) holds no student data.
+const INITIALS_OK = /^(?:[A-Z]{2,3})?$/;
+// A quoted `initials` key (JSON, or JSON escaped inside a JSON string: group 1 is the
+// escape run, bounded so a long backslash run stays linear). Its value must be a string
+// of the same escape level, or it is a finding.
+const INITIALS_JSON_KEY = /(\\{0,15})"initials\1"\s*:\s*/g;
+// Deeper than that bound (5+ levels of JSON-in-JSON) the key is not read: a finding.
+const INITIALS_TOO_DEEP = /\\{16}"initials/g;
+// A bare key with a string literal (a JS bundle or test source): `initials: "AB"`.
+const INITIALS_JS_KEY = /(?<![\w$"'\\])initials\s*:\s*(["'`])(.*?)\1/g;
+
+// Trace entries that are always text: a NUL byte in one makes it unreadable, not binary.
+const TEXT_ENTRY = /(?:\.(?:trace|network|stacks)$|^src\/)/;
+
+/** @typedef {"email"|"ssn"|"phone"|"initials"|"network-host"|"origin"|"unreadable"} FindingKind */
+/** @typedef {{file: string, kind: FindingKind, location: string}} Finding */
+
+function isUnresolvableHost(hostname) {
+  const h = hostname.toLowerCase();
+  return UNRESOLVABLE_TLDS.some((tld) => h.endsWith(tld));
+}
+
+function isReservedDomain(domain) {
+  const d = domain.toLowerCase();
+  return (
+    FILE_EXTENSIONS.has(d.slice(d.lastIndexOf(".") + 1)) ||
+    RESERVED_DOMAINS.includes(d) ||
+    RESERVED_DOMAINS.some((r) => d.endsWith(`.${r}`)) ||
+    RESERVED_TLDS.some((tld) => d.endsWith(tld))
+  );
+}
+
+/** The string value after a quoted `initials` key, or null when it is not a string. */
+function jsonStringAt(text, at, esc) {
+  const quote = `${esc}"`;
+  if (!text.startsWith(quote, at)) return null;
+  const end = text.indexOf(quote, at + quote.length);
+  return end < 0 ? null : text.slice(at + quote.length, end);
+}
+
+// A base64 `data:` URL (a DOM snapshot's inline image or font, or text a page embedded):
+// group 1 is the payload. Every part has exactly one parse (no two adjacent runs of the
+// same class), so a failed match costs O(n) — never a product of splits.
+const DATA_URL_RE =
+  /data:[\w.+-]{0,100}(?:\/[\w.+-]{0,100})?(?:;[\w.+-]{1,64}(?:=[\w.+-]{0,64})?){0,5};base64,([A-Za-z0-9+/]{4,}={0,2})/g;
+/** A payload inside a payload is decoded too, to this depth; deeper is a finding. */
+const MAX_DATA_URL_DEPTH = 2;
+
+/** Bytes a UTF-8 sequence takes, from its lead byte (0 for a continuation byte). */
+const utf8Length = (byte) => (byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 0);
+
+/** A payload as text. Playwright shortens long values in a trace, which can cut a
+ * multi-byte character: only an incomplete final UTF-8 sequence is dropped, so binary
+ * never passes as text by trimming. */
+function decodePayloadText(data) {
+  const text = decodeText(data);
+  if (text !== null) return text;
+  for (let back = 1; back <= 3 && back <= data.length; back++) {
+    const need = utf8Length(data[data.length - back]);
+    if (need === 0) continue;
+    // The last lead byte: its sequence must run past the end (cut), or it is not a cut.
+    return need > back ? decodeText(data.subarray(0, data.length - back)) : null;
+  }
+  return null;
+}
+
+/** Findings inside a base64 `data:` URL payload, at the URL's offset: its decoded text
+ * is matched like any text; decoded binary must be an image (or, inside a trace, a
+ * font or icon). */
+function dataUrlHits(text, depth, glyphs) {
+  const hits = [];
+  for (const m of text.matchAll(DATA_URL_RE)) {
+    if (depth >= MAX_DATA_URL_DEPTH) {
+      hits.push({ kind: "unreadable", index: m.index });
+      continue;
+    }
+    const data = Buffer.from(m[1], "base64");
+    const decoded = decodePayloadText(data);
+    if (decoded !== null) {
+      for (const h of matchOffsets(decoded, { depth: depth + 1, glyphs })) {
+        hits.push({ kind: h.kind, index: m.index });
+      }
+    } else if (!isKnownMedia(data, { glyphs })) {
+      hits.push({ kind: "unreadable", index: m.index });
+    }
+  }
+  return hits;
+}
+
+/** Offsets of every PII-shaped value in the text, by kind (a value inside a base64
+ * `data:` URL is reported at the URL). `glyphs`: a font/icon payload is expected (a
+ * trace entry). */
+function matchOffsets(text, { depth = 0, glyphs = false } = {}) {
+  const hits = dataUrlHits(text, depth, glyphs);
+  for (const m of text.matchAll(EMAIL_RE)) {
+    if (!isReservedDomain(m[1])) hits.push({ kind: "email", index: m.index });
+  }
+  for (const m of text.matchAll(SSN_RE)) hits.push({ kind: "ssn", index: m.index });
+  for (const m of text.matchAll(PHONE_RE)) hits.push({ kind: "phone", index: m.index });
+  for (const m of text.matchAll(INITIALS_JSON_KEY)) {
+    const value = jsonStringAt(text, m.index + m[0].length, m[1]);
+    if (value === null || !INITIALS_OK.test(value)) hits.push({ kind: "initials", index: m.index });
+  }
+  for (const m of text.matchAll(INITIALS_TOO_DEEP)) hits.push({ kind: "initials", index: m.index });
+  for (const m of text.matchAll(INITIALS_JS_KEY)) {
+    if (!INITIALS_OK.test(m[2])) hits.push({ kind: "initials", index: m.index });
+  }
+  return hits.sort((a, b) => a.index - b.index);
+}
+
+/** 1-based line:col of an offset. */
+function lineCol(text, index) {
+  let line = 1;
+  let lineStart = 0;
+  for (let i = text.indexOf("\n"); i >= 0 && i < index; i = text.indexOf("\n", i + 1)) {
+    line++;
+    lineStart = i + 1;
+  }
+  return `${line}:${index - lineStart + 1}`;
+}
+
+/**
+ * Findings for one text. `where` prefixes the location (a zip entry name).
+ * @param {{glyphs?: boolean}} [opts] `glyphs`: accept an inline font or icon (trace
+ *   entries only — their short signatures are not trusted anywhere else)
+ * @returns {Finding[]}
+ */
+export function scanText(text, file, where = "", { glyphs = false } = {}) {
+  return matchOffsets(text, { glyphs }).map((h) => ({
+    file,
+    kind: h.kind,
+    location: `${where}${lineCol(text, h.index)}`,
+  }));
+}
+
+const UTF8 = new TextDecoder("utf-8", { fatal: true });
+
+/**
+ * The bytes as text, or null when they are not text: any NUL byte (which also rules out
+ * UTF-16) or any invalid UTF-8. Never decoded lossily — a compressed or encoded blob
+ * with no NUL byte would otherwise be scanned as mojibake and pass.
+ * @param {Uint8Array} data
+ * @returns {string|null}
+ */
+export function decodeText(data) {
+  if (data.includes(0)) return null;
+  try {
+    return UTF8.decode(data);
+  } catch {
+    return null;
+  }
+}
+
+/** Leading bytes (`[offset, bytes]` pairs, all must match) of the image and video formats
+ * a run legitimately holds. */
+const PIXEL_MAGIC = [
+  [[0, [0xff, 0xd8, 0xff]]], // JPEG
+  [[0, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]]], // PNG
+  [[0, [...Buffer.from("GIF8")]]],
+  [
+    [0, [...Buffer.from("RIFF")]],
+    [8, [...Buffer.from("WEBP")]],
+  ],
+  [[0, [0x1a, 0x45, 0xdf, 0xa3]]], // WebM / Matroska
+  [[4, [...Buffer.from("ftyp")]]], // MP4
+];
+/** Fonts and icons: only ever a page resource inside a trace. Their short signatures
+ * (TrueType, ICO) are why they are not accepted anywhere else. */
+const GLYPH_MAGIC = [
+  [[0, [...Buffer.from("wOFF")]]],
+  [[0, [...Buffer.from("wOF2")]]],
+  [[0, [0x00, 0x01, 0x00, 0x00]]], // TrueType
+  [[0, [...Buffer.from("OTTO")]]], // OpenType
+  [[0, [0x00, 0x00, 0x01, 0x00]]], // ICO
+];
+
+const matches = (data, signature) =>
+  signature.every(([at, bytes]) => bytes.every((b, i) => data[at + i] === b));
+
+/** Is this an image or a video by its leading bytes (never by its name)? With `glyphs`, a
+ * font or icon also counts. Pixels and glyphs are the only binary a scan may pass unread.
+ * @param {Uint8Array} data
+ * @param {{glyphs?: boolean}} [opts] */
+export function isKnownMedia(data, { glyphs = false } = {}) {
+  const known = glyphs ? [...PIXEL_MAGIC, ...GLYPH_MAGIC] : PIXEL_MAGIC;
+  return known.some((signature) => matches(data, signature));
+}
+
+/** Protocols whose URL names a host to check. */
+const HOST_PROTOCOLS = new Set(["http:", "https:", "ws:", "wss:"]);
+
+/** Is this URL a request to the allowed host itself? The positive proof: the strict
+ * subset of "local" that excludes data:/blob: and unresolvable test names. */
+const isAllowedHost = (url, allowedHost) =>
+  HOST_PROTOCOLS.has(url.protocol) && url.host === allowedHost;
+
+/** Does a network-log URL stay local: the allowed host:port, an unresolvable name, or
+ * no host at all (data:, about:)? A protocol it does not know is not local. */
+function isLocalRequest(raw, allowedHost) {
+  const url = new URL(raw);
+  if (url.protocol === "blob:") return isLocalRequest(url.pathname, allowedHost);
+  if (url.protocol === "data:" || url.protocol === "about:") return true;
+  if (!HOST_PROTOCOLS.has(url.protocol)) return false;
+  return url.host === allowedHost || isUnresolvableHost(url.hostname);
+}
+
+/** The request URL of one `*.network` line; throws when there is none. */
+function requestUrl(line) {
+  const url = JSON.parse(line)?.snapshot?.request?.url;
+  if (typeof url !== "string") throw new Error("no request url");
+  new URL(url);
+  return url;
+}
+
+/**
+ * How many requests in the trace's `*.network` entries went to the allowed host itself
+ * (not a data:/blob:/reserved name): the positive proof a recording shows the local
+ * build. 0 for an archive or line it cannot read — no proof, never an error.
+ * @param {Buffer} buf a trace.zip
+ * @param {string} allowedHost
+ */
+export function localRequestCount(buf, allowedHost) {
+  let entries;
+  try {
+    entries = readZipEntries(buf);
+  } catch {
+    return 0;
+  }
+  let count = 0;
+  for (const { name, data } of entries) {
+    if (!name.endsWith(".network")) continue;
+    for (const line of (decodeText(data) ?? "").split("\n")) {
+      try {
+        if (isAllowedHost(new URL(requestUrl(line)), allowedHost)) count++;
+      } catch {
+        // not a request line: no proof from it
+      }
+    }
+  }
+  return count;
+}
+
+/**
+ * Every request in a `*.network` entry must go to the allowed host — or to a reserved
+ * name that cannot resolve (a test fulfils synthetic pages on `http://overlay.test`
+ * through a route, so nothing leaves the runner).
+ */
+function scanNetwork(text, file, entry, allowedHost) {
+  const findings = [];
+  text.split("\n").forEach((line, i) => {
+    if (line.trim() === "") return;
+    const location = `${entry}:${i + 1}`;
+    let url;
+    try {
+      url = requestUrl(line);
+    } catch {
+      // A line we cannot read cannot be shown to be local.
+      findings.push({ file, kind: "unreadable", location });
+      return;
+    }
+    let local;
+    try {
+      local = isLocalRequest(url, allowedHost);
+    } catch {
+      // e.g. `blob:null/<id>`: no origin to check. Caught so the URL never reaches a log.
+      local = false;
+    }
+    if (!local) findings.push({ file, kind: "network-host", location });
+  });
+  return findings;
+}
+
+/**
+ * Findings for one trace.zip: the text scan over every text entry, and the host check
+ * over every `*.network` entry.
+ * @param {Buffer} buf
+ * @param {string} file
+ * @param {string} allowedHost the only host:port the run may have reached
+ * @returns {Finding[]}
+ */
+export function scanTraceZip(buf, file, allowedHost) {
+  let entries;
+  try {
+    entries = readZipEntries(buf);
+  } catch {
+    return [{ file, kind: "unreadable", location: "archive" }];
+  }
+  const findings = [];
+  for (const { name, data } of entries) {
+    const text = decodeText(data);
+    if (text === null) {
+      // A trace's own logs are never skipped as binary, and binary other than an image or
+      // font cannot be read: unreadable, not clean.
+      if (TEXT_ENTRY.test(name) || !isKnownMedia(data, { glyphs: true })) {
+        findings.push({ file, kind: "unreadable", location: name });
+      }
+      continue;
+    }
+    if (name.endsWith(".network")) findings.push(...scanNetwork(text, file, name, allowedHost));
+    findings.push(...scanText(text, file, `${name}:`, { glyphs: true }));
+  }
+  return findings;
+}
+
+/**
+ * Scan everything the dashboard is built from and the page itself.
+ * @param {{files: string[], traceZips: string[], html: {file: string, text: string},
+ *   allowedHost: string}} args every listed file must exist (the caller drops absent ones)
+ * @returns {Finding[]}
+ */
+export function scanBuild({ files, traceZips, html, allowedHost }) {
+  const findings = [];
+  for (const file of files) {
+    const text = decodeText(readFileSync(file));
+    if (text === null) findings.push({ file, kind: "unreadable", location: "not UTF-8 text" });
+    else findings.push(...scanText(text, file));
+  }
+  for (const file of traceZips) {
+    findings.push(...scanTraceZip(readFileSync(file), file, allowedHost));
+  }
+  findings.push(...scanText(html.text, html.file));
+  return findings;
+}
+
+// Control characters in a logged name could start a new line that GitHub reads as a
+// workflow command (`::stop-commands::`).
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching them is the point
+const CONTROL = /[\u0000-\u001f\u007f]/g;
+
+/** A log line per finding: file, pattern type, location — never the matched value. */
+export function formatFindings(findings) {
+  const clean = (s) => String(s).replace(CONTROL, "?");
+  return findings.map((f) => `  ${clean(f.file)} [${f.kind}] at ${clean(f.location)}`).join("\n");
+}

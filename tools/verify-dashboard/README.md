@@ -39,13 +39,49 @@ check):
    ones), so it can never contradict the cards below it — no Playwright CLI is invoked
    at generate time. With no verified journey the tile degrades to a dash, like the
    UNVERIFIED cards, rather than a misleading `0`.
-4. Reads **CI status** for `main` from the GitHub Actions REST API (best-effort;
-   degrades to neutral pills without a token).
+4. Reads **CI status for the page's own commit** from the GitHub Actions REST API
+   (best-effort; degrades to neutral pills without a token) — see
+   [CI pills](#ci-pills-bound-to-the-commit).
 5. Fills `engine/template.html` → `dist-dashboard/index.html` + `videos/` + `traces/`
    + `stills/`. Each journey renders its human-pace walkthrough video (below) and a
    step-synced list; the gating run's fast video is only a raw-evidence link. The stills
    are taken by the e2e run itself, so the generator needs no browser and no preview
    server.
+
+### CI pills: bound to the commit
+
+The pill group is headed **`CI for <short sha>`** and every pill describes a run of
+that one commit — the commit the journeys, counts and provenance come from. The
+generator passes the FULL 40-char sha to `collectCiPills(repo, token, specs, sha)`
+(from `COMMIT_SHA`, else `GITHUB_SHA`, else `git rev-parse HEAD`); the engine never
+works from a short sha.
+
+- **Query:** `…/workflows/<file>/runs?head_sha=<sha>&event=push&branch=main`.
+- **Client-side re-check** of every candidate: `head_sha === sha`, `event === "push"`,
+  `head_repository.full_name === repo` (case-insensitive). This rejects another
+  commit's run, PR / `workflow_dispatch` runs, and a fork PR from a branch named
+  `main`, even if the API ignored a filter.
+- **Several matches:** newest `created_at` wins (ties: higher run id). Each list entry
+  is a distinct run already at its latest attempt — a re-run bumps `run_attempt` on
+  the same entry — so `run_attempt` does not order different runs. Job-split pills
+  (e.g. `verify` + the `build-images` matrix) read `jobs?filter=latest` of that
+  matched run only.
+
+Pill states:
+
+| state | class | shown as | meaning |
+|---|---|---|---|
+| `success` / `failure` | `pass` / `fail` | label | the run's verdict (`timed_out` → failure) |
+| `in_progress` | `note` | `· in progress at build time <ISO>` | not finished when the page was generated |
+| `no_run` | `none` (neutral, solid) | `· no run for this commit` | the API answered; no matching run exists. **Never** filled from another commit's run |
+| `unknown` | `unk` (neutral, dashed) | `· status unknown` | the API could not be read (error, no repo/token, no valid sha); also a matched run with no job matching the spec, or a completed item with no conclusion |
+| other (`cancelled`, `skipped`, …) | `note` | label | neutral |
+
+The page is **static**, generated when the e2e run completes. Sibling workflows for
+the same commit (CI, CodeQL) may still be running then, so their pills honestly read
+"in progress at build time" — the page does not poll or update. On a PR build the
+dashboard is built from the PR merge ref, which has no push run, so its pills read
+"no run for this commit".
 
 ### Evidence: why a custom Playwright reporter
 
@@ -97,12 +133,14 @@ the 4000px cap, or content that does not grow with the viewport) is recorded as
 `truncated: true` — never silently cropped. The walkthrough project takes no stills,
 so its video is untouched.
 
-The reporter records the still as `steps[].screenshot` (schema `journey-evidence/3`):
+The reporter records the still as `steps[].screenshot` (schema `ta/journey-evidence/4`; v3 had the same still record):
 a `{path, contentType, width, height, truncated}` record, or `null` when there is none.
 Ingest maps it onto the Journey model as `steps[].screenshot` — a served
 `stills/<journey>-<engine>-<NN>.jpg` path, or `null` — and `steps[].screenshot_truncated`:
 `true`/`false` as recorded, or `null` when there is no still or the run predates the
-flag (v2):
+flag (v2); `steps[].screenshot_width`/`screenshot_height` follow the same rule. The
+journey also carries `steps_engine` (the browser its steps and stills come from) and
+`unshown_still_engines` (browsers that took stills the card cannot show):
 
 - **Absent is explicit.** A step with no still (a firefox-canonical card, a capture
   that failed, a file missing from the artifact) is `null` — never a placeholder, never
@@ -117,7 +155,30 @@ flag (v2):
 - **Flaky stays flaky.** Stills come from the final attempt, but journey status still
   comes from Playwright's `outcome`, so a retry that passed renders FLAKY.
 
-The card does not render the stills yet (TEACH-15); the Journey model carries them.
+### Step screens on the card (Phase 3c, TEACH-15)
+
+The stills are hidden until a reader asks for one; the page fetches none on load.
+
+- **Video | Screens.** With JS, a card with stills gets two views over its media
+  column, and the step list drives both. Clicking a step seeks the video in the Video
+  view and shows that step's still in the Screens view. The Screens view shows one still
+  at a time, with Prev/Next and the arrow keys, which work only while focus is in the
+  viewer. It shows the step's label and assertions, the still's size, an "open full size"
+  link, and a "truncated at capture limit" note when the still was cut off. A tall still
+  is shown at the column's width and scrolls inside a fixed-height stage. It is never
+  squashed, and stepping does not shift the layout. The stills' browser is labelled.
+- **Which view opens.** The Video view exists only when the card has a same-commit
+  walkthrough. A passed card with one opens on Video. A card without one opens on
+  Screens at step 1. A failed card opens on its failing step's still, which is the
+  screen it failed on; the failing step also gets a "View failure screen" button.
+- **No JS.** The tab row and the viewer stay hidden. Each step with a still has a
+  "Screen ↗" link ("View failure screen ↗" on the failing step) that opens the image.
+  This is a link rather than an inline image because browsers ignore `loading="lazy"`
+  when scripting is off, so an inline image would fetch every still on load.
+- **States.** A step without a still shows "no screen captured". A run with no stills
+  shows one line instead of a viewer, and names the browser that has stills when the
+  card's steps come from another browser. A flaky card names the retry its stills come
+  from. An UNVERIFIED card never renders stills.
 
 ## Layout
 
@@ -125,8 +186,9 @@ The card does not render the stills yet (TEACH-15); the Journey model carries th
 - `engine/ingest.mjs` — `journey-evidence.json` + manifest + provenance → `Journey[]`.
 - `engine/assets.mjs` — serves run assets (videos, traces, stills) as files next to the page; still + video size caps, one published-bytes budget.
 - `engine/provenance.mjs` — run provenance from CI env + artifact sha256.
+- `engine/pii-scan.mjs` — the output scan (see [Output checks](#output-checks)); `engine/zip.mjs` reads trace.zip entries for it.
 - `engine/counts.mjs` — vitest count mechanics + the journeys→e2e-tile count (`deriveE2eCount`).
-- `engine/ci-status.mjs` — GitHub Actions API → status pills.
+- `engine/ci-status.mjs` — GitHub Actions API → status pills bound to one commit sha.
 - `engine/render/lib.mjs` — pure builders (tiles, bars, pills, callouts, template fill).
 - `engine/render/journeys.mjs` — the full JourneyCard (video + synced step list +
   assertions + failure/flaky/UNVERIFIED states) + list.
@@ -152,7 +214,53 @@ reporter array, so a local run needs `CI=1` to produce it.
 
 `EVIDENCE_FILE` overrides the evidence path; `SOURCE_*` supply the run provenance (the
 CI wiring sets them from the resolved e2e run). `GITHUB_REPOSITORY` + `GITHUB_TOKEN`
-enable the live CI pills. With no evidence file, every journey renders UNVERIFIED.
+enable the CI pills (bound to `COMMIT_SHA`, else `GITHUB_SHA`, else the checkout's
+HEAD). With no evidence file, every journey renders UNVERIFIED.
+
+## Output checks
+
+The page is private, but the image and the Actions artifacts are **public** (see
+Hosting). Inputs are synthetic by construction; these checks refuse the whole build (no
+`dist-dashboard/`, non-zero exit) if that ever stops being true:
+
+- **Origin.** The evidence files (schema `ta/journey-evidence/4`) carry `baseURL`, the
+  origin the run tested. Ingest refuses any value but `http://127.0.0.1:4173` (the local
+  vite preview of the synthetic seed). This is the only check that covers videos and
+  stills. Pre-stamp evidence (v1–v3) is refused when publishing and not ingested on a
+  PR build. The gating Playwright config also throws when `CI` and `E2E_BASE_URL` are
+  both set.
+- **Network.** Every request in every trace.zip `*.network` log must go to `127.0.0.1`
+  (or an RFC 2606 name that cannot resolve, e.g. `overlay.test`, which a test fulfils
+  through a route).
+  An empty log proves nothing (a trace recorded without snapshots logs no network), so
+  media also needs positive proof. Every published gating video or still needs its
+  trace to hold at least one request to `127.0.0.1:4173`; without one, a publish is
+  refused. A walkthrough video is only bound when its own trace does; otherwise the card
+  shows no video and says why.
+- **Text scan.** `journey-evidence.json`, `walkthrough-evidence.json`, `results.json`,
+  the rendered `index.html` and every text entry of every trace.zip (including the
+  decoded payload of every base64 `data:` URL) are scanned for an
+  email (RFC 2606 domains allowed), an SSN, a US phone number, and an `initials` value
+  that is not 2–3 capital letters. There is no name blocklist and no bare-digit
+  student-ID pattern (both collide with normal output).
+
+A finding logs the file, the pattern type and the location — never the matched value:
+the Actions logs are public too.
+
+**Before upload.** The dashboard build runs these checks after `e2e.yml` has already
+published its artifacts, so `e2e.yml` also runs them first:
+`node tools/verify-dashboard/src/scan-artifacts.mjs <dir>` (`engine/artifact-scan.mjs`)
+runs before each upload (`e2e/test-results/`, `e2e/test-results-walkthrough/`), pass or
+fail, and the upload runs only when it exits 0. It walks the whole directory, fail-closed:
+every `*.zip` gets the trace checks; a file named as a video or still (`.webm .mp4 .png
+.jpg .jpeg .webp .gif`) is skipped as pixels only when its leading bytes say it is one;
+every other file must be UTF-8 text (no lossy decoding) and is text-scanned, including the
+base64 attachment bodies and stdout buffers inside any `*.json`; each `*-evidence.json`
+must carry the local origin stamp (v4); a symlink is a finding. Inside a trace, binary
+other than an image or font is a finding too.
+The CI run writes no Playwright HTML report: it was an unscanned public copy of every
+trace. The walkthrough records a trace (snapshots on — without them Playwright logs no
+network) so its videos get the network check too; it is never copied into the page.
 
 ## Phase status
 
@@ -167,7 +275,10 @@ now carries nothing a real run did not produce.
 
 ## Hosting
 
-**Private**, on the Lexington infra — not public GitHub Pages (Neil's call). When a
+The **page** is private, on the Lexington infra — not public GitHub Pages (Neil's call).
+The **image** is public on GHCR, like this repo and its Actions artifacts: anyone can
+pull it and read every video, still and trace in it (hence the
+[output checks](#output-checks)). When a
 push to `main` finishes its `e2e` run green, the workflow (triggered by `workflow_run`)
 checks out that commit and builds the generated output (`dist-dashboard/`) into a static
 nginx image and pushes it to GHCR:

@@ -79,11 +79,27 @@ describe("assertJourney (loud validation)", () => {
     );
   });
   it("accepts a step still that is a served path or an explicit null", () => {
+    const size = (w, h) => ({ screenshot_width: w, screenshot_height: h });
     const steps = [
-      { index: 0, screenshot: "stills/J1-chromium-00.jpg", screenshot_truncated: false },
-      { index: 1, screenshot: "stills/J1-chromium-01.jpg", screenshot_truncated: true },
-      { index: 2, screenshot: "stills/J1-chromium-02.jpg", screenshot_truncated: null },
-      { index: 3, screenshot: null, screenshot_truncated: null },
+      {
+        index: 0,
+        screenshot: "stills/J1-chromium-00.jpg",
+        screenshot_truncated: false,
+        ...size(390, 1430),
+      },
+      {
+        index: 1,
+        screenshot: "stills/J1-chromium-01.jpg",
+        screenshot_truncated: true,
+        ...size(390, 4000),
+      },
+      {
+        index: 2,
+        screenshot: "stills/J1-chromium-02.jpg",
+        screenshot_truncated: null,
+        ...size(null, null),
+      },
+      { index: 3, screenshot: null, screenshot_truncated: null, ...size(null, null) },
     ];
     expect(assertJourney({ ...good, steps }).steps).toBe(steps);
   });
@@ -105,6 +121,22 @@ describe("assertJourney (loud validation)", () => {
     for (const bad of bads) {
       expect(() => assertJourney({ ...good, steps: [{ index: 0, ...bad }] })).toThrow(
         /screenshot_truncated must be/,
+      );
+    }
+  });
+  it("rejects a still size that is not a positive integer/null, or set with no still", () => {
+    const still = { screenshot: "stills/J1-chromium-00.jpg", screenshot_truncated: false };
+    const none = { screenshot: null, screenshot_truncated: null };
+    const bads = [
+      { ...still, screenshot_width: undefined, screenshot_height: 800 },
+      { ...still, screenshot_width: 390, screenshot_height: 0 },
+      { ...still, screenshot_width: 390.5, screenshot_height: 800 },
+      { ...still, screenshot_width: "390", screenshot_height: 800 },
+      { ...none, screenshot_width: 390, screenshot_height: null },
+    ];
+    for (const bad of bads) {
+      expect(() => assertJourney({ ...good, steps: [{ index: 0, ...bad }] })).toThrow(
+        /screenshot_(width|height) must be/,
       );
     }
   });

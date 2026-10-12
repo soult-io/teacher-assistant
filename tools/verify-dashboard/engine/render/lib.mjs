@@ -4,6 +4,8 @@
 // The impure parts (running vitest, the GitHub API, Playwright) live in the sibling
 // engine modules and feed their results through these.
 
+import { NO_RUN, UNKNOWN } from "../ci-status.mjs";
+
 const HTML_ESCAPES = {
   "&": "&amp;",
   "<": "&lt;",
@@ -55,20 +57,60 @@ export function renderBars(packages) {
     .join("\n      ");
 }
 
-/** Map a GitHub Actions conclusion to the pill's CSS class. */
+/**
+ * Map a GitHub Actions conclusion to the pill's CSS class. The two non-verdicts get
+ * their own neutral classes so a reader can tell them apart: `none` (no run exists for
+ * the commit) and `unk` (status could not be determined — see ci-status.mjs). Neither
+ * is ever green.
+ */
 export function pillClass(conclusion) {
   if (conclusion === "success") return "pass";
   if (conclusion === "failure") return "fail";
+  if (conclusion === NO_RUN) return "none";
+  if (conclusion === UNKNOWN) return "unk";
   return "note";
 }
 
-/** Render the "CI on main" status pills from a normalised list. */
-export function renderCiPills(pills) {
+/**
+ * The visible qualifier (and tooltip) for a pill that is not a settled verdict. The
+ * page is static, generated once: an in-progress pill says it was in progress AT
+ * BUILD TIME, so it is never read as live.
+ */
+function pillQualifier(conclusion, builtAt) {
+  if (conclusion === "in_progress") {
+    return {
+      text: `in progress at build time ${builtAt}`,
+      title: `This run had not finished when the page was generated (${builtAt}). The page is static and does not update.`,
+    };
+  }
+  if (conclusion === NO_RUN) {
+    return {
+      text: "no run for this commit",
+      title:
+        "No push run of this workflow exists for this commit. Another commit's run is never shown.",
+    };
+  }
+  if (conclusion === UNKNOWN) {
+    return {
+      text: "status unknown",
+      title: `CI status could not be determined at build time (${builtAt}): the GitHub API could not be read, or the run had no matching job or no conclusion.`,
+    };
+  }
+  return null;
+}
+
+/**
+ * Render the CI status pills for the dashboard's commit from a normalised list.
+ * `builtAt` is the ISO time the page was generated, shown on non-final pills.
+ */
+export function renderCiPills(pills, { builtAt }) {
   return pills
-    .map(
-      (p) =>
-        `<span class="pill ${pillClass(p.conclusion)}"><span class="dot"></span>${escapeHtml(p.label)}</span>`,
-    )
+    .map((p) => {
+      const q = pillQualifier(p.conclusion, builtAt);
+      const title = q ? ` title="${escapeHtml(q.title)}"` : "";
+      const qual = q ? ` <span class="q">· ${escapeHtml(q.text)}</span>` : "";
+      return `<span class="pill ${pillClass(p.conclusion)}"${title}><span class="dot"></span>${escapeHtml(p.label)}${qual}</span>`;
+    })
     .join("\n    ");
 }
 

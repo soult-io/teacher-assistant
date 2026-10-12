@@ -1,13 +1,14 @@
-// To-Score queue (U3) — the score-later ⚑ bookmarks land here as queued points
+// To-Score queue (U3) — the score-later 🕐 bookmarks land here as queued points
 // (buildToScoreQueue). Each row opens the FULL Quick-Score editor (not a reduced
 // form), keeping the collected admin date. Scoring from the queue writes via M5
-// (an audited queued→scored edit) and clears the flag.
+// (an audited queued→scored edit) and clears the score-later bookmark.
 
 import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { buildToScoreQueue } from "@teacher-assistant/store";
 import { Avatar } from "../../design/Avatar.js";
+import { GoalTitle } from "../../design/GoalTitle.js";
 import type { DecryptedRecords } from "../../data/repository.js";
-import type { Lookups } from "./dashboard/dashboard-vm.js";
+import { type Lookups, orderToScoreQueue, periodLabelOf } from "./dashboard/dashboard-vm.js";
 
 export interface ToScoreScreenProps {
   readonly records: DecryptedRecords;
@@ -18,7 +19,7 @@ export interface ToScoreScreenProps {
 
 export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProps) {
   const byId = new Map(records.points.map((p) => [p.data_point_id, p]));
-  const queue = buildToScoreQueue(records.points);
+  const queue = orderToScoreQueue(buildToScoreQueue(records.points), lk);
 
   return (
     <div className="to-score">
@@ -44,9 +45,9 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
           }
           const initials = lk.initialsById.get(entry.studentId) ?? "??";
           const goalText = lk.goalTextById.get(entry.goalId) ?? "(goal)";
+          const goalLabel = lk.goalLabelById.get(entry.goalId);
           // §E.1: the period tag stays on the queue row (the Quick-Score header shows it too).
-          const periodId = lk.periodByStudent(entry.studentId);
-          const periodLabel = periodId !== null ? (lk.periodLabelById.get(periodId) ?? null) : null;
+          const periodLabel = periodLabelOf(entry.studentId, lk);
           return (
             <button
               key={entry.dataPointId}
@@ -60,7 +61,8 @@ export function ToScoreScreen({ records, lk, onOpen, onBack }: ToScoreScreenProp
               <Avatar initials={initials} />
               <div className="rowmain">
                 <span className="rowtitle">
-                  {goalText} <span className="editpt">full editor ›</span>
+                  <GoalTitle label={goalLabel} text={goalText} />{" "}
+                  <span className="editpt">full editor ›</span>
                 </span>
                 <span className="rowmeta">
                   {periodLabel !== null ? <span className="period">{periodLabel}</span> : null}{" "}
