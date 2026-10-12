@@ -23,6 +23,7 @@ function renderDetail(goalText: string, over?: Partial<Parameters<typeof GoalDet
     onAddPoint: vi.fn(),
     onEditPoint: vi.fn(),
     onAckMastery: vi.fn(),
+    onSetGoalLabel: vi.fn(),
   };
   render(
     <GoalDetailScreen
@@ -33,6 +34,7 @@ function renderDetail(goalText: string, over?: Partial<Parameters<typeof GoalDet
       periodLabel="P4"
       probeLabel="5-item probe"
       isNonInstructional={() => false}
+      labelDuplicates={[]}
       {...handlers}
       {...over}
     />,
@@ -159,6 +161,8 @@ describe("GoalDetailScreen (U4)", () => {
           onAddPoint={vi.fn()}
           onEditPoint={vi.fn()}
           onAckMastery={vi.fn()}
+          labelDuplicates={[]}
+          onSetGoalLabel={vi.fn()}
         />,
       );
       const rows = within(view.container.querySelector("tbody") as HTMLElement)
@@ -223,6 +227,8 @@ describe("GoalDetailScreen (U4)", () => {
         onAddPoint={vi.fn()}
         onEditPoint={vi.fn()}
         onAckMastery={vi.fn()}
+        labelDuplicates={[]}
+        onSetGoalLabel={vi.fn()}
       />,
     );
     expect(screen.queryByTestId("copy-quarterly")).toBeNull();
@@ -253,5 +259,112 @@ describe("GoalDetailScreen (U4)", () => {
   it("clarifier: the two-average divergence is explained when a counted off-basis point is averaged", () => {
     renderDetail("Scientific notation"); // F4 counts the off-basis point; M8 excludes it
     expect(screen.getByTestId("two-average-clarifier")).toBeInTheDocument();
+  });
+});
+
+describe("GoalDetailScreen — IEP goal label (TEACH-41)", () => {
+  it("shows 'Goal 2 · text' as the heading with a small edit link", () => {
+    renderDetail("Add integers"); // AB Goal 2 in the seed
+    const heading = screen.getByRole("heading", { level: 1 });
+    expect(heading).toHaveTextContent(/^Goal 2/);
+    expect(heading).toHaveTextContent(/Add integers$/);
+    expect(within(heading).getByText("Goal 2", { exact: false })).toHaveClass("goalnum");
+    expect(screen.getByTestId("goal-label-edit")).toHaveTextContent("edit");
+  });
+
+  it("an unlabeled goal shows only its text and a grey '+ Add IEP goal #', never 'Goal ?'", () => {
+    renderDetail("Scientific notation");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(/^Scientific notation$/);
+    expect(screen.getByTestId("goal-label-edit")).toHaveTextContent("+ Add IEP goal #");
+    expect(screen.queryByText(/Goal \?/)).toBeNull();
+  });
+
+  it("inline edit: Enter saves the trimmed label", () => {
+    const { handlers } = renderDetail("Scientific notation");
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    const input = screen.getByTestId("goal-label-input");
+    fireEvent.change(input, { target: { value: " 3 " } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(handlers.onSetGoalLabel).toHaveBeenCalledExactlyOnceWith("3");
+    expect(screen.queryByTestId("goal-label-input")).toBeNull();
+  });
+
+  it("inline edit: blur saves, Esc cancels, an unchanged value writes nothing", () => {
+    const { handlers } = renderDetail("Add integers");
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    fireEvent.change(screen.getByTestId("goal-label-input"), { target: { value: "9" } });
+    fireEvent.keyDown(screen.getByTestId("goal-label-input"), { key: "Escape" });
+    expect(handlers.onSetGoalLabel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    fireEvent.blur(screen.getByTestId("goal-label-input")); // still "2" → no change
+    expect(handlers.onSetGoalLabel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    fireEvent.change(screen.getByTestId("goal-label-input"), { target: { value: "2a" } });
+    fireEvent.blur(screen.getByTestId("goal-label-input"));
+    expect(handlers.onSetGoalLabel).toHaveBeenCalledExactlyOnceWith("2a");
+  });
+
+  it("inline edit: clearing the box removes the label; an invalid label is refused", () => {
+    const { handlers } = renderDetail("Add integers");
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    fireEvent.change(screen.getByTestId("goal-label-input"), { target: { value: "Goal 2" } });
+    fireEvent.keyDown(screen.getByTestId("goal-label-input"), { key: "Enter" });
+    expect(screen.getByTestId("goal-label-invalid")).toBeInTheDocument();
+    expect(handlers.onSetGoalLabel).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByTestId("goal-label-input"), { target: { value: "" } });
+    fireEvent.keyDown(screen.getByTestId("goal-label-input"), { key: "Enter" });
+    expect(handlers.onSetGoalLabel).toHaveBeenCalledExactlyOnceWith(undefined);
+  });
+
+  it("a duplicate label shows the lasting cue on the header AND on the IC-copy area", () => {
+    const records = buildSyntheticSeed(NOW).master;
+    const other = records.goals.find((g) => g.goal_text === "Two-step equations");
+    if (other === undefined) {
+      throw new Error("expected AB Two-step equations");
+    }
+    renderDetail("Add integers", { labelDuplicates: [{ ...other, goal_label: "2" }] });
+    expect(screen.getByTestId("dup-label-cue")).toHaveTextContent("two Goal 2");
+    expect(screen.getByTestId("detail-dup-warning")).toHaveTextContent(
+      "AB has two Goal 2 — Add integers and Two-step equations",
+    );
+    // Both IC copy surfaces (the statement + the quarterly figure) carry the warning.
+    const warnings = screen.getAllByTestId("ic-dup-warning");
+    expect(warnings).toHaveLength(2);
+    for (const w of warnings) {
+      expect(w).toHaveTextContent("AB has two Goal 2 — check before entering");
+    }
+    expect(within(screen.getByTestId("auto-statement")).getByTestId("ic-dup-warning")).toBeTruthy();
+    expect(within(screen.getByTestId("quarterly")).getByTestId("ic-dup-warning")).toBeTruthy();
+  });
+
+  it("no duplicate → no cue, no IC warning", () => {
+    renderDetail("Add integers");
+    expect(screen.queryByTestId("dup-label-cue")).toBeNull();
+    expect(screen.queryByTestId("ic-dup-warning")).toBeNull();
+  });
+
+  it("the copied IC statement never carries the label", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    renderDetail("Add integers");
+    fireEvent.click(screen.getByTestId("copy-to-ic"));
+    expect(writeText).toHaveBeenCalledOnce();
+    expect(String(writeText.mock.calls[0]?.[0])).not.toMatch(/Goal 2/);
+  });
+
+  it("Esc then a blur from the closing input never saves; Enter then blur saves once", () => {
+    const { handlers } = renderDetail("Add integers");
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    const input = screen.getByTestId("goal-label-input");
+    fireEvent.change(input, { target: { value: "9" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    fireEvent.blur(input); // the detached input's stale handler
+    expect(handlers.onSetGoalLabel).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("goal-label-edit"));
+    const again = screen.getByTestId("goal-label-input");
+    fireEvent.change(again, { target: { value: "7" } });
+    fireEvent.keyDown(again, { key: "Enter" });
+    fireEvent.blur(again);
+    expect(handlers.onSetGoalLabel).toHaveBeenCalledExactlyOnceWith("7");
   });
 });

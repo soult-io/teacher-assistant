@@ -11,6 +11,7 @@
 import type { ProgressDataPoint } from "@teacher-assistant/schema";
 import { StatusChip } from "../../../design/StatusChip.js";
 import { Avatar } from "../../../design/Avatar.js";
+import { GoalTitle } from "../../../design/GoalTitle.js";
 import { OBS_LABEL, pointValueLabel, SETTING_LABEL } from "./labels.js";
 
 function valueLine(p: ProgressDataPoint): string {
@@ -34,6 +35,8 @@ export interface ValidationQueueScreenProps {
   readonly queue: readonly ProgressDataPoint[];
   readonly initialsById: ReadonlyMap<string, string>;
   readonly goalTextById: ReadonlyMap<string, string>;
+  /** IEP goal label per goal (TEACH-41); unlabeled goals are absent. Teacher-side only. */
+  readonly goalLabelById: ReadonlyMap<string, string>;
   readonly onConfirm: (pending: ProgressDataPoint) => void;
   readonly onFix: (pending: ProgressDataPoint) => void;
   readonly onBack: () => void;
@@ -43,6 +46,7 @@ export function ValidationQueueScreen({
   queue,
   initialsById,
   goalTextById,
+  goalLabelById,
   onConfirm,
   onFix,
   onBack,
@@ -72,7 +76,12 @@ export function ValidationQueueScreen({
               <StatusChip chip={{ glyph: "⏳", className: "pending" }} label="pending" />
               <Avatar initials={initials} />
               <div className="rowmain">
-                <span className="rowtitle">{goalTextById.get(p.goal_id) ?? "(goal)"}</span>
+                <span className="rowtitle">
+                  <GoalTitle
+                    label={goalLabelById.get(p.goal_id)}
+                    text={goalTextById.get(p.goal_id) ?? "(goal)"}
+                  />
+                </span>
                 <span className="rowmeta">{valueLine(p)} · JT</span>
                 {p.denominator_mismatch ? (
                   <span className="note warn" data-testid="validate-mismatch">

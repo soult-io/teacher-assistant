@@ -83,6 +83,7 @@ describe("compareStudentGoal", () => {
     initials: "AB",
     periodLabel: "P2",
     studentId: "s-1",
+    goalLabel: null,
     goalText: "Add integers",
     ...k,
   });
@@ -104,5 +105,56 @@ describe("compareStudentGoal", () => {
       key({ initials: "ab", studentId: "s-0" }),
       key({ initials: "CD", goalText: "Aardvark" }),
     ]);
+  });
+
+  it("orders a student's goals by IEP label before goal text (TEACH-41)", () => {
+    const rows = [
+      key({ goalLabel: "2", goalText: "Add integers" }),
+      key({ goalLabel: "1", goalText: "Two-step equations" }),
+    ];
+    expect([...rows].sort(compareStudentGoal).map((r) => r.goalText)).toEqual([
+      "Two-step equations",
+      "Add integers",
+    ]);
+  });
+
+  it("is number-aware on the label: 1 < 1a < 2 < 10", () => {
+    const rows = ["10", "2", "1a", "1"].map((goalLabel) => key({ goalLabel }));
+    expect([...rows].sort(compareStudentGoal).map((r) => r.goalLabel)).toEqual([
+      "1",
+      "1a",
+      "2",
+      "10",
+    ]);
+  });
+
+  it("puts unlabeled goals last, A–Z by text among themselves", () => {
+    const rows = [
+      key({ goalLabel: null, goalText: "Zeta" }),
+      key({ goalLabel: null, goalText: "Alpha" }),
+      key({ goalLabel: "3", goalText: "Mu" }),
+    ];
+    expect([...rows].sort(compareStudentGoal).map((r) => r.goalText)).toEqual([
+      "Mu",
+      "Alpha",
+      "Zeta",
+    ]);
+  });
+
+  it("breaks a duplicate label by goal text (goalId is the caller's last tiebreak)", () => {
+    const rows = [
+      key({ goalLabel: "2", goalText: "Two-step equations" }),
+      key({ goalLabel: "2", goalText: "Add integers" }),
+    ];
+    expect([...rows].sort(compareStudentGoal).map((r) => r.goalText)).toEqual([
+      "Add integers",
+      "Two-step equations",
+    ]);
+    expect(compareStudentGoal(key({ goalLabel: "2" }), key({ goalLabel: "2" }))).toBe(0);
+  });
+
+  it("the label never outranks the student keys", () => {
+    const rows = [key({ initials: "CD", goalLabel: "1" }), key({ initials: "AB", goalLabel: "9" })];
+    expect([...rows].sort(compareStudentGoal).map((r) => r.initials)).toEqual(["AB", "CD"]);
   });
 });

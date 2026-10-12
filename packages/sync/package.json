@@ -24,6 +24,7 @@
     "yjs": "13.6.32"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
     "@teacher-assistant/sync-relay": "workspace:*",
     "@vitest/coverage-v8": "~4.1.10",
     "typescript": "~5.9.3",

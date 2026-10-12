@@ -10,6 +10,7 @@ function makeTarget(): SheetTarget {
     goalId: newOpaqueId(),
     studentId: newOpaqueId(),
     initials: "AB",
+    goalLabel: "2",
     goalText: "Two-step equations",
     periodLabel: "P2",
     probeLabel: "5-item probe",
@@ -33,6 +34,13 @@ describe("QuickScoreSheet — desktop modal affordances (U7)", () => {
     render(<QuickScoreSheet target={makeTarget()} onCommit={vi.fn()} onClose={onClose} />);
     fireEvent.click(screen.getByRole("button", { name: "close" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("the header reads 'P2 · Goal 2 · Two-step equations' (TEACH-41)", () => {
+    render(<QuickScoreSheet target={makeTarget()} onCommit={vi.fn()} onClose={vi.fn()} />);
+    const who = document.querySelector(".sheet-who") as HTMLElement;
+    expect(who).toHaveTextContent("P2 · Goal 2 · , Two-step equations");
+    expect(who.querySelector(".goalnum")).toHaveTextContent(/^Goal 2/);
   });
 
   it("Enter (submit) saves a matching score", () => {

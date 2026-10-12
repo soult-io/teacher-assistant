@@ -18,6 +18,22 @@ env:
 jobs:
   verify:
     runs-on: ubuntu-latest
+    # A real Postgres for the sync-relay store contract (TEACH-49): the same pinned
+    # image as the stack's qa-db. Test-only credentials; nothing here is a secret.
+    services:
+      postgres:
+        image: postgres:16.15-alpine3.24@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+        env:
+          POSTGRES_USER: relay_test
+          POSTGRES_PASSWORD: relay_test
+          POSTGRES_DB: relay_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U relay_test -d relay_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +64,8 @@ jobs:
       # Build ran above, so cross-package imports resolve to dist.
       - name: Unit tests (all workspaces)
         run: pnpm -r run test
+        env:
+          TEST_DATABASE_URL: postgres://relay_test:relay_test@localhost:5432/relay_test
 
       # Coverage baseline for the core logic packages (measure-only — NO failing
       # threshold yet, Phase 1). Emits coverage-summary.json per covered package;

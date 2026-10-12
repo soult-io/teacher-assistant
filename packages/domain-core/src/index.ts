@@ -25,6 +25,8 @@ export * from "./mismatch.js";
 export * from "./consistency.js";
 export * from "./owes.js";
 export * from "./goal-validation.js";
+// TEACH-41 — the IEP goal label: audited edit + cohort-scoped duplicate check.
+export * from "./goal-label.js";
 export * from "./goal-detail.js";
 
 // M6a — IEP % → Infinite Campus export + F4 quarterly summary (phase1-spec §4).
@@ -33,6 +35,8 @@ export * from "./ic-export.js";
 
 // M7 — baseline / proposed-goal track + ARC/IEP dates (phase1-spec §3).
 export * from "./baseline.js";
+// TEACH-46 — audited baseline point Fix / Remove / Keep (SME ruling 2026-10-09).
+export * from "./baseline-edit.js";
 export * from "./lifecycle.js";
 export * from "./arc-window.js";
 

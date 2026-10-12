@@ -19,7 +19,9 @@ export interface AvatarProps {
 export function Avatar({ initials, small = false }: AvatarProps) {
   const upper = initials.toUpperCase();
   const hue = hueClassForInitials(upper);
-  const cls = `av circle ${small ? "sm " : ""}${hue}`;
+  // 3 letters (a middle initial, TEACH-26/40) get tighter type so wide glyphs
+  // (e.g. "MWM") stay inside the disc.
+  const cls = `av circle ${small ? "sm " : ""}${upper.length === 3 ? "tri " : ""}${hue}`;
   return (
     <span className={cls} role="img" aria-label={`student ${upper}`}>
       {upper}

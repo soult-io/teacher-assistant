@@ -5,6 +5,10 @@
 
 export const productSlug = "teacher-assistant";
 
+// The only origin a run may have tested for the dashboard to be built from it: the
+// local vite preview of the synthetic-seed build (e2e/playwright.config.ts LOCAL_URL).
+export const evidenceBaseURL = "http://127.0.0.1:4173";
+
 // The tested workspaces, in a stable display order (bars re-sort by pass count at
 // render). content-api and diff-orchestrator are scaffolds with no tests.
 export const packages = [
@@ -77,6 +81,21 @@ export const journeyManifest = [
     id: "J6",
     name: "No-data — a documented gap, not a zero",
     match: { file: "j6-no-data.spec.ts" },
+  },
+  {
+    id: "J7",
+    name: "Goals listed in IEP order",
+    match: { file: "j7-iep-goal-order.spec.ts" },
+  },
+  {
+    id: "J8",
+    name: "Desktop dashboard — student cards, graph only on ↗ (1280×800)",
+    match: { file: "desktop-dashboard.spec.ts", title: "1280×800" },
+  },
+  {
+    id: "J8-wide",
+    name: "Desktop dashboard — student cards, graph only on ↗ (1920×1080)",
+    match: { file: "desktop-dashboard.spec.ts", title: "1920×1080" },
   },
 ];
 

@@ -10,6 +10,7 @@
 
 import {
   type AutoStatement,
+  type BaselineFix,
   buildGoalDetail,
   compareArcNewestFirst,
   computeAutoStatement,
@@ -20,15 +21,20 @@ import {
   MIN_SCORED_POINTS,
 } from "@teacher-assistant/domain-core";
 import type {
+  BaselinePoint,
   IEPGoal,
   MasteryObservation,
   ProgressDataPoint,
   Revision,
-  Timestamp,
 } from "@teacher-assistant/schema";
 import type { ReactNode } from "react";
 import { Avatar } from "../../../design/Avatar.js";
+import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
+import { GoalLabelEditor } from "../../GoalLabelEditor.js";
+import { isoDayOfTs } from "../../../data/date.js";
 import { useIsDesktop } from "../../useIsDesktop.js";
+import { baselinePointsOldestFirst } from "../baseline/baseline-order.js";
+import { BaselinePoints } from "../baseline/BaselinePoints.js";
 import { TrendChart } from "./TrendChart.js";
 
 /** Copy text to the clipboard when available — a no-op elsewhere (guarded for jsdom/older browsers). */
@@ -62,11 +68,6 @@ function indeterminateHint(statement: AutoStatement): string | null {
   }
 }
 
-/** ISO day for a millisecond audit timestamp (entry / edit time). */
-function isoDay(ts: Timestamp): string {
-  return new Date(Number(ts)).toISOString().slice(0, 10);
-}
-
 /** Compact who/when/old→new summary for an audited edit (§B audit trail). */
 function describeRevision(rev: Revision): string {
   const keysOf = (o: unknown): string[] =>
@@ -79,7 +80,7 @@ function describeRevision(rev: Revision): string {
   const diff = keys
     .map((k) => `${k}: ${String(oldR[k] ?? "—")}→${String(newR[k] ?? "—")}`)
     .join(", ");
-  return `${rev.who} · ${isoDay(rev.when)} — ${diff}`;
+  return `${rev.who} · ${isoDayOfTs(rev.when)} — ${diff}`;
 }
 
 const VARIANT_BADGE: Readonly<Record<AutoStatement["variant"], string>> = {
@@ -173,12 +174,27 @@ function QuarterlyNotes({ q }: { readonly q: GoalDetail["quarterlySummary"] }) {
   );
 }
 
+/**
+ * The IC-prep duplicate warning (ky-sped-lbd-sdi-sme binding condition): a weekly %
+ * entered against the wrong IC goal is an IEP-record error, so every copy-to-IC
+ * area says so while the duplicate exists. Null when there is no duplicate.
+ */
+function IcDuplicateWarning({ duplicate }: { readonly duplicate: string | null }) {
+  return duplicate !== null ? (
+    <div className="note warn" data-testid="ic-dup-warning">
+      {duplicate}
+    </div>
+  ) : null;
+}
+
 function QuarterlyCard({
   detail,
   exportable,
+  icDuplicate,
 }: {
   readonly detail: GoalDetail;
   readonly exportable: boolean;
+  readonly icDuplicate: string | null;
 }) {
   const q = detail.quarterlySummary;
   return (
@@ -205,6 +221,7 @@ function QuarterlyCard({
           <QuarterlyNotes q={q} />
           {/* IC copy path — ONLY for an IC-exportable goal (same structural guard the
               statement card uses); a proposed/baseline/non-% goal has no copy path (DF-1). */}
+          {exportable ? <IcDuplicateWarning duplicate={icDuplicate} /> : null}
           {exportable ? (
             <button
               type="button"
@@ -221,7 +238,13 @@ function QuarterlyCard({
   );
 }
 
-function StatementCard({ statement }: { readonly statement: AutoStatement }) {
+function StatementCard({
+  statement,
+  icDuplicate,
+}: {
+  readonly statement: AutoStatement;
+  readonly icDuplicate: string | null;
+}) {
   // The card only renders for an IC-exportable goal (computeAutoStatement returns
   // null otherwise), so the copy path is inherently guarded (DF-7). Copy is the ONLY
   // action — the statement stays slot-assembled; the teacher reviews/edits in IC
@@ -251,6 +274,7 @@ function StatementCard({ statement }: { readonly statement: AutoStatement }) {
           across).
         </div>
       ) : null}
+      <IcDuplicateWarning duplicate={icDuplicate} />
       <button
         type="button"
         className="btn small primary copybtn"
@@ -396,7 +420,7 @@ function HistoryTable({
                       </span>
                     ) : null}
                   </td>
-                  <td>{isoDay(p.entry_ts)}</td>
+                  <td>{isoDayOfTs(p.entry_ts)}</td>
                   <td>
                     {ct}
                     {p.denominator_original !== undefined && p.denominator_mismatch === true ? (
@@ -454,6 +478,14 @@ export interface GoalDetailScreenProps {
   readonly periodLabel: string | null;
   readonly probeLabel: string;
   /**
+   * The OTHER goals of this student, same cohort, that share this goal's IEP label
+   * (domain-core duplicateGoalLabels) — empty when there is no duplicate. Drives the
+   * lasting duplicate cue on the header and the IC-copy area (TEACH-41).
+   */
+  readonly labelDuplicates: readonly IEPGoal[];
+  /** Save a changed IEP goal label (undefined = cleared); the caller audits via setGoalLabel. */
+  readonly onSetGoalLabel: (label: string | undefined) => void;
+  /**
    * The M4 instructional-weeks calendar predicate — feeds the R3-3 ≥4-instructional-
    * week half of the auto-statement gate. REQUIRED (no default): a default of
    * `() => false` would count every calendar week as instructional and INFLATE the
@@ -465,6 +497,34 @@ export interface GoalDetailScreenProps {
   readonly onAddPoint: () => void;
   readonly onEditPoint: (point: ProgressDataPoint) => void;
   readonly onAckMastery: (candidate: MasteryCandidate) => void;
+  /**
+   * TEACH-46: this goal's baseline points and their audited Fix / Keep. After ARC
+   * adoption a point may be fixed (never removed) and the IEP baseline_value never
+   * recomputes — the card shows the "Fixed after ARC" note instead. Omitted → no card.
+   */
+  readonly baselinePoints?: readonly BaselinePoint[];
+  readonly onFixBaselinePoint?: (point: BaselinePoint, fix: BaselineFix) => void;
+}
+
+/** TEACH-46 — an adopted goal's baseline points: Fix only, History, the after-ARC note. */
+function BaselinePointsCard({
+  goal,
+  points,
+  onFix,
+}: {
+  readonly goal: IEPGoal;
+  readonly points: readonly BaselinePoint[];
+  readonly onFix: (point: BaselinePoint, fix: BaselineFix) => void;
+}) {
+  return (
+    <div className="card" data-testid="detail-baseline-points">
+      <div className="cardhead">
+        <b>Baseline points</b>
+      </div>
+      {/* Fix only: no Remove and no Keep after adoption (ruling B). */}
+      <BaselinePoints goal={goal} points={points} onFix={onFix} />
+    </div>
+  );
 }
 
 /** The trend card (chart + the ⊘-as-gap note) — shared by every layout. */
@@ -486,25 +546,51 @@ function ChartCard({ detail, goal }: { readonly detail: GoalDetail; readonly goa
   );
 }
 
+/** "Two-step equations and Add integers" — the duplicate goals' texts, this one first. */
+function duplicateTexts(goal: IEPGoal, others: readonly IEPGoal[]): string {
+  const texts = [goal.goal_text, ...others.map((g) => g.goal_text)];
+  return texts.length <= 2
+    ? texts.join(" and ")
+    : `${texts.slice(0, -1).join(", ")} and ${texts.at(-1) ?? ""}`;
+}
+
 /** The goal header (avatar + name + criterion/baseline). Desktop lays "+ Add a point" inline. */
 function DetailHeader({
   goal,
   initials,
   periodLabel,
+  labelDuplicates,
+  onSetGoalLabel,
   onAddPoint,
   inlineAdd,
 }: {
   readonly goal: IEPGoal;
   readonly initials: string;
   readonly periodLabel: string | null;
+  readonly labelDuplicates: readonly IEPGoal[];
+  readonly onSetGoalLabel: (label: string | undefined) => void;
   readonly onAddPoint: () => void;
   readonly inlineAdd: boolean;
 }) {
+  const duplicated = labelDuplicates.length > 0;
   return (
     <div className="detailhead">
       <Avatar initials={initials} />
       <div className="detailtitle">
-        <h1>{goal.goal_text}</h1>
+        <h1>
+          <GoalTitle label={goal.goal_label} text={goal.goal_text} />
+        </h1>
+        <div className="goallabel-row">
+          {/* Keyed by goal: an open draft must never carry over to another goal. */}
+          <GoalLabelEditor key={goal.goal_id} label={goal.goal_label} onSave={onSetGoalLabel} />
+          {duplicated ? <DuplicateLabelCue label={goal.goal_label} /> : null}
+        </div>
+        {duplicated ? (
+          <div className="note warn" data-testid="detail-dup-warning">
+            {initials} has two Goal {goal.goal_label} — {duplicateTexts(goal, labelDuplicates)}.
+            Change one label.
+          </div>
+        ) : null}
         <div className="sub">
           {periodLabel !== null ? `${periodLabel} · ` : ""}Criterion: {goal.criterion_level}% ×{" "}
           {goal.criterion_consistency.phrase}
@@ -523,22 +609,21 @@ function DetailHeader({
 }
 
 /** Which arrangement to render the Goal Detail cards in (design §3.1/§3.2). */
-export type GoalDetailLayout = "mobile" | "pane" | "full";
+export type GoalDetailLayout = "mobile" | "full";
 
 export interface GoalDetailBodyProps extends Omit<GoalDetailScreenProps, "onBack"> {
-  /** mobile = validated single column; full = two columns (deep-link); pane = stacked (dashboard). */
+  /** mobile = validated single column; full = two columns (desktop). */
   readonly layout: GoalDetailLayout;
 }
 
 /**
- * The Goal Detail cards, arranged for one of three layouts. The SAME card components
+ * The Goal Detail cards, arranged for one of two layouts. The SAME card components
  * render everywhere — only their arrangement changes (design §5: desktop reflows the
  * honesty surfaces, never their meaning or copy):
  *   - mobile: the validated single column (chart · quarterly · statement · consistency · ARC).
  *   - full  : two columns — data left (chart · consistency · ARC), report-bound honesty
- *             surfaces right (draft statement · quarterly) — the deep-linked Goal Detail.
- *   - pane  : one stacked column inside the dashboard master-detail (chart · statement ·
- *             consistency · quarterly · ARC), with "+ Add a point" inline in the header.
+ *             surfaces right (draft statement · quarterly) — the desktop Goal Detail,
+ *             with "+ Add a point" inline in the header.
  * The caller wraps this in `.goal-detail`.
  */
 export function GoalDetailBody(props: GoalDetailBodyProps) {
@@ -549,30 +634,43 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
     initials,
     periodLabel,
     probeLabel,
+    labelDuplicates,
+    onSetGoalLabel,
     isNonInstructional,
     onAddPoint,
     onEditPoint,
     onAckMastery,
     layout,
+    baselinePoints,
+    onFixBaselinePoint,
   } = props;
 
   const detail = buildGoalDetail(goal, points);
   const statement = computeAutoStatement(goal, initials, points, { isNonInstructional });
   const observation = observations.find((o) => o.goal_id === goal.goal_id);
   const exportable = isIcExportable(goal);
+  const icDuplicate =
+    labelDuplicates.length > 0
+      ? `${initials} has two Goal ${goal.goal_label ?? ""} — check before entering`
+      : null;
 
   const header = (
     <DetailHeader
       goal={goal}
       initials={initials}
       periodLabel={periodLabel}
+      labelDuplicates={labelDuplicates}
+      onSetGoalLabel={onSetGoalLabel}
       onAddPoint={onAddPoint}
       inlineAdd={layout !== "mobile"}
     />
   );
   const chart = <ChartCard detail={detail} goal={goal} />;
-  const quarterly = <QuarterlyCard detail={detail} exportable={exportable} />;
-  const stmt = statement !== null ? <StatementCard statement={statement} /> : null;
+  const quarterly = (
+    <QuarterlyCard detail={detail} exportable={exportable} icDuplicate={icDuplicate} />
+  );
+  const stmt =
+    statement !== null ? <StatementCard statement={statement} icDuplicate={icDuplicate} /> : null;
   const consistency = (
     <ConsistencyCard
       detail={detail}
@@ -581,8 +679,18 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
       onAckMastery={onAckMastery}
     />
   );
+  const ownBaseline = baselinePointsOldestFirst(
+    (baselinePoints ?? []).filter((p) => p.goal_id === goal.goal_id),
+  );
+  const baselineCard =
+    ownBaseline.length > 0 && onFixBaselinePoint !== undefined && goal.status !== "proposed" ? (
+      <BaselinePointsCard goal={goal} points={ownBaseline} onFix={onFixBaselinePoint} />
+    ) : null;
   const history = (
-    <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+    <>
+      <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+      {baselineCard}
+    </>
   );
 
   if (layout === "full") {
@@ -603,19 +711,6 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
             overflowed and clipped the "Fix" action behind a horizontal scrollbar. It spans
             the full content width below the two-column honesty surfaces so every column —
             and the per-row Fix — is visible without scrolling. */}
-        {history}
-      </>
-    );
-  }
-
-  if (layout === "pane") {
-    return (
-      <>
-        {header}
-        {chart}
-        {stmt}
-        {consistency}
-        {quarterly}
         {history}
       </>
     );

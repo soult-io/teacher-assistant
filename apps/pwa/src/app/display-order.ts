@@ -6,15 +6,16 @@
 // trimmed + toLowerCase()d and compared by code point, and the raw text breaks a
 // case-only tie so the order is total.
 
-import { compareCodePoints } from "@teacher-assistant/domain-core";
+import {
+  compareCodePoints,
+  compareDisplayText,
+  compareGoalLabel,
+} from "@teacher-assistant/domain-core";
 import type { OpaqueId } from "@teacher-assistant/schema";
 
-/** Case-insensitive display compare (trim + toLowerCase, code point), raw text breaks ties. */
-export function compareDisplayText(a: string, b: string): number {
-  return (
-    compareCodePoints(a.trim().toLowerCase(), b.trim().toLowerCase()) || compareCodePoints(a, b)
-  );
-}
+// The text comparators live in domain-core (the IC export engine sorts goal labels
+// with the same number-aware compare); re-exported so screens import one module.
+export { compareDisplayText, compareNumberAware } from "@teacher-assistant/domain-core";
 
 /** compareDisplayText with a missing value (null) sorted last. */
 export function compareOptionalText(a: string | null, b: string | null): number {
@@ -24,49 +25,13 @@ export function compareOptionalText(a: string | null, b: string | null): number 
   return compareDisplayText(a, b);
 }
 
-/** Compare two ASCII digit runs by numeric value without Number (no precision loss). */
-function compareDigitRuns(a: string, b: string): number {
-  const x = a.replace(/^0+/, "");
-  const y = b.replace(/^0+/, "");
-  return x.length - y.length || compareCodePoints(x, y);
-}
-
-/** Normalized text split into digit and non-digit runs. */
-function runsOf(s: string): string[] {
-  return (
-    s
-      .trim()
-      .toLowerCase()
-      .match(/\d+|\D+/g) ?? []
-  );
-}
-
-/**
- * Number-aware display compare for labels like "Period 2" / "Period 10": the
- * normalized text is split into digit and non-digit runs; digit runs compare
- * numerically, the rest case-insensitively by code point. Equal-valued labels
- * ("P02" vs "P2", "p2" vs "P2") fall back to compareDisplayText, so it is total.
- */
-export function compareNumberAware(a: string, b: string): number {
-  const ra = runsOf(a);
-  const rb = runsOf(b);
-  const n = Math.min(ra.length, rb.length);
-  for (let i = 0; i < n; i += 1) {
-    const x = ra[i] ?? "";
-    const y = rb[i] ?? "";
-    const cmp = /^\d/.test(x) && /^\d/.test(y) ? compareDigitRuns(x, y) : compareCodePoints(x, y);
-    if (cmp !== 0) {
-      return cmp;
-    }
-  }
-  return ra.length - rb.length || compareDisplayText(a, b);
-}
-
 /** The teacher-meaningful keys of a student's goal row, as shown on screen. */
 export interface StudentGoalSortKey {
   readonly initials: string;
   readonly periodLabel: string | null;
   readonly studentId: string;
+  /** The IEP goal label ("2", "1a"), or null when the goal has none (TEACH-41). */
+  readonly goalLabel: string | null;
   readonly goalText: string;
 }
 
@@ -76,30 +41,40 @@ export interface StudentResolvers {
   readonly periodLabelOf: (studentId: OpaqueId) => string | null;
 }
 
+/** The goal fields the student-goal order reads. */
+export interface GoalSortFields {
+  readonly goalLabel: string | null;
+  readonly goalText: string;
+}
+
 /** The sort key of a student's goal as the screen shows it — the one key builder. */
 export function studentGoalKey(
   studentId: OpaqueId,
-  goalText: string,
+  goal: GoalSortFields,
   r: StudentResolvers,
 ): StudentGoalSortKey {
   return {
     initials: r.initialsOf(studentId),
     periodLabel: r.periodLabelOf(studentId),
     studentId,
-    goalText,
+    goalLabel: goal.goalLabel,
+    goalText: goal.goalText,
   };
 }
 
 /**
  * The student-goal row order shared by every list of goal rows: initials, then
  * period label (none last), then studentId (two students with the same initials
- * and period stay apart), then goal text — so a student's goals read A–Z.
+ * and period stay apart), then the IEP goal label (number-aware, 1 < 1a < 2 < 10;
+ * unlabeled goals last — TEACH-41), then goal text — so a student's goals read in
+ * IEP order, and unlabeled ones A–Z after them.
  */
 export function compareStudentGoal(a: StudentGoalSortKey, b: StudentGoalSortKey): number {
   return (
     compareDisplayText(a.initials, b.initials) ||
     compareOptionalText(a.periodLabel, b.periodLabel) ||
     compareCodePoints(a.studentId, b.studentId) ||
+    compareGoalLabel(a.goalLabel ?? undefined, b.goalLabel ?? undefined) ||
     compareDisplayText(a.goalText, b.goalText)
   );
 }

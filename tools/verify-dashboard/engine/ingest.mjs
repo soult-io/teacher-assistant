@@ -3,7 +3,12 @@
 // the manifest decides which tests are journeys, their order, and their display names.
 
 import { basename } from "node:path";
-import { EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V1, EVIDENCE_SCHEMA_V2 } from "./evidence-schema.mjs";
+import {
+  EVIDENCE_SCHEMA,
+  EVIDENCE_SCHEMA_V1,
+  EVIDENCE_SCHEMA_V2,
+  EVIDENCE_SCHEMA_V3,
+} from "./evidence-schema.mjs";
 import {
   assertJourney,
   deriveJourneyStatus,
@@ -16,7 +21,15 @@ import {
 
 // Every schema tag ingest reads: the current one first, then the older ones it still
 // accepts (see evidence-schema.mjs).
-const READABLE_SCHEMAS = [EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V2, EVIDENCE_SCHEMA_V1];
+const READABLE_SCHEMAS = [
+  EVIDENCE_SCHEMA,
+  EVIDENCE_SCHEMA_V3,
+  EVIDENCE_SCHEMA_V2,
+  EVIDENCE_SCHEMA_V1,
+];
+
+// The schemas whose stills carry width/height/truncated.
+const SIZED_SCHEMAS = [EVIDENCE_SCHEMA, EVIDENCE_SCHEMA_V3];
 
 // Which browser's step tree + video stand in for the journey. Both browsers run the
 // same steps, so a stable preference keeps the canonical view deterministic.
@@ -32,7 +45,8 @@ export function parseEvidence(text) {
   try {
     data = JSON.parse(text);
   } catch (err) {
-    throw new Error(`journey-evidence is not valid JSON: ${err.message}`);
+    // Not err.message: Node quotes part of the input, and the Actions log is public.
+    throw new Error(`journey-evidence is not valid JSON (${err.name})`);
   }
   const schema = data?.schema;
   if (!READABLE_SCHEMAS.includes(schema)) {
@@ -49,12 +63,35 @@ export function parseEvidence(text) {
         step.screenshot = null;
         continue;
       }
-      assertStillField(step, test, schema === EVIDENCE_SCHEMA);
+      assertStillField(step, test, SIZED_SCHEMAS.includes(schema));
       // v2 recorded no truncation flag: unknown, never read as "complete".
       if (schema === EVIDENCE_SCHEMA_V2 && step.screenshot) step.screenshot.truncated = null;
     }
   }
   return data;
+}
+
+/**
+ * Was this run of the local synthetic build? The published image and the Actions
+ * artifacts are public, so the dashboard is only built from a run against
+ * `expectedBaseURL`: a run pointed at a live URL could have recorded real student data
+ * into its videos, stills and traces, which no text scan can see.
+ * @param {object} evidence a parsed evidence file
+ * @param {string} expectedBaseURL
+ * @returns {boolean} true when stamped with `expectedBaseURL`; false when the file
+ *   predates the stamp (v1–v3) — the caller decides whether that is fatal
+ * @throws when a stamped file names any other origin, or a v4 file has no stamp
+ */
+export function checkRunOrigin(evidence, expectedBaseURL) {
+  if (evidence.schema !== EVIDENCE_SCHEMA) return false;
+  if (evidence.baseURL !== expectedBaseURL) {
+    // The value is a URL we chose, not student data, but a live origin still never
+    // reaches a public log: say only that it is not the local build.
+    throw new Error(
+      `journey-evidence (${evidence.mode ?? "gating"}) was not recorded against ${expectedBaseURL} — refusing to build the dashboard from it`,
+    );
+  }
+  return true;
 }
 
 /**
@@ -170,14 +207,16 @@ const sameLabels = (a, b) => a.length === b.length && a.every((s, i) => s.label 
  * Bind the journey to its human-pace walkthrough recording, or say why not. The
  * walkthrough is only shown when it is provably of the same commit as the gating run,
  * agrees with the card's verdict, and walked the same steps — so its step offsets
- * line up with the list beside it. Anything else → no video and a note; the fast
- * gating recording is never substituted.
+ * line up with the list beside it — and its own trace logged at least one request to the
+ * local build (`provesLocal`), the network proof the video shows synthetic data.
+ * Anything else → no video and a note; the fast gating recording is never substituted.
  * @param {object} entry manifest entry
  * @param {object} canonical the gating record the card's steps come from
  * @param {string} status the journey's derived status
  * @param {object} provenance the gating run's provenance
  * @param {{evidence: object, run: {ci_run_id: string|null, ci_run_url: string|null},
- *   resolveAsset: Function}|null} walkthrough
+ *   resolveAsset: Function, provesLocal: (rawTracePath: string) => boolean}|null} walkthrough
+ *   `provesLocal` is given the trace attachment's EVIDENCE path (the caller remaps it)
  * @returns {{video: object|null, offsets: (number|null)[]|null, note: string|null}}
  */
 function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
@@ -195,7 +234,11 @@ function bindWalkthrough(entry, canonical, status, provenance, walkthrough) {
   }
   if (!sameLabels(record.steps, canonical.steps)) return none(MEDIA_NOTE.DIFFERS);
   const att = findAttachment(record, "video");
-  const src = att ? walkthrough.resolveAsset(att.path, "video", entry.id, record.project) : null;
+  if (!att) return none(MEDIA_NOTE.NONE);
+  // Proof before the copy: an unproven video is never served.
+  const trace = findAttachment(record, "trace");
+  if (!trace || !walkthrough.provesLocal(trace.path)) return none(MEDIA_NOTE.UNPROVEN);
+  const src = walkthrough.resolveAsset(att.path, "video", entry.id, record.project);
   if (!src) return none(MEDIA_NOTE.NONE);
   return {
     video: {
@@ -318,6 +361,25 @@ function buildJourney(entry, records, product, provenance, resolveAsset, walkthr
       media.offsets,
     ),
   };
+}
+
+/**
+ * Journeys that publish gating media (the raw video or a still) with no network proof
+ * beside it: no trace copied, or a copied trace that logged no request to the local
+ * build (`provesLocal`, given its served path). The trace's network log is the proof
+ * that media shows the local build; an empty one (a trace recorded without snapshots
+ * logs none) passes the output scan's host check on nothing — so a publish refuses these
+ * rather than pass them.
+ * @param {object[]} journeys Journey[] from buildJourneys
+ * @param {(traceUrl: string) => boolean} provesLocal given the trace's SERVED url (relative
+ *   to the dashboard output directory)
+ * @returns {string[]} their ids
+ */
+export function journeysWithUnprovenMedia(journeys, provesLocal) {
+  const publishesMedia = (j) => j.raw_video_url || j.steps.some((s) => s.screenshot);
+  return journeys
+    .filter((j) => publishesMedia(j) && !(j.trace_url && provesLocal(j.trace_url)))
+    .map((j) => j.id);
 }
 
 /**

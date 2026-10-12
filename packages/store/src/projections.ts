@@ -15,6 +15,7 @@
 import {
   compareCodePoints,
   isCalendarInstructional,
+  isCountedBaselinePoint,
   isDueInWeek,
   isoWeekId,
 } from "@teacher-assistant/domain-core";
@@ -253,7 +254,10 @@ export function buildBaselineView(
     if (goal.status !== "proposed") {
       continue;
     }
-    const pts = baselinePoints.filter((p) => p.goal_id === goal.goal_id);
+    // TEACH-46: a removed point, or an odd total not yet kept, never counts.
+    const pts = baselinePoints.filter(
+      (p) => p.goal_id === goal.goal_id && isCountedBaselinePoint(p),
+    );
     // Guard against a bad synthetic point with a zero/negative denominator (no
     // Infinity/NaN in the estimate); usability counts only comparable points.
     const valid = pts.filter((p) => p.denominator_used > 0);

@@ -28,7 +28,8 @@ describe("assembleGoal (U5 create)", () => {
     expect(goal.probe_definition_id).toBe(probe.probe_definition_id);
     expect(probe.expected_denominator).toBe(5);
     // goal_text carries the initials (stranger test: audience = initials only).
-    expect(goal.goal_text).toContain("ab");
+    // TEACH-40: the canonical (normalized) initials, not the raw "ab" entry.
+    expect(goal.goal_text.startsWith("AB will ")).toBe(true);
   });
 
   it("an ADOPT builds an ACTIVE goal with the baseline locked in", () => {
@@ -98,5 +99,44 @@ describe("assembleGoal (U5 create)", () => {
     expect(s.initials).toBe("AB");
     expect(s.color_token).toBe("--s-ab");
     expect(s.active).toBe(true);
+  });
+
+  it("makeStudent normalizes dotted/spaced initials (TEACH-40)", () => {
+    expect(makeStudent("j.a.s.", "--s-ab").initials).toBe("JAS");
+  });
+
+  it.each(["John Smith", "J", "ABCD", "A1"])(
+    "makeStudent throws on invalid initials %j (TEACH-40)",
+    (raw) => {
+      expect(() => makeStudent(raw, "--s-ab")).toThrow(/initials/);
+    },
+  );
+
+  it("the goal text carries the normalized initials, not the raw entry (TEACH-40)", () => {
+    const { goal } = assembleGoal({ ...filledDraft(), initials: "j.a.s." }, newOpaqueId(), nowTs());
+    expect(goal.goal_text.startsWith("JAS will ")).toBe(true);
+  });
+
+  it("IEP goal #: parsed trimmed, blank → absent, invalid → absent (TEACH-41)", () => {
+    const labelOf = (goalLabel: string) =>
+      assembleGoal(filledDraft({ goalLabel }), newOpaqueId(), nowTs()).goal.goal_label;
+    expect(labelOf(" 2 ")).toBe("2");
+    expect(labelOf("1a")).toBe("1a");
+    expect(labelOf("")).toBeUndefined();
+    expect(labelOf("   ")).toBeUndefined();
+    expect(labelOf("Goal 2")).toBeUndefined();
+    const blank = assembleGoal(filledDraft(), newOpaqueId(), nowTs()).goal;
+    expect("goal_label" in blank).toBe(false);
+  });
+
+  it("the label is outside the baseline-mandatory gate and is never auto-filled", () => {
+    expect(emptyForm().goalLabel).toBe("");
+    const { goal } = assembleGoal(
+      filledDraft({ path: "adopt", baseline: "20" }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.goal_label).toBeUndefined();
+    expect(canBeginMonitoring(goal).ok).toBe(true);
   });
 });
