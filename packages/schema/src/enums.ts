@@ -102,6 +102,27 @@ export const MISMATCH_DISPOSITIONS = ["counted", "excluded"] as const;
 export type MismatchDisposition = Member<typeof MISMATCH_DISPOSITIONS>;
 
 /**
+ * Baseline point lifecycle (data-model §2.2, TEACH-46 C1). A baseline point is
+ * never hard-deleted: a removed point keeps its values, stays visible in the
+ * card's History, and is excluded from the baseline estimate, n and canAdopt.
+ */
+export const BASELINE_POINT_STATUSES = ["recorded", "removed"] as const;
+export type BaselinePointStatus = Member<typeof BASELINE_POINT_STATUSES>;
+
+/**
+ * Why a baseline point was removed (TEACH-46 C2). A CLOSED list — no free text,
+ * no "Other" (ky-sped-lbd-sdi-sme ruling 2026-10-09). Any addition must re-clear
+ * the SME and the privacy gate.
+ */
+export const BASELINE_REMOVE_REASONS = [
+  "entered_by_mistake",
+  "duplicate",
+  "wrong_student_or_goal",
+  "probe_not_per_goal_condition",
+] as const;
+export type BaselineRemoveReason = Member<typeof BASELINE_REMOVE_REASONS>;
+
+/**
  * No-data reason (data-model §2.4, §A.2). `no_time` is a fidelity gap (accrues
  * the No-time counter, NOT excused); absent/testing/no_school are excused and
  * pause (never break) the consistency run. The para path may write only a

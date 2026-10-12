@@ -12,6 +12,8 @@ import { asTimestamp, type NoDataReason, type ProgressDataPoint } from "@teacher
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../design/Avatar.js";
 import { GoalTitle } from "../design/GoalTitle.js";
+import { SCORE_LATER } from "../design/glyphs.js";
+import { useEscapeToClose } from "./Sheet.js";
 import { matchesDesktop } from "./useIsDesktop.js";
 import type { DocMutator } from "../data/session.js";
 import {
@@ -259,7 +261,7 @@ function ScoreEntry({
             className="btn small ghost"
             onClick={() => onCommit(bookmarkMutator(contextOf(target)))}
           >
-            ⚑ Collected — score later
+            <span aria-hidden="true">{SCORE_LATER.glyph}</span> {SCORE_LATER.label}
           </button>
         </div>
       ) : null}
@@ -347,15 +349,7 @@ export function QuickScoreSheet({
 
   // Keyboard dismissal (Escape) — the accessible way to close; the backdrop
   // click is a pointer convenience on top of it.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        onClose();
-      }
-    };
-    globalThis.addEventListener?.("keydown", onKey);
-    return () => globalThis.removeEventListener?.("keydown", onKey);
-  }, [onClose]);
+  useEscapeToClose(onClose);
 
   return (
     <>

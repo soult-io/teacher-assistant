@@ -252,6 +252,8 @@ function baselinePoint(
     computed_value: numerator / 5,
     probe_condition_id: conditionId,
     scorer: "teacher",
+    status: "recorded",
+    revisions: [],
   };
 }
 

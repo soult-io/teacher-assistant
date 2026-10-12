@@ -10,6 +10,7 @@
 
 import {
   type AutoStatement,
+  type BaselineFix,
   buildGoalDetail,
   compareArcNewestFirst,
   computeAutoStatement,
@@ -20,17 +21,20 @@ import {
   MIN_SCORED_POINTS,
 } from "@teacher-assistant/domain-core";
 import type {
+  BaselinePoint,
   IEPGoal,
   MasteryObservation,
   ProgressDataPoint,
   Revision,
-  Timestamp,
 } from "@teacher-assistant/schema";
 import type { ReactNode } from "react";
 import { Avatar } from "../../../design/Avatar.js";
 import { DuplicateLabelCue, GoalTitle } from "../../../design/GoalTitle.js";
 import { GoalLabelEditor } from "../../GoalLabelEditor.js";
+import { isoDayOfTs } from "../../../data/date.js";
 import { useIsDesktop } from "../../useIsDesktop.js";
+import { baselinePointsOldestFirst } from "../baseline/baseline-order.js";
+import { BaselinePoints } from "../baseline/BaselinePoints.js";
 import { TrendChart } from "./TrendChart.js";
 
 /** Copy text to the clipboard when available — a no-op elsewhere (guarded for jsdom/older browsers). */
@@ -64,11 +68,6 @@ function indeterminateHint(statement: AutoStatement): string | null {
   }
 }
 
-/** ISO day for a millisecond audit timestamp (entry / edit time). */
-function isoDay(ts: Timestamp): string {
-  return new Date(Number(ts)).toISOString().slice(0, 10);
-}
-
 /** Compact who/when/old→new summary for an audited edit (§B audit trail). */
 function describeRevision(rev: Revision): string {
   const keysOf = (o: unknown): string[] =>
@@ -81,7 +80,7 @@ function describeRevision(rev: Revision): string {
   const diff = keys
     .map((k) => `${k}: ${String(oldR[k] ?? "—")}→${String(newR[k] ?? "—")}`)
     .join(", ");
-  return `${rev.who} · ${isoDay(rev.when)} — ${diff}`;
+  return `${rev.who} · ${isoDayOfTs(rev.when)} — ${diff}`;
 }
 
 const VARIANT_BADGE: Readonly<Record<AutoStatement["variant"], string>> = {
@@ -421,7 +420,7 @@ function HistoryTable({
                       </span>
                     ) : null}
                   </td>
-                  <td>{isoDay(p.entry_ts)}</td>
+                  <td>{isoDayOfTs(p.entry_ts)}</td>
                   <td>
                     {ct}
                     {p.denominator_original !== undefined && p.denominator_mismatch === true ? (
@@ -498,6 +497,34 @@ export interface GoalDetailScreenProps {
   readonly onAddPoint: () => void;
   readonly onEditPoint: (point: ProgressDataPoint) => void;
   readonly onAckMastery: (candidate: MasteryCandidate) => void;
+  /**
+   * TEACH-46: this goal's baseline points and their audited Fix / Keep. After ARC
+   * adoption a point may be fixed (never removed) and the IEP baseline_value never
+   * recomputes — the card shows the "Fixed after ARC" note instead. Omitted → no card.
+   */
+  readonly baselinePoints?: readonly BaselinePoint[];
+  readonly onFixBaselinePoint?: (point: BaselinePoint, fix: BaselineFix) => void;
+}
+
+/** TEACH-46 — an adopted goal's baseline points: Fix only, History, the after-ARC note. */
+function BaselinePointsCard({
+  goal,
+  points,
+  onFix,
+}: {
+  readonly goal: IEPGoal;
+  readonly points: readonly BaselinePoint[];
+  readonly onFix: (point: BaselinePoint, fix: BaselineFix) => void;
+}) {
+  return (
+    <div className="card" data-testid="detail-baseline-points">
+      <div className="cardhead">
+        <b>Baseline points</b>
+      </div>
+      {/* Fix only: no Remove and no Keep after adoption (ruling B). */}
+      <BaselinePoints goal={goal} points={points} onFix={onFix} />
+    </div>
+  );
 }
 
 /** The trend card (chart + the ⊘-as-gap note) — shared by every layout. */
@@ -614,6 +641,8 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
     onEditPoint,
     onAckMastery,
     layout,
+    baselinePoints,
+    onFixBaselinePoint,
   } = props;
 
   const detail = buildGoalDetail(goal, points);
@@ -650,8 +679,18 @@ export function GoalDetailBody(props: GoalDetailBodyProps) {
       onAckMastery={onAckMastery}
     />
   );
+  const ownBaseline = baselinePointsOldestFirst(
+    (baselinePoints ?? []).filter((p) => p.goal_id === goal.goal_id),
+  );
+  const baselineCard =
+    ownBaseline.length > 0 && onFixBaselinePoint !== undefined && goal.status !== "proposed" ? (
+      <BaselinePointsCard goal={goal} points={ownBaseline} onFix={onFixBaselinePoint} />
+    ) : null;
   const history = (
-    <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+    <>
+      <HistoryTable goal={goal} points={points} probeLabel={probeLabel} onEditPoint={onEditPoint} />
+      {baselineCard}
+    </>
   );
 
   if (layout === "full") {

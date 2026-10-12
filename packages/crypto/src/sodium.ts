@@ -153,6 +153,30 @@ export function genericHash(data: Uint8Array, outLen: number): Uint8Array {
   return s().crypto_generichash(outLen, data, null);
 }
 
+/**
+ * Keyed BLAKE2b (a PRF): `outLen` bytes of BLAKE2b(`data`, key = `key`). libsodium
+ * requires a 16–64-byte key, so the secret is the key and a domain label is the data
+ * (used to derive the pairing sid and key from the pairing secret).
+ */
+export function keyedHash(key: Uint8Array, data: Uint8Array, outLen: number): Uint8Array {
+  return s().crypto_generichash(outLen, data, key);
+}
+
+/** X25519 public-key length (crypto_box). */
+export function boxPublicKeyBytes(): number {
+  return s().crypto_box_PUBLICKEYBYTES;
+}
+
+/** Length of a 32-byte key sealed to a box public key (crypto_box_seal output). */
+export function sealedKeyBytes(): number {
+  return s().crypto_box_SEALBYTES + s().crypto_aead_xchacha20poly1305_ietf_KEYBYTES;
+}
+
+/** Ed25519 public-key length (crypto_sign). */
+export function signPublicKeyBytes(): number {
+  return s().crypto_sign_PUBLICKEYBYTES;
+}
+
 /** Constant-time equality for two byte arrays. */
 export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) {
@@ -160,6 +184,15 @@ export function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   }
   // sodium.memcmp requires equal length (checked above).
   return s().memcmp(a, b);
+}
+
+/** True if every byte is zero (constant time over the buffer's length). */
+export function isAllZero(buf: Uint8Array): boolean {
+  let acc = 0;
+  for (const byte of buf) {
+    acc |= byte;
+  }
+  return acc === 0;
 }
 
 /** Zero a key buffer in place (best-effort hygiene; GC still holds copies). */

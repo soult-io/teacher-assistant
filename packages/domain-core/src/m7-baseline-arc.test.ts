@@ -64,6 +64,8 @@ function baselinePoint(goal: IEPGoal, numerator: number, condition: OpaqueId): B
     denominator_used: 10,
     probe_condition_id: condition,
     scorer: "teacher",
+    status: "recorded",
+    revisions: [],
   };
 }
 

@@ -18,6 +18,9 @@ function renderBaseline(edit: (records: Records) => Records = (r) => r) {
     onAdopt: vi.fn(),
     onEditArcDate: vi.fn().mockReturnValue(null),
     onSetGoalLabel: vi.fn(),
+    onFixBaselinePoint: vi.fn(),
+    onRemoveBaselinePoint: vi.fn(),
+    onKeepBaselineTotal: vi.fn(),
   };
   render(
     <BaselineScreen
@@ -80,6 +83,7 @@ describe("BaselineScreen (U5)", () => {
 
   it("adding a baseline point routes to the handler", () => {
     const { onAddBaselinePoint } = renderBaseline();
+    fireEvent.change(screen.getByLabelText("baseline correct"), { target: { value: "3" } });
     fireEvent.click(screen.getByRole("button", { name: "+ Add baseline point" }));
     expect(onAddBaselinePoint).toHaveBeenCalledOnce();
   });

@@ -95,6 +95,10 @@ export function adoptGoal(
       // Recorded as a distinct flag (not the `criterion_level` key) so the F4
       // quarterly clamp does not read adoption as a criterion CHANGE.
       criterion_confirmed: true,
+      // TEACH-46 C6: which points, and which method, produced the locked value — so
+      // a later post-adoption fix can show what the estimate would have been.
+      baseline_method: estimate.method,
+      baseline_point_ids: estimate.pointIds,
     },
   };
   return {

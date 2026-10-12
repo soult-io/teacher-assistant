@@ -8,21 +8,46 @@
 // H-PUB-4 (hard): the public surface is identity-clean — URLs/bodies carry only
 // opaque ids + base64 ciphertext, request bodies are never logged, and every
 // 4xx/5xx references an opaque `record_id` only.
+//
+// TEACH-55 (EU-0) logging contract: see logging.ts — every error path answers
+// `{error, record_id}` and logs at most `{record_id, route, status, sqlstate}`.
 
-import { randomUUID } from "node:crypto";
 import rateLimit from "@fastify/rate-limit";
 import {
   canonicalRequest,
   SYNC_HEADERS,
-  type SyncErrorBody,
   type SyncPullResult,
   type SyncPushBody,
   type SyncPushResult,
 } from "@teacher-assistant/schema";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
+import { isTrustedProxyEntry } from "./config.js";
+import {
+  parseGrantBody,
+  parseListBody,
+  parsePairingGrantBody,
+  parsePairingRequestBody,
+  parsePairingSidBody,
+  parseRecoveryWrapBody,
+  parseRedeemBody,
+  parseRetireBody,
+  parseRevokeBody,
+} from "./control-bodies.js";
+import {
+  clientErrorHandler,
+  failRequest,
+  guardLogMessage,
+  keepLogFields,
+  handleError,
+  LOG_LEVEL,
+  OWNER_CODES_INVALIDATED,
+  SERIALIZERS,
+  sendError,
+} from "./logging.js";
+import { ownerCodeHash } from "./owner-code.js";
+import { type RedeemAttempt, RedeemGuard } from "./redeem-guard.js";
 import { fromBase64, sodiumReady, verifyDetached } from "./sodium-verify.js";
-import { errorCode } from "./sql.js";
-import { parseCursor, type RelayStore } from "./store.js";
+import { parseCursor, type RedeemResult, type RelayStore } from "./store.js";
 
 /** Requests older/newer than this (clock skew + transit) are rejected (replay window). */
 const TIMESTAMP_WINDOW_MS = 300_000;
@@ -62,27 +87,14 @@ function header(req: FastifyRequest, name: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-/** Send the identity-clean error body; returns its opaque record_id. */
-function sendError(reply: FastifyReply, status: number, code: string): string {
-  const record_id = randomUUID();
-  const body: SyncErrorBody = { error: code, record_id };
-  reply.code(status).send(body);
-  return record_id;
-}
-
 /**
- * A store failure (e.g. the database is unreachable) → 503. The log line carries
- * the opaque record_id and, for a database error, its 5-character SQLSTATE —
- * never the error message, the doc id, or anything from the request (H-PUB-4).
- * A 503 means "outcome unknown": a timed-out append may still have committed,
- * so a client retry can append the same updates again (CRDT updates are
- * idempotent to apply, so this is safe for the sync client).
+ * A store failure (e.g. the database is unreachable) → 503. A 503 means
+ * "outcome unknown": a timed-out append may still have committed, so a client
+ * retry can append the same updates again (CRDT updates are idempotent to apply,
+ * so this is safe for the sync client).
  */
 function storeUnavailable(req: FastifyRequest, reply: FastifyReply, err: unknown): void {
-  const code = errorCode(err);
-  const sqlstate = code !== undefined && /^[0-9A-Z]{5}$/.test(code) ? code : undefined;
-  const record_id = sendError(reply, 503, "unavailable");
-  req.log.error({ record_id, sqlstate }, "sync store unavailable");
+  failRequest(req, reply, 503, "unavailable", err, "sync store unavailable");
 }
 
 /**
@@ -94,12 +106,47 @@ function storeUnavailable(req: FastifyRequest, reply: FastifyReply, err: unknown
  */
 const MAX_ID_LENGTH = 256;
 
+/** Scope tag reserved for the enrollment control plane; never valid on /sync/:docId. */
+const RESERVED_CONTROL_SCOPE = "control";
+
+/** Control routes have two or more path segments, so they never match /sync/:docId (spec DN-5). */
+const REDEEM_ROUTE = "/sync/enroll/redeem";
+
+/** The owner control routes (spec §5.3, EU-3). Identifiers travel only in the signed body. */
+const OWNER_ROUTES = {
+  list: "/sync/devices/list",
+  grant: "/sync/devices/grant",
+  revoke: "/sync/devices/revoke",
+  retireScope: "/sync/devices/retire-scope",
+  recoveryWrap: "/sync/devices/recovery-wrap",
+} as const;
+
+/**
+ * The pairing mailbox (spec §4.2, §5.3, EU-4). No route has a path parameter:
+ * the sid travels only in the signed body, so it never reaches an access log.
+ */
+const PAIRING_ROUTES = {
+  open: "/sync/enroll/pairing/open",
+  requestPut: "/sync/enroll/pairing/request-put",
+  requestGet: "/sync/enroll/pairing/request-get",
+  grantPut: "/sync/enroll/pairing/grant-put",
+  grantGet: "/sync/enroll/pairing/grant-get",
+} as const;
+
+/**
+ * Pairing routes: 30 requests a minute per trusted client IP, per route (spec
+ * §5.5) — tighter than the global 300 because the devices poll them, and the
+ * Postgres grant-get waits for the control lock while holding a pool connection.
+ */
+const PAIRING_RATE_LIMIT = { rateLimit: { max: 30, timeWindow: "1 minute" } } as const;
+
 /** Ciphertext travels as base64 (standard or URL-safe alphabet). */
 const BASE64 = /^[A-Za-z0-9+/_-]*={0,2}$/;
 
 /** Identical response for "unknown doc" and "unauthorized" — the H-PUB-3 zero-existence guarantee. */
-function notFound(reply: FastifyReply): void {
+function notFound(reply: FastifyReply): FastifyReply {
   sendError(reply, 404, "not_found");
+  return reply;
 }
 
 interface VerifiedRequest {
@@ -156,6 +203,12 @@ function parsePushUpdates(rawBody: Uint8Array): readonly string[] | null {
   return updates as string[];
 }
 
+/** POST /sync/enroll/redeem success body (spec §5.3). */
+interface RedeemResponse {
+  readonly mode: "first" | "recovery";
+  readonly recovery_wrap: string | null;
+}
+
 function rawBodyOf(req: FastifyRequest): Uint8Array {
   const body = req.body;
   return body instanceof Uint8Array ? body : new Uint8Array(0);
@@ -164,26 +217,89 @@ function rawBodyOf(req: FastifyRequest): Uint8Array {
 export interface BuildAppOptions {
   /** Where log lines go (default stdout). Tests capture them to assert what is logged. */
   readonly logStream?: { write(line: string): void };
+  /**
+   * Peers (IPs/CIDRs — the proxy-web network) whose X-Forwarded-For sets req.ip
+   * (config.ts loadTrustProxy). Omitted: no proxy is trusted. Never trust-all.
+   */
+  readonly trustProxy?: readonly string[];
+  /** Clock (ms) for the redeem lockout; tests inject one. */
+  readonly now?: () => number;
+}
+
+function trustProxyOption(list: readonly string[] | undefined): string[] | false {
+  if (list === undefined) {
+    return false;
+  }
+  if (list.length === 0 || !list.every(isTrustedProxyEntry)) {
+    throw new Error("trustProxy must be a non-empty list of IPs/CIDRs (never trust-all)");
+  }
+  return [...list];
+}
+
+/** Who may call a control route: an active owner, or any valid signer (the store then decides). */
+type ControlAccess = "owner" | "any";
+
+interface ControlRouteOptions {
+  readonly access: ControlAccess;
+  /** Per-route Fastify config (the pairing rate limit). */
+  readonly config?: typeof PAIRING_RATE_LIMIT;
+}
+
+const OWNER: ControlRouteOptions = { access: "owner" };
+const PAIRING_OWNER: ControlRouteOptions = { access: "owner", config: PAIRING_RATE_LIMIT };
+const PAIRING_ANY: ControlRouteOptions = { access: "any", config: PAIRING_RATE_LIMIT };
+
+/**
+ * The startup order (spec §5.1): expired pairing sessions and owner codes are
+ * swept before the app exists, so none outlives a restart into the first request.
+ */
+export async function startApp(
+  store: RelayStore,
+  options: BuildAppOptions = {},
+): Promise<FastifyInstance> {
+  await store.sweepExpired();
+  return buildApp(store, options);
 }
 
 /** Build the relay app over a store (injected so tests can seed the ACL). */
 export function buildApp(store: RelayStore, options: BuildAppOptions = {}): FastifyInstance {
   // disableRequestLogging: bodies (opaque ciphertext) and signed headers are
   // never written to a log line (H-PUB-4, defence in depth).
-  const logger = options.logStream === undefined ? true : { stream: options.logStream };
-  const app = Fastify({ logger, disableRequestLogging: true });
+  const app = Fastify({
+    logger: {
+      level: LOG_LEVEL,
+      serializers: SERIALIZERS,
+      hooks: { logMethod: guardLogMessage },
+      formatters: { log: keepLogFields },
+      ...(options.logStream === undefined ? {} : { stream: options.logStream }),
+    },
+    disableRequestLogging: true,
+    trustProxy: trustProxyOption(options.trustProxy),
+    // 414 (doc id over maxParamLength) and a malformed URL bypass setErrorHandler
+    // unless routed here; Fastify's own bodies for them echo the filled path.
+    frameworkErrors: handleError,
+    clientErrorHandler,
+  });
+  app.setErrorHandler(handleError);
+  // The default 404 body names the method + filled path.
+  app.setNotFoundHandler((req, reply) => {
+    failRequest(req, reply, 404, "not_found", undefined, "request rejected");
+  });
   const nonces = new NonceCache();
+  const redeemGuard = new RedeemGuard(options.now);
 
   // Per-IP rate limiting (H-PUB-5) — app-level defence in depth in front of the
-  // authorizing /sync routes, additional to the NPM/WAF layer. Behind the
-  // Lexington NPM, the deploy must set Fastify `trustProxy` so req.ip is the
-  // real client. The 429 body stays identity-clean (opaque record_id only).
+  // authorizing /sync routes, additional to the NPM/WAF layer. Keyed on req.ip,
+  // which is the real client only via a TRUST_PROXY peer (else the socket peer).
+  // The thrown error reaches handleError → {error: "rate_limited", record_id}.
   // State is in-process (single-instance Phase 0; a shared store is a follow-on).
   app.register(rateLimit, {
     global: true,
     max: 300,
     timeWindow: "1 minute",
-    errorResponseBuilder: () => ({ error: "rate_limited", record_id: randomUUID() }),
+    keyGenerator: (req) => req.ip,
+    errorResponseBuilder: (_req, ctx) =>
+      Object.assign(new Error("rate limited"), { statusCode: ctx.statusCode }),
   });
 
   // libsodium (signature verification) must be initialised before any request is
@@ -219,7 +335,10 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     }
     // A doc id with a NUL (Postgres text cannot hold one) or an oversized id or
     // scope can never exist, so it gets the same 404 as any other unknown doc.
+    // The `control` scope is reserved for enrollment (device-enrollment spec
+    // §5.5, EU-0): it never carries a data stream.
     if (
+      verified.scope === RESERVED_CONTROL_SCOPE ||
       docId.includes("\u0000") ||
       verified.scope.includes("\u0000") ||
       docId.length > MAX_ID_LENGTH ||
@@ -245,50 +364,352 @@ export function buildApp(store: RelayStore, options: BuildAppOptions = {}): Fast
     return verified;
   }
 
-  app.get("/health", async () => ({ status: "ok", service: "sync-relay" }));
-
-  // Fetch updates after ?since for an opaque doc id.
-  app.get("/sync/:docId", async (req, reply) => {
-    const { docId } = req.params as { docId: string };
-    try {
-      const verified = await authorizeDoc(req, reply, rawBodyOf(req), docId);
-      if (verified === null) {
-        return reply;
-      }
-      const raw = (req.query as { since?: unknown }).since;
-      const since = parseCursor(typeof raw === "string" ? raw : undefined);
-      const result = await store.fetch(docId, since);
-      const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
-      return reply.send(payload);
-    } catch (err) {
-      return storeUnavailable(req, reply, err);
+  /**
+   * One redeem attempt, before any reply: a malformed body, a refusal (bad
+   * signature, a non-control scope, or a code the store refuses), or the mode.
+   * Expired codes are swept first (spec §5.1: at the start of every control route).
+   */
+  async function attemptRedeem(
+    req: FastifyRequest,
+    rawBody: Uint8Array,
+  ): Promise<RedeemResult | "bad_request"> {
+    const verified = verifyRequest(req, rawBody, nonces);
+    if (verified === null || verified.scope !== RESERVED_CONTROL_SCOPE) {
+      return "refused";
     }
-  });
+    const code = parseRedeemBody(rawBody);
+    if (code === null) {
+      return "bad_request";
+    }
+    await store.sweepExpired();
+    const hash = ownerCodeHash(code);
+    return hash === undefined
+      ? "refused"
+      : store.redeemOwnerCode(hash, verified.devicePublicKeyB64);
+  }
 
-  // Append encrypted updates for an opaque doc id.
-  app.post("/sync/:docId", async (req, reply) => {
+  /** Count a refused redeem; past the global limit, invalidate every unused code (spec §5.5). */
+  async function countRedeemFailure(req: FastifyRequest, attempt: RedeemAttempt): Promise<void> {
+    if (attempt.fail()) {
+      await store.invalidateOwnerCodes(); // a throw leaves the count over the limit: the next failure retries
+      redeemGuard.burned();
+      req.log.warn({ route: REDEEM_ROUTE }, OWNER_CODES_INVALIDATED);
+    }
+  }
+
+  async function redeemResponse(mode: "first" | "recovery"): Promise<RedeemResponse> {
+    const wrap = mode === "recovery" ? await store.getRecoveryWrap() : undefined;
+    return { mode, recovery_wrap: wrap ?? null };
+  }
+
+  /**
+   * The control-route preamble (spec §5.3): a valid signature under the reserved
+   * `control` scope — from an ACTIVE owner on an owner route — else the identical
+   * H-PUB-3 404: a non-owner, a revoked device, a bad signature and an unknown
+   * route all look the same. Expired codes and pairing sessions are then swept
+   * (spec §5.1: at the start of every control route). Returns the raw body and
+   * the signer, or null after the 404 was sent.
+   */
+  async function authorizeControl(
+    req: FastifyRequest,
+    reply: FastifyReply,
+    access: ControlAccess,
+  ): Promise<{ readonly rawBody: Uint8Array; readonly signer: string } | null> {
     const rawBody = rawBodyOf(req);
-    const { docId } = req.params as { docId: string };
-    try {
-      const verified = await authorizeDoc(req, reply, rawBody, docId);
-      if (verified === null) {
+    const verified = verifyRequest(req, rawBody, nonces);
+    if (
+      verified === null ||
+      verified.scope !== RESERVED_CONTROL_SCOPE ||
+      (access === "owner" && (await store.deviceRole(verified.devicePublicKeyB64)) !== "owner")
+    ) {
+      notFound(reply);
+      return null;
+    }
+    await store.sweepExpired();
+    return { rawBody, signer: verified.devicePublicKeyB64 };
+  }
+
+  /** A refused control operation: `{error, record_id}` plus the one permitted log line. */
+  function conflict(req: FastifyRequest, reply: FastifyReply, code: string): FastifyReply {
+    failRequest(req, reply, 409, code, undefined, "request rejected");
+    return reply;
+  }
+
+  function payloadTooLarge(reply: FastifyReply): FastifyReply {
+    sendError(reply, 413, "payload_too_large");
+    return reply;
+  }
+
+  /**
+   * Register one control route: the preamble, then the strict body parser (null →
+   * 400), then the handler with the verified signer. Any store failure is the
+   * 503 "outcome unknown".
+   */
+  function controlRoute<T>(
+    routes: FastifyInstance,
+    path: string,
+    route: ControlRouteOptions,
+    parse: (rawBody: Uint8Array) => T | null,
+    handle: (
+      body: T,
+      signer: string,
+      req: FastifyRequest,
+      reply: FastifyReply,
+    ) => Promise<FastifyReply>,
+  ): void {
+    routes.post(
+      path,
+      route.config === undefined ? {} : { config: route.config },
+      async (req, reply) => {
+        try {
+          const control = await authorizeControl(req, reply, route.access);
+          if (control === null) {
+            return reply;
+          }
+          const body = parse(control.rawBody);
+          if (body === null) {
+            sendError(reply, 400, "bad_request");
+            return reply;
+          }
+          return await handle(body, control.signer, req, reply);
+        } catch (err) {
+          return storeUnavailable(req, reply, err);
+        }
+      },
+    );
+  }
+
+  /** A pairing read: the blob, or the identical 404 when the store has none for this signer. */
+  function sendBlob(reply: FastifyReply, blob: string | undefined): FastifyReply {
+    return blob === undefined ? notFound(reply) : reply.send({ blob });
+  }
+
+  // Routes live in a plugin registered AFTER the rate limiter: @fastify/rate-limit
+  // attaches through an onRoute hook that exists only once it has loaded, so a
+  // route added directly on `app` here would never be limited (TEACH-55 found
+  // exactly that on main 6d987a2: 305 requests from one IP, all 200).
+  app.register(async (routes) => {
+    routes.get("/health", async () => ({ status: "ok", service: "sync-relay" }));
+
+    // Fetch updates after ?since for an opaque doc id.
+    routes.get("/sync/:docId", async (req, reply) => {
+      const { docId } = req.params as { docId: string };
+      try {
+        const verified = await authorizeDoc(req, reply, rawBodyOf(req), docId);
+        if (verified === null) {
+          return reply;
+        }
+        const raw = (req.query as { since?: unknown }).since;
+        const since = parseCursor(typeof raw === "string" ? raw : undefined);
+        const result = await store.fetch(docId, since);
+        const payload: SyncPullResult = { cursor: result.cursor, updates: result.updates };
+        return reply.send(payload);
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
+      }
+    });
+
+    // Redeem an operator owner code (device-enrollment spec §5.3, F1/F5). The
+    // signer becomes an owner. Every failure — bad signature, a non-control
+    // scope, a wrong, used, expired or malformed code, a key the relay already
+    // knows (revoked, member or owner) — is the identical 401 and counts toward
+    // the lockout. A locked-out IP (or the global key) gets 429 before the code
+    // is looked at. Neither the code nor its hash is ever logged (§5.6).
+    routes.post(REDEEM_ROUTE, async (req, reply) => {
+      const attempt = redeemGuard.begin(req.ip);
+      if (attempt === undefined) {
+        failRequest(req, reply, 429, "rate_limited", undefined, "request rejected");
         return reply;
       }
-      const updates = parsePushUpdates(rawBody);
-      if (updates === null) {
-        return sendError(reply, 400, "bad_request");
+      try {
+        const outcome = await attemptRedeem(req, rawBodyOf(req));
+        if (outcome === "bad_request") {
+          sendError(reply, 400, "bad_request");
+          return reply;
+        }
+        if (outcome === "refused") {
+          await countRedeemFailure(req, attempt);
+          sendError(reply, 401, "unauthorized");
+          return reply;
+        }
+        attempt.succeed();
+        return reply.send(await redeemResponse(outcome));
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
+      } finally {
+        attempt.release();
       }
-      // undefined: another scope bound this doc after authorizeDoc looked — the
-      // same zero-existence 404 as if it had been bound already.
-      const cursor = await store.append(docId, verified.scope, updates);
-      if (cursor === undefined) {
-        return notFound(reply);
+    });
+
+    // Owner control routes (spec §5.3, F4/F5). Every refusal before the body is
+    // read is the identical 404 (authorizeControl); revoked is permanent, so a
+    // grant replayed after a revoke — even on a restarted relay with an empty
+    // nonce cache — is refused by the store (spec §5.4).
+    controlRoute(routes, OWNER_ROUTES.list, OWNER, parseListBody, async (_b, _s, _req, reply) =>
+      reply.send({ devices: await store.listDevices() }),
+    );
+
+    controlRoute(
+      routes,
+      OWNER_ROUTES.grant,
+      OWNER,
+      parseGrantBody,
+      async ({ device, scopes }, _s, req, reply) =>
+        (await store.grantScopes(device, scopes)) === "ok"
+          ? reply.send({})
+          : conflict(req, reply, "conflict"),
+    );
+
+    controlRoute(
+      routes,
+      OWNER_ROUTES.revoke,
+      OWNER,
+      parseRevokeBody,
+      async (device, _s, req, reply) =>
+        (await store.revoke(device)) === "ok" ? reply.send({}) : conflict(req, reply, "last_owner"),
+    );
+
+    // The master scope is never retired (FERPA re-review N3).
+    controlRoute(
+      routes,
+      OWNER_ROUTES.retireScope,
+      OWNER,
+      parseRetireBody,
+      async (tag, _s, req, reply) => {
+        const result = await store.retireScope(tag);
+        if (result === "master_scope") {
+          return conflict(req, reply, "master_scope");
+        }
+        if (result === "not_found") {
+          return notFound(reply);
+        }
+        return reply.send({});
+      },
+    );
+
+    controlRoute(
+      routes,
+      OWNER_ROUTES.recoveryWrap,
+      OWNER,
+      parseRecoveryWrapBody,
+      async (body, _s, _req, reply) => {
+        if (body === "too_large") {
+          return payloadTooLarge(reply);
+        }
+        await store.putRecoveryWrap(body.blob);
+        return reply.send({});
+      },
+    );
+
+    // The pairing mailbox (spec §4.2, §5.3, F2/F3). Every refusal is the
+    // identical 404 — an unknown, expired or taken session, a wrong signer —
+    // except a grant-put the store refuses for a known session (409). The sid,
+    // the keys, the tags and the blobs are never logged (§5.6).
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.open,
+      PAIRING_OWNER,
+      parsePairingSidBody,
+      async (sid, opener, _req, reply) => {
+        if (!(await store.openPairing(sid, opener))) {
+          return notFound(reply);
+        }
+        return reply.send({});
+      },
+    );
+
+    // B posts its sealed request; first write wins (a taken slot is the 404).
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.requestPut,
+      PAIRING_ANY,
+      parsePairingRequestBody,
+      async (body, signer, _req, reply) => {
+        if (body === "too_large") {
+          return payloadTooLarge(reply);
+        }
+        if (!(await store.putPairingRequest(body.sid, signer, body.blob))) {
+          return notFound(reply);
+        }
+        return reply.send({});
+      },
+    );
+
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.requestGet,
+      PAIRING_OWNER,
+      parsePairingSidBody,
+      async (sid, opener, _req, reply) =>
+        sendBlob(reply, await store.getPairingRequest(sid, opener)),
+    );
+
+    // A enrolls the request signer and posts the sealed grant, in one store step.
+    // The grantee must be the recorded request signer (else 409), and a para is
+    // a member with period scopes only (a master scope is 409, from the store).
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.grantPut,
+      PAIRING_OWNER,
+      parsePairingGrantBody,
+      async (body, opener, req, reply) => {
+        if (body === "too_large") {
+          return payloadTooLarge(reply);
+        }
+        const result = await store.completePairing(
+          body.sid,
+          opener,
+          body.device,
+          body.role,
+          body.scopes,
+          body.blob,
+        );
+        if (result === "not_found") {
+          return notFound(reply);
+        }
+        return result === "ok" ? reply.send({}) : conflict(req, reply, "conflict");
+      },
+    );
+
+    // B collects the grant; only the recorded request signer gets it, once.
+    controlRoute(
+      routes,
+      PAIRING_ROUTES.grantGet,
+      PAIRING_ANY,
+      parsePairingSidBody,
+      async (sid, signer, _req, reply) =>
+        sendBlob(reply, await store.takePairingGrant(sid, signer)),
+    );
+
+    // Append encrypted updates for an opaque doc id.
+    routes.post("/sync/:docId", async (req, reply) => {
+      const rawBody = rawBodyOf(req);
+      const { docId } = req.params as { docId: string };
+      try {
+        const verified = await authorizeDoc(req, reply, rawBody, docId);
+        if (verified === null) {
+          return reply;
+        }
+        const updates = parsePushUpdates(rawBody);
+        if (updates === null) {
+          // Return the reply, not sendError's record_id: an async handler that
+          // returns a value after sending makes Fastify log "Reply was already
+          // sent … in /sync/<filled doc id>".
+          sendError(reply, 400, "bad_request");
+          return reply;
+        }
+        // undefined: another scope bound this doc after authorizeDoc looked — the
+        // same zero-existence 404 as if it had been bound already.
+        const cursor = await store.append(docId, verified.scope, updates);
+        if (cursor === undefined) {
+          return notFound(reply);
+        }
+        const payload: SyncPushResult = { cursor };
+        return reply.send(payload);
+      } catch (err) {
+        return storeUnavailable(req, reply, err);
       }
-      const payload: SyncPushResult = { cursor };
-      return reply.send(payload);
-    } catch (err) {
-      return storeUnavailable(req, reply, err);
-    }
+    });
   });
 
   return app;

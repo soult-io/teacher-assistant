@@ -11,6 +11,8 @@ import type {
   AccomMod,
   AccommodationSubtype,
   ArcDateFlag,
+  BaselinePointStatus,
+  BaselineRemoveReason,
   BaselineSource,
   ColorToken,
   BlockType,
@@ -156,10 +158,18 @@ export interface IEPGoal {
   readonly revisions: readonly Revision[];
 }
 
-/** §2.2 BaselinePoint [ENCRYPTED]. Separate table so baseline ≠ monitoring data. */
+/**
+ * §2.2 BaselinePoint [ENCRYPTED]. Separate table so baseline ≠ monitoring data.
+ * Corrected only through the audited domain-core edits (fixBaselinePoint,
+ * removeBaselinePoint, keepBaselineTotal) — each appends a Revision; nothing is
+ * ever hard-deleted (TEACH-46).
+ */
 export interface BaselinePoint {
   readonly baseline_point_id: OpaqueId;
-  /** Goal must be status=proposed. */
+  /**
+   * The goal must be status=proposed to CREATE a point. A point on an adopted
+   * goal may still be fixed, but the goal's baseline_value never recomputes.
+   */
   readonly goal_id: OpaqueId;
   readonly student_id: OpaqueId;
   readonly admin_date: IsoDate;
@@ -171,6 +181,29 @@ export interface BaselinePoint {
   readonly probe_condition_id: OpaqueId;
   /** teacher — the para does not baseline. */
   readonly scorer: Extract<Scorer, "teacher">;
+  /** recorded | removed. A removed point is kept and shown in History, never counted. */
+  readonly status: BaselinePointStatus;
+  /** Set iff status=removed. Closed list — no free text. */
+  readonly removed_reason?: BaselineRemoveReason;
+  readonly removed_ts?: Timestamp;
+  readonly removed_by?: Extract<Scorer, "teacher">;
+  /** The probe's expected total when the point was entered; retained, never overwritten (C8). */
+  readonly denominator_original?: number;
+  /** Derived: denominator_used ≠ denominator_original. Warn, do not block (C8). */
+  readonly denominator_mismatch?: boolean;
+  /**
+   * The teacher tapped "Keep" on a mismatched total. Until then a mismatched
+   * point does not count toward the 3 comparable points (C8). NOT derived.
+   */
+  readonly mismatch_kept?: boolean;
+  /**
+   * Set when the point was fixed after its goal was adopted at ARC. The goal's
+   * baseline_value is NOT recomputed (it must match the IEP); the card shows the
+   * "Fixed after ARC" note with both numbers.
+   */
+  readonly corrected_after_adoption?: boolean;
+  /** Audit trail {who, when, old, new} — numbers, dates and closed enums only. */
+  readonly revisions: readonly Revision[];
 }
 
 /** §2.3 ProbeDefinition [ENCRYPTED] — circumstance text is disability-linked. */
