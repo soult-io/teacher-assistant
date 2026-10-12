@@ -7,7 +7,7 @@
 # transits this container — the client holds it encrypted locally.
 
 ## ---- build: vite build the PWA (+ its workspace deps) ----
-FROM node:22-alpine AS build
+FROM node:26-alpine AS build
 RUN npm install -g pnpm@11.17.0
 WORKDIR /app
 COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
