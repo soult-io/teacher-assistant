@@ -1,6 +1,7 @@
 // Status glyphs (design §E, round-3). The settled TRACK status set — kept
 // visually distinct so status always dominates a row:
 //   ● logged   ○ owes   ⊘ no-data   ★ mastery   ⏳ pending   ◐ incomplete   ◷ queued
+// plus one action marker (not a status): 🕐 score later (SCORE_LATER, TEACH-47).
 // The glyph carries the state to grayscale / colour-vision-deficient readers;
 // the chip colour reinforces. Ported from the prototype's glyph() map.
 
@@ -22,6 +23,18 @@ export const STATUS_CHIPS = {
   incomplete: { glyph: "◐", className: "incomplete" },
   queued: { glyph: "◷", className: "queued" },
 } as const satisfies Record<string, Chip>;
+
+/**
+ * Score-later (TEACH-47): "probe given, score later". A clock reads as "do this
+ * later"; the old ⚑ flag read to teachers as an error. Not ⏳ (that is the para
+ * `pending` cue) and kept apart from the ◷ `queued` chip: 🕐 is a full-colour emoji
+ * clock face, ◷ a single-colour geometric glyph. The glyph is decorative next to
+ * the plain `label`, which is the accessible name wherever the marker appears.
+ */
+export const SCORE_LATER = {
+  glyph: "🕐",
+  label: "Collected — score later",
+} as const;
 
 /** Map a weekly-dashboard row state (M3 projection) to its chip. */
 export function chipForDashboardState(state: DashboardState): Chip {

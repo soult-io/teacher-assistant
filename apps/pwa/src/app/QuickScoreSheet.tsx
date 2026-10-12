@@ -12,6 +12,7 @@ import { asTimestamp, type NoDataReason, type ProgressDataPoint } from "@teacher
 import { useEffect, useRef, useState } from "react";
 import { Avatar } from "../design/Avatar.js";
 import { GoalTitle } from "../design/GoalTitle.js";
+import { SCORE_LATER } from "../design/glyphs.js";
 import { useEscapeToClose } from "./Sheet.js";
 import { matchesDesktop } from "./useIsDesktop.js";
 import type { DocMutator } from "../data/session.js";
@@ -260,7 +261,7 @@ function ScoreEntry({
             className="btn small ghost"
             onClick={() => onCommit(bookmarkMutator(contextOf(target)))}
           >
-            ⚑ Collected — score later
+            <span aria-hidden="true">{SCORE_LATER.glyph}</span> {SCORE_LATER.label}
           </button>
         </div>
       ) : null}
