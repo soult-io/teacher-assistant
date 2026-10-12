@@ -21,7 +21,7 @@
   "dependencies": {
     "@teacher-assistant/crypto": "workspace:*",
     "@teacher-assistant/schema": "workspace:*",
-    "yjs": "13.6.32"
+    "yjs": "13.6.33"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.8",
