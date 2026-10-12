@@ -9,7 +9,7 @@
  * Phase-0 spec; for now this proves the shell renders end to end.
  *
  * WALKTHROUGH MODE (E2E_WALKTHROUGH=1): a separate, NON-gating capture that re-runs the
- * J1–J6 journeys on chromium at human pace (slowMo per action, per-character typing, a
+ * J1–J7 journeys on chromium at human pace (slowMo per action, per-character typing, a
  * hold at the end of every step) purely to record a video a person can watch. It
  * writes its own evidence (walkthrough-evidence.json, for the step offsets into THIS
  * recording) under test-results-walkthrough/, so it can never mix with the gating
@@ -26,6 +26,13 @@ const walkthrough = process.env.E2E_WALKTHROUGH === "1";
 // real student data into a published video, so the combination is refused outright.
 if (walkthrough && liveBaseUrl) {
   throw new Error("E2E_WALKTHROUGH records the local synthetic build only — unset E2E_BASE_URL");
+}
+
+// On CI every run's evidence (videos, traces, stills) is uploaded to PUBLIC Actions
+// artifacts and may be built into the public dashboard image, so CI only ever tests the
+// local synthetic build. A live URL is for a person running the suite by hand.
+if (process.env.CI && liveBaseUrl) {
+  throw new Error("E2E_BASE_URL is refused on CI — CI tests the local synthetic build only");
 }
 
 /** Walkthrough: pause Playwright adds before every browser action (ms). */
@@ -68,12 +75,19 @@ const walkthroughConfig = defineConfig<StepStillsOptions>({
         outputFile: "test-results-walkthrough/walkthrough-evidence.json",
         mode: "walkthrough",
         commitSha,
+        baseURL: LOCAL_URL,
       },
     ],
   ],
   use: {
     baseURL: LOCAL_URL,
-    trace: "off",
+    // A trace for its network log: it proves each video shows the local synthetic build
+    // (e2e.yml and the dashboard build check every request's host). Snapshots MUST stay
+    // on — with `snapshots: false` Playwright writes the *.network entries empty and the
+    // host check passes on nothing. No screencast or sources (~2 MB a journey; no
+    // measurable cost to the recording's pace). Never copied into the dashboard: only the
+    // video is.
+    trace: { mode: "on", snapshots: true, screenshots: false, sources: false },
     screenshot: "off",
     // Recorded at the phone viewport the journeys run in, 1:1, so the text in the
     // video is the size a teacher sees it — not a phone screen shrunk into a
@@ -94,6 +108,9 @@ const walkthroughConfig = defineConfig<StepStillsOptions>({
   webServer: localServer,
 });
 
+/** The origin the gating run tests; stamped into its evidence. */
+const baseURL = liveBaseUrl ?? LOCAL_URL;
+
 const gatingConfig = defineConfig<StepStillsOptions>({
   testDir: "./tests",
   timeout: 60_000,
@@ -103,22 +120,29 @@ const gatingConfig = defineConfig<StepStillsOptions>({
   // journey-evidence.json (our custom reporter) is the step+assertion evidence the
   // verification dashboard renders — the built-in JSON reporter prunes green runs to
   // bare test.step titles, so it cannot supply assertion text. results.json stays for
-  // stats/tooling; github + html are the human-facing views. All land under
-  // test-results/ (outputFile paths + the default outputDir) so one artifact upload
-  // captures the evidence alongside the per-test videos and traces.
+  // stats/tooling; github is the human-facing view. All land under test-results/
+  // (outputFile paths + the default outputDir) so one artifact upload captures the
+  // evidence alongside the per-test videos and traces. No html reporter on CI: the
+  // artifact is PUBLIC and the report is an unscannable second copy of every trace
+  // (e2e.yml scans test-results/ before upload). For the HTML view, download the
+  // artifact and run `playwright show-trace <trace.zip>` locally.
   reporter: process.env.CI
     ? [
         ["github"],
         [
           "./reporters/evidence-reporter.ts",
-          { outputFile: "test-results/journey-evidence.json", mode: "gating", commitSha },
+          {
+            outputFile: "test-results/journey-evidence.json",
+            mode: "gating",
+            commitSha,
+            baseURL,
+          },
         ],
         ["json", { outputFile: "test-results/results.json" }],
-        ["html", { open: "never" }],
       ]
     : [["list"]],
   use: {
-    baseURL: liveBaseUrl ?? LOCAL_URL,
+    baseURL,
     // Full trace + video on every test: these ARE the journey evidence the
     // dashboard renders, not just failure diagnostics. Screenshots stay
     // failure-only here — the per-step stills come from the journey `step` fixture.

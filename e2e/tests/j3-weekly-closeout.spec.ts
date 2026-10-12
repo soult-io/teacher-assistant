@@ -11,7 +11,7 @@
 
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/journey";
-import { goalRow, unlockToDashboard } from "./support/track";
+import { goalActionName, goalRow, unlockToDashboard } from "./support/track";
 
 // The clean, on-basis para capture the teacher confirms (student AB). Its short master
 // history (2 scored points) keeps the post-confirm statement under the ≥8-point gate.
@@ -103,7 +103,7 @@ test.describe("J3 — Weekly close-out (confirm a para point → draft IC statem
         // value lives in the para doc, never master truth, so it is absent from the audit
         // history and from the statement's data — the statement is drawn from 2 points only.
         await goalRow(page, GOAL)
-          .getByRole("button", { name: `trend and history ${GOAL}` })
+          .getByRole("button", { name: goalActionName("trend and history", GOAL) })
           .click();
         await expect(
           historyCard(page).locator("tbody tr"),
@@ -191,7 +191,7 @@ test.describe("J3 — Weekly close-out (confirm a para point → draft IC statem
       "Goal Detail: the confirmed para point is now a counted, export-eligible record (in-app value == export value)",
       async () => {
         await goalRow(page, GOAL)
-          .getByRole("button", { name: `trend and history ${GOAL}` })
+          .getByRole("button", { name: goalActionName("trend and history", GOAL) })
           .click();
         await expect(
           historyCard(page).locator("tbody tr"),
@@ -281,7 +281,7 @@ test.describe("J3 — Weekly close-out (confirm a para point → draft IC statem
         // only observes it — it surfaces a candidate flag and an Acknowledge action; the
         // status does not auto-flip to mastered and the goal is not closed.
         await goalRow(page, MASTERY_GOAL)
-          .getByRole("button", { name: `trend and history ${MASTERY_GOAL}` })
+          .getByRole("button", { name: goalActionName("trend and history", MASTERY_GOAL) })
           .click();
         const candidate = page.getByTestId("mastery-candidate");
         await expect(

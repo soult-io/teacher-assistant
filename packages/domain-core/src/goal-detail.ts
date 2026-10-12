@@ -12,7 +12,7 @@ import type {
   ProgressDataPoint,
   Revision,
 } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcOldestFirst } from "./comparators.js";
 import {
   type ConsistencyResult,
   consistencyWindow,
@@ -101,13 +101,13 @@ interface NoDataTally {
   readonly markers: NoDataMarker[];
 }
 
-/** Tally the ⊘ points by reason and collect the chart's gap markers (admin-date order). */
+/** Tally the ⊘ points by reason and collect the chart's gap markers (plot order). */
 function tallyNoData(points: readonly ProgressDataPoint[]): NoDataTally {
   let noTimeCount = 0;
   let excusedCount = 0;
   let behaviorCount = 0;
   const markers: NoDataMarker[] = [];
-  for (const p of points) {
+  for (const p of [...points].sort(compareArcOldestFirst)) {
     if (p.state !== "no_data" || p.no_data_reason === undefined) {
       continue;
     }
@@ -121,7 +121,6 @@ function tallyNoData(points: readonly ProgressDataPoint[]): NoDataTally {
     }
     markers.push({ adminDate: p.admin_date, reason });
   }
-  markers.sort((a, b) => compareCodePoints(a.adminDate, b.adminDate));
   return { noTimeCount, excusedCount, behaviorCount, markers };
 }
 
@@ -132,7 +131,7 @@ function buildTrend(goal: IEPGoal, points: readonly ProgressDataPoint[]): TrendP
       // Plot the points that participate: non-mismatched, or teacher-counted. An
       // excluded/pending mismatched point is never plotted (it stays in history).
       .filter((p) => p.state === "scored" && inComputedMath(p))
-      .sort((a, b) => compareCodePoints(a.admin_date, b.admin_date))
+      .sort(compareArcOldestFirst)
       .map((p) => {
         const computed = computeValue(
           goal.denominator_model,

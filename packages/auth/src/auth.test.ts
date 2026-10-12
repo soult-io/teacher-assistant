@@ -3,6 +3,7 @@ import {
   createEnrollmentRequest,
   generateDeviceKeypair,
   generateMasterKey,
+  generateSigningKeypair,
   sodiumReady,
   TeacherKeyring,
   utf8,
@@ -87,8 +88,11 @@ describe("auth unlocks device-held wrapped keys", () => {
     const masterScope = newScopeTag();
     const trusted = new TeacherKeyring(masterScope, generateMasterKey());
     const device = generateDeviceKeypair();
-    const { request, verificationCode } = createEnrollmentRequest(device);
-    const grant = approveDeviceEnrollment(trusted, request, verificationCode);
+    const { request, verificationCode } = createEnrollmentRequest({
+      boxPublicKey: device.publicKey,
+      signingPublicKey: generateSigningKeypair().publicKey,
+    });
+    const grant = approveDeviceEnrollment(trusted, request, verificationCode, newOpaqueId());
 
     // A real caller passes the VerifiedAuthenticationResponse from finishAuthentication;
     // here we stand in a minimal one carrying just the `verified` flag the gate reads.

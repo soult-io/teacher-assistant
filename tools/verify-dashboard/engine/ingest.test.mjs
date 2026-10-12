@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildJourneys, parseEvidence, parseWalkthroughEvidence } from "./ingest.mjs";
+import {
+  buildJourneys,
+  checkRunOrigin,
+  journeysWithUnprovenMedia,
+  parseEvidence,
+  parseWalkthroughEvidence,
+} from "./ingest.mjs";
 import { MEDIA_NOTE } from "./model.mjs";
 
 const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", job: "e2e" };
@@ -8,7 +14,17 @@ const PROVENANCE = { ci_run_id: "999", commit_sha: "deadbeef", workflow: "e2e", 
 const echoResolver = (_raw, kind, id, engine, index) =>
   index === undefined ? `${kind}/${id}-${engine}.bin` : `${kind}/${id}-${engine}-${index}.bin`;
 
-const still = (n) => ({
+// A v3 still record: full height, with its pixel size and truncation flag.
+const still = (n, over = {}) => ({
+  path: `/ci/test-results/j1-chromium/step-still-${n}.jpg`,
+  contentType: "image/jpeg",
+  width: 390,
+  height: 1452,
+  truncated: false,
+  ...over,
+});
+// A v2 still record: a path only — no size, no truncation flag.
+const stillV2 = (n) => ({
   path: `/ci/test-results/j1-chromium/step-still-${n}.jpg`,
   contentType: "image/jpeg",
 });
@@ -56,31 +72,74 @@ describe("parseEvidence (loud-fail discipline)", () => {
     const ev = parseEvidence(JSON.stringify({ schema: "journey-evidence/1", tests: [] }));
     expect(ev.tests).toEqual([]);
   });
-  it("accepts the current v2 schema with per-step stills", () => {
+  it("accepts the current v3 schema with sized, flagged stills", () => {
+    const text = JSON.stringify({
+      schema: "journey-evidence/3",
+      tests: [
+        record({
+          steps: [
+            { label: "Open", assertions: [], screenshot: still(0) },
+            {
+              label: "Long",
+              assertions: [],
+              screenshot: still(1, { height: 4000, truncated: true }),
+            },
+          ],
+        }),
+      ],
+    });
+    const steps = parseEvidence(text).tests[0].steps;
+    expect(steps[0].screenshot).toEqual(still(0));
+    expect(steps[1].screenshot.truncated).toBe(true);
+  });
+  it("still reads v2: its stills ingest with truncation unknown (null), never 'complete'", () => {
     const text = JSON.stringify({
       schema: "journey-evidence/2",
-      tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] })],
+      tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: stillV2(0) }] })],
     });
-    expect(parseEvidence(text).tests[0].steps[0].screenshot).toEqual(still(0));
+    expect(parseEvidence(text).tests[0].steps[0].screenshot).toEqual({
+      ...stillV2(0),
+      truncated: null,
+    });
+  });
+  it("fails loud when a v3 still has no truncation flag or pixel size (no silent crop)", () => {
+    const bads = [
+      stillV2(0),
+      still(0, { truncated: undefined }),
+      still(0, { truncated: "no" }),
+      still(0, { height: 0 }),
+      still(0, { width: 390.5 }),
+    ];
+    for (const bad of bads) {
+      const text = JSON.stringify({
+        schema: "journey-evidence/3",
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+      });
+      expect(() => parseEvidence(text)).toThrow(/width\/height\/truncated/);
+    }
   });
   it("normalises a v1 file: every step ingests with an explicit null still", () => {
     const text = JSON.stringify({ schema: "journey-evidence/1", tests: [record()] });
     expect(parseEvidence(text).tests[0].steps[0].screenshot).toBeNull();
   });
-  it("fails loud when a v2 step omits the screenshot field (no silent drop)", () => {
-    const text = JSON.stringify({
-      schema: "journey-evidence/2",
-      tests: [record({ steps: [{ label: "Open", assertions: [] }] })],
-    });
-    expect(() => parseEvidence(text)).toThrow(/screenshot/);
-  });
-  it("fails loud on a malformed v2 still record", () => {
-    for (const bad of [{}, { path: "" }, { path: 7 }, "x.jpg"]) {
+  it("fails loud when a v2/v3 step omits the screenshot field (no silent drop)", () => {
+    for (const schema of ["journey-evidence/2", "journey-evidence/3"]) {
       const text = JSON.stringify({
-        schema: "journey-evidence/2",
-        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+        schema,
+        tests: [record({ steps: [{ label: "Open", assertions: [] }] })],
       });
       expect(() => parseEvidence(text)).toThrow(/screenshot/);
+    }
+  });
+  it("fails loud on a malformed v2/v3 still record", () => {
+    for (const schema of ["journey-evidence/2", "journey-evidence/3"]) {
+      for (const bad of [{}, { path: "" }, { path: 7 }, "x.jpg"]) {
+        const text = JSON.stringify({
+          schema,
+          tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: bad }] })],
+        });
+        expect(() => parseEvidence(text)).toThrow(/screenshot/);
+      }
     }
   });
 });
@@ -358,6 +417,56 @@ describe("buildJourneys", () => {
     ]);
   });
 
+  it("carries each still's truncation flag onto the step; null with no still or unknown", () => {
+    const evidence = parseEvidence(
+      JSON.stringify({
+        schema: "journey-evidence/3",
+        tests: [
+          record({
+            steps: [
+              { label: "Short", assertions: [], screenshot: still(0) },
+              { label: "Cut off", assertions: [], screenshot: still(1, { truncated: true }) },
+              { label: "None", assertions: [], screenshot: null },
+            ],
+          }),
+        ],
+      }),
+    );
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps.map((s) => s.screenshot_truncated)).toEqual([false, true, null]);
+    expect(j1.steps.map((s) => [s.screenshot_width, s.screenshot_height])).toEqual([
+      [390, 1452],
+      [390, 1452],
+      [null, null],
+    ]);
+
+    const v2 = parseEvidence(
+      JSON.stringify({
+        schema: "journey-evidence/2",
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: stillV2(0) }] })],
+      }),
+    );
+    const [old] = buildJourneys({
+      evidence: v2,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(old.steps[0]).toMatchObject({
+      screenshot: "still/J1-chromium-0.bin",
+      screenshot_truncated: null,
+      screenshot_width: null,
+      screenshot_height: null,
+    });
+  });
+
   it("a step with no still stays an explicit null — never borrowed from a neighbour", () => {
     const evidence = {
       schema: "journey-evidence/2",
@@ -393,6 +502,7 @@ describe("buildJourneys", () => {
       resolveAsset: (_raw, kind) => (kind === "still" ? null : "x"),
     });
     expect(j1.steps[0].screenshot).toBeNull();
+    expect(j1.steps[0].screenshot_truncated).toBeNull();
   });
 
   it("stills follow the canonical browser: a firefox-canonical card shows no chromium stills", () => {
@@ -419,6 +529,28 @@ describe("buildJourneys", () => {
     });
     expect(j1.status).toBe("failed");
     expect(j1.steps[0].screenshot).toBeNull();
+    // …but the card can say where the unshown stills are.
+    expect(j1.steps_engine).toBe("firefox");
+    expect(j1.unshown_still_engines).toEqual(["chromium"]);
+  });
+
+  it("names the steps' browser and lists no unshown stills when the canonical one took them", () => {
+    const evidence = {
+      schema: "journey-evidence/2",
+      tests: [
+        record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] }),
+        record({ project: "firefox" }),
+      ],
+    };
+    const [j1] = buildJourneys({
+      evidence,
+      manifest,
+      product: "p",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(j1.steps_engine).toBe("chromium");
+    expect(j1.unshown_still_engines).toEqual([]);
   });
 
   it("a flaky run with stills stays FLAKY — stills never launder a retry into a clean pass", () => {
@@ -492,6 +624,11 @@ describe("buildJourneys — walkthrough recording", () => {
           contentType: "video/webm",
           path: "/ci/test-results-walkthrough/j1-walkthrough/video.webm",
         },
+        {
+          name: "trace",
+          contentType: "application/zip",
+          path: "/ci/test-results-walkthrough/j1-walkthrough/trace.zip",
+        },
       ],
       steps: [
         { label: "Open the dashboard", status: "passed", startOffsetMs: 1200, assertions: [] },
@@ -503,6 +640,7 @@ describe("buildJourneys — walkthrough recording", () => {
     evidence: { mode: "walkthrough", commitSha: "deadbeef", tests, ...over },
     run: { ci_run_id: "999", ci_run_url: "https://github.com/o/r/actions/runs/999" },
     resolveAsset: (_raw, kind, id, engine) => `${kind}s/${id}-${engine}.webm`,
+    provesLocal: () => true,
   });
   const build = (wt, evidence = gating) =>
     buildJourneys({
@@ -550,7 +688,32 @@ describe("buildJourneys — walkthrough recording", () => {
   it("shows no video when the walkthrough's video is missing or unservable", () => {
     const wt = { ...walkthrough(), resolveAsset: () => null };
     expect(build(wt).video).toBeNull();
-    expect(build(walkthrough({}, [walkRecord({ attachments: [] })])).video).toBeNull();
+    const bare = build(walkthrough({}, [walkRecord({ attachments: [] })]));
+    expect(bare.video).toBeNull();
+    expect(bare.media_note).toBe(MEDIA_NOTE.NONE);
+  });
+
+  it("shows no video when the walkthrough's trace shows no local request — says so", () => {
+    const seen = [];
+    const wt = {
+      ...walkthrough(),
+      provesLocal: (raw) => {
+        seen.push(raw);
+        return false;
+      },
+    };
+    const j1 = build(wt);
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.UNPROVEN);
+    expect(seen).toEqual(["/ci/test-results-walkthrough/j1-walkthrough/trace.zip"]);
+  });
+
+  it("shows no video when the walkthrough recorded no trace", () => {
+    const noTrace = walkRecord();
+    noTrace.attachments = noTrace.attachments.filter((a) => a.name !== "trace");
+    const j1 = build(walkthrough({}, [noTrace]));
+    expect(j1.video).toBeNull();
+    expect(j1.media_note).toBe(MEDIA_NOTE.UNPROVEN);
   });
 
   it("does not show a failed walkthrough under a passing card — says so", () => {
@@ -602,5 +765,103 @@ describe("buildJourneys — walkthrough recording", () => {
     });
     expect(j1.status).toBe("unverified");
     expect(j1.video).toBeNull();
+  });
+});
+
+describe("checkRunOrigin (the dashboard is built only from the local synthetic build)", () => {
+  const LOCAL = "http://127.0.0.1:4173";
+  const v4 = (over = {}) =>
+    parseEvidence(
+      JSON.stringify({
+        schema: "ta/journey-evidence/4",
+        mode: "gating",
+        baseURL: LOCAL,
+        tests: [record({ steps: [{ label: "Open", assertions: [], screenshot: still(0) }] })],
+        ...over,
+      }),
+    );
+
+  it("parses v4 with sized stills and admits a run of the local build", () => {
+    const ev = v4();
+    expect(ev.tests[0].steps[0].screenshot.truncated).toBe(false);
+    expect(checkRunOrigin(ev, LOCAL)).toBe(true);
+  });
+  it("refuses a v4 run of any other origin, without naming it", () => {
+    const run = () => checkRunOrigin(v4({ baseURL: "https://qa.stabpablo.com" }), LOCAL);
+    expect(run).toThrow(/not recorded against http:\/\/127\.0\.0\.1:4173/);
+    expect(run).not.toThrow(/stabpablo/);
+  });
+  it("refuses a v4 file with no stamp, or a null one (projects disagreed)", () => {
+    expect(() => checkRunOrigin(v4({ baseURL: undefined }), LOCAL)).toThrow(/refusing/);
+    expect(() => checkRunOrigin(v4({ baseURL: null }), LOCAL)).toThrow(/refusing/);
+  });
+  it("reports pre-stamp (v1–v3) evidence as unstamped, for the caller to decide", () => {
+    for (const schema of ["journey-evidence/1", "journey-evidence/2", "journey-evidence/3"]) {
+      expect(checkRunOrigin(parseEvidence(JSON.stringify({ schema, tests: [] })), LOCAL)).toBe(
+        false,
+      );
+    }
+  });
+  it("does not read payroll-app's bare-named tag as ours", () => {
+    expect(() =>
+      parseEvidence(JSON.stringify({ schema: "journey-evidence/4", tests: [] })),
+    ).toThrow(/schema mismatch/);
+  });
+});
+
+describe("journeysWithUnprovenMedia (a publish needs network proof for gating media)", () => {
+  const manifest = [{ id: "j1", name: "J1", match: { file: "j1-score-probe.spec.ts" } }];
+  const build = (rec) =>
+    buildJourneys({
+      evidence: { tests: [rec] },
+      manifest,
+      product: "ta",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+  const withStill = (over) =>
+    record({
+      steps: [{ label: "Open", assertions: [], screenshot: still(0) }],
+      ...over,
+    });
+
+  const proven = () => true;
+  it("passes a journey whose copied trace shows a local request", () => {
+    expect(journeysWithUnprovenMedia(build(withStill()), proven)).toEqual([]);
+  });
+  it("flags a journey whose copied trace shows no local request", () => {
+    const seen = [];
+    const unproven = (url) => {
+      seen.push(url);
+      return false;
+    };
+    expect(journeysWithUnprovenMedia(build(withStill()), unproven)).toEqual(["j1"]);
+    expect(seen).toEqual(["trace/j1-chromium.bin"]);
+  });
+  it("flags a journey with a video and stills but no trace attachment", () => {
+    const rec = withStill();
+    rec.attachments = rec.attachments.filter((a) => a.name !== "trace");
+    expect(journeysWithUnprovenMedia(build(rec), proven)).toEqual(["j1"]);
+  });
+  it("flags a journey whose trace could not be served", () => {
+    const journeys = buildJourneys({
+      evidence: { tests: [withStill()] },
+      manifest,
+      product: "ta",
+      provenance: PROVENANCE,
+      resolveAsset: (raw, kind, id, engine, index) =>
+        kind === "trace" ? null : echoResolver(raw, kind, id, engine, index),
+    });
+    expect(journeysWithUnprovenMedia(journeys, proven)).toEqual(["j1"]);
+  });
+  it("passes an UNVERIFIED journey (nothing published)", () => {
+    const journeys = buildJourneys({
+      evidence: { tests: [] },
+      manifest,
+      product: "ta",
+      provenance: PROVENANCE,
+      resolveAsset: echoResolver,
+    });
+    expect(journeysWithUnprovenMedia(journeys, proven)).toEqual([]);
   });
 });

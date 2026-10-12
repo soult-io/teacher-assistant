@@ -7,7 +7,7 @@
 // assertions — written as human-readable evidence, verbatim.
 
 import { expect, test } from "./support/journey";
-import { goalRow, unlockToDashboard } from "./support/track";
+import { goalActionName, goalRow, unlockToDashboard } from "./support/track";
 
 test.describe("J1 — Score a probe (3-tap loop)", () => {
   test("owed goal → + → Save: computes the %, flips to scored, decrements the owe-count", async ({
@@ -31,7 +31,7 @@ test.describe("J1 — Score a probe (3-tap loop)", () => {
 
     await step("Tap 1 of 3 — tap the owed goal row to open Quick-Score", async () => {
       await goalRow(page, GOAL)
-        .getByRole("button", { name: `score ${GOAL}` })
+        .getByRole("button", { name: goalActionName("score", GOAL) })
         .click();
       await expect(sheet, "Quick-Score sheet opens over the dashboard").toBeVisible();
       await expect(

@@ -17,7 +17,7 @@
 // and on-track is a defensible PROJECTION, not a guarantee.
 
 import type { IEPGoal, IsoDate, OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
-import { compareCodePoints } from "./comparators.js";
+import { compareArcOldestFirst } from "./comparators.js";
 import { isIcExportable } from "./ic-export.js";
 import { instructionalWeekCount } from "./instructional-weeks.js";
 import { clampAfterFromRevisions, computeQuarterlySummary, QUARTERLY_WINDOW } from "./quarterly.js";
@@ -266,9 +266,6 @@ export function computeAutoStatement(
   const clampAfter = clampAfterFromRevisions(goal);
   const inClamp = (p: ProgressDataPoint): boolean =>
     clampAfter === undefined || p.admin_date >= clampAfter;
-  const order = (a: ProgressDataPoint, b: ProgressDataPoint): number =>
-    compareCodePoints(a.admin_date, b.admin_date) ||
-    compareCodePoints(a.data_point_id, b.data_point_id);
 
   const isConditionMismatch = (p: ProgressDataPoint): boolean =>
     options.expectedConditionId !== undefined &&
@@ -300,11 +297,12 @@ export function computeAutoStatement(
       : `${quarterly.dateRange.start} to ${quarterly.dateRange.end}`;
 
   // The trend/gate + prior-period dataset: the F4-comparable points (clamped, scored,
-  // denominator- and condition-comparable) in admin-date order — the same list F4 draws
-  // its most-recent window from, so the prior period is the window just before it.
+  // denominator- and condition-comparable) in the shared oldest-first order — the same
+  // order F4 draws its most-recent window from, so the prior period is the window just
+  // before it and the four-point tail ends on the last-entered point (TEACH-27).
   const trendPoints = conditionOk
     .filter((p) => p.state === "scored" && inClamp(p) && p.denominator_mismatch !== true)
-    .sort(order);
+    .sort(compareArcOldestFirst);
 
   // Mismatches (scored, in clamp) excluded for denominator OR condition — surfaced, not silently dropped.
   const excludedMismatches = points.filter(
@@ -315,10 +313,11 @@ export function computeAutoStatement(
       (p.denominator_mismatch === true || isConditionMismatch(p)),
   ).length;
 
-  // Prior reporting period = the QUARTERLY_WINDOW comparable points BEFORE the F4 window.
-  const priorWindow = trendPoints
-    .slice(0, Math.max(0, trendPoints.length - quarterly.n))
-    .slice(-QUARTERLY_WINDOW);
+  // Prior reporting period = the QUARTERLY_WINDOW comparable points before the last
+  // QUARTERLY_WINDOW of trendPoints. Sliced structurally, not derived from quarterly.n:
+  // the F4 window is the tail of the same hard-excluded set, so the two always align
+  // (TEACH-30). Empty when trendPoints has ≤ QUARTERLY_WINDOW points.
+  const priorWindow = trendPoints.slice(-2 * QUARTERLY_WINDOW, -QUARTERLY_WINDOW);
   const priorPeriodAvg =
     priorWindow.length === 0 ? null : round(mean(priorWindow.map((p) => pointValue(goal, p))));
 

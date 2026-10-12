@@ -66,14 +66,14 @@ describe("DashboardScreen (U2/U3)", () => {
     expect(within(body).getByText("Done this week")).toBeInTheDocument();
   });
 
-  it("by-student owes rows carry the ⚑ flag and a status-coloured value (C1/C3)", () => {
+  it("by-student owes rows carry the 🕐 score-later toggle and a status-coloured value (C1/C3)", () => {
     renderDashboard();
     const toggle = screen.getByTestId("group-toggle");
     fireEvent.click(toggle); // by period
     fireEvent.click(toggle); // by student
-    expect(screen.getAllByRole("button", { name: "Gave it, score later" }).length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByRole("button", { name: "Collected — score later" }).length,
+    ).toBeGreaterThan(0);
     const owesValues = screen.getAllByText("owes");
     expect(
       owesValues.some((el) => el.className.includes("sval") && el.className.includes("owes")),
@@ -82,24 +82,26 @@ describe("DashboardScreen (U2/U3)", () => {
 
   it("tapping an owes row opens the score sheet target", () => {
     const { onOpenScore } = renderDashboard();
-    fireEvent.click(screen.getByRole("button", { name: "score Two-step equations" }));
+    fireEvent.click(screen.getByRole("button", { name: "score Goal 1, Two-step equations" }));
     expect(onOpenScore).toHaveBeenCalledOnce();
   });
 
   it("every goal has a ↗ trend button that opens Goal Detail (D2 reachability)", () => {
     const { onOpenDetail } = renderDashboard();
-    fireEvent.click(screen.getByRole("button", { name: "trend and history Two-step equations" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "trend and history Goal 1, Two-step equations" }),
+    );
     expect(onOpenDetail).toHaveBeenCalledOnce();
   });
 
-  it("the ⚑ flag writes a bookmark via apply", () => {
+  it("the 🕐 toggle writes a bookmark via apply", () => {
     const { apply } = renderDashboard();
-    const flags = screen.getAllByRole("button", { name: "Gave it, score later" });
-    const flag = flags[0];
-    if (flag === undefined) {
+    const toggles = screen.getAllByRole("button", { name: "Collected — score later" });
+    const toggle = toggles[0];
+    if (toggle === undefined) {
       throw new Error("expected a score-later button");
     }
-    fireEvent.click(flag);
+    fireEvent.click(toggle);
     expect(apply).toHaveBeenCalledOnce();
   });
 

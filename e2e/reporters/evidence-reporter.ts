@@ -27,7 +27,10 @@ import type {
 
 // v2 adds steps[].screenshot (always present: a still record, or null = no still).
 // Additive, still v2: optional top-level `mode` + `commitSha` (see EvidenceFile).
-export const EVIDENCE_SCHEMA = "journey-evidence/2";
+// v3: a still is full-height and its record carries `width`, `height` and `truncated`.
+// v4: top-level `baseURL`, the origin the run tested; the dashboard refuses any run not
+// of the local synthetic build. Namespaced (`ta/`): payroll-app's tag has the same name.
+export const EVIDENCE_SCHEMA = "ta/journey-evidence/4";
 
 /** Which run produced the file: the fast gating run, or the human-pace walkthrough. */
 export type EvidenceMode = "gating" | "walkthrough";
@@ -42,6 +45,17 @@ export const RECORDING_START_ANNOTATION = "recording-start";
 /** Attachment name the journey `step` fixture (tests/support/journey.ts) gives a step's still. */
 export const STEP_STILL_ATTACHMENT = "step-still";
 
+/** Attachment (JSON body, a StillMeta) the fixture adds right after each still. */
+export const STEP_STILL_META_ATTACHMENT = "step-still-meta";
+
+/** The still's pixel size, and whether the screen was cut off at the height cap. */
+export interface StillMeta {
+  width: number;
+  height: number;
+  /** True when part of the screen is not in the still (over the cap) — never silent. */
+  truncated: boolean;
+}
+
 type AssertionStatus = "passed" | "failed";
 
 interface AssertionRecord {
@@ -50,7 +64,9 @@ interface AssertionRecord {
   detail?: string;
 }
 
-interface StillRecord {
+// A still with no readable meta is written without width/height/truncated: the
+// dashboard's v3 ingest then fails loud instead of guessing "not cut off".
+interface StillRecord extends Partial<StillMeta> {
   path: string;
   contentType: string;
 }
@@ -65,7 +81,7 @@ interface StepRecord {
   startOffsetMs: number;
   status: AssertionStatus;
   assertions: AssertionRecord[];
-  // The full-page still attached at the end of this step, or null when the step has
+  // The full-height still attached at the end of this step, or null when the step has
   // none (a non-canonical browser, or a capture that failed). Never omitted, never a
   // placeholder: null is the explicit "no still".
   screenshot: StillRecord | null;
@@ -100,6 +116,9 @@ interface EvidenceFile {
   // can never be shown as this commit's.
   mode: EvidenceMode;
   commitSha: string | null;
+  // The origin every project tested, or null when the projects disagree with the
+  // configured one — the dashboard refuses anything but the local build.
+  baseURL: string | null;
   generatedAt: string;
   stats: {
     expected: number;
@@ -139,18 +158,44 @@ function collectAssertions(steps: TestStep[]): AssertionRecord[] {
   return out;
 }
 
+/** The fixture's StillMeta attachment body, or null when it is missing or malformed. */
+function readStillMeta(body: Buffer | undefined): StillMeta | null {
+  if (!body) return null;
+  try {
+    const m = JSON.parse(body.toString("utf8")) as Partial<StillMeta>;
+    const sizeOk = [m.width, m.height].every((n) => Number.isInteger(n) && (n as number) > 0);
+    if (sizeOk && typeof m.truncated === "boolean") {
+      return { width: m.width as number, height: m.height as number, truncated: m.truncated };
+    }
+  } catch {
+    // Unreadable: treated as absent (see StillRecord).
+  }
+  return null;
+}
+
+/** Fold one attachment into the still seen so far: a new still, or the meta for it. */
+function withAttachment(
+  still: StillRecord | null,
+  a: TestStep["attachments"][number],
+): StillRecord | null {
+  if (a.name === STEP_STILL_ATTACHMENT && a.path) {
+    return { path: a.path, contentType: a.contentType };
+  }
+  if (a.name === STEP_STILL_META_ATTACHMENT && still) {
+    const meta = readStillMeta(a.body);
+    if (meta) return { ...still, ...meta };
+  }
+  return still;
+}
+
 /** The step's own still: attached by a direct child (`test.attach`), not by a nested
  * `test.step` (that one belongs to the nested step). The last one wins — the wrapper
- * attaches exactly one per step, at the step's end. */
+ * attaches exactly one per step, at the step's end, followed by its meta. */
 function findStill(steps: TestStep[]): StillRecord | null {
   let still: StillRecord | null = null;
   for (const step of steps) {
     if (step.category === "test.step") continue;
-    for (const a of step.attachments) {
-      if (a.name === STEP_STILL_ATTACHMENT && a.path) {
-        still = { path: a.path, contentType: a.contentType };
-      }
-    }
+    for (const a of step.attachments) still = withAttachment(still, a);
     const nested = findStill(step.steps);
     if (nested) still = nested;
   }
@@ -212,19 +257,31 @@ export default class EvidenceReporter implements Reporter {
   private readonly outputFile: string;
   private readonly mode: EvidenceMode;
   private readonly commitSha: string | null;
+  private readonly configuredBaseURL: string | null;
+  private baseURL: string | null = null;
   // Keyed by test.id → the highest-retry (final) result seen for that test.
   private readonly finals = new Map<string, { test: TestCase; result: TestResult }>();
 
   constructor(
-    options: { outputFile?: string; mode?: EvidenceMode; commitSha?: string | null } = {},
+    options: {
+      outputFile?: string;
+      mode?: EvidenceMode;
+      commitSha?: string | null;
+      baseURL?: string | null;
+    } = {},
   ) {
     this.outputFile = resolve(options.outputFile ?? "test-results/journey-evidence.json");
     this.mode = options.mode ?? "gating";
     this.commitSha = options.commitSha ?? null;
+    this.configuredBaseURL = options.baseURL ?? null;
   }
 
-  onBegin(_config: FullConfig, _suite: Suite): void {
+  onBegin(config: FullConfig, _suite: Suite): void {
     this.finals.clear();
+    // Stamp the configured origin only if every project really used it: a project
+    // overriding baseURL makes the stamp null, never a claim the run did not earn.
+    const used = config.projects.map((p) => p.use.baseURL);
+    this.baseURL = used.every((u) => u === this.configuredBaseURL) ? this.configuredBaseURL : null;
   }
 
   onTestEnd(test: TestCase, result: TestResult): void {
@@ -247,6 +304,7 @@ export default class EvidenceReporter implements Reporter {
       schema: EVIDENCE_SCHEMA,
       mode: this.mode,
       commitSha: this.commitSha,
+      baseURL: this.baseURL,
       generatedAt: new Date().toISOString(),
       stats: {
         ...stats,

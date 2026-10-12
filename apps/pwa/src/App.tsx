@@ -5,25 +5,32 @@
 // a filter over the teacher's records — so the confidentiality boundary is the key,
 // not the UI (architecture/para-doc-topology.md).
 
-import { type BaselineMethod, editArcDate } from "@teacher-assistant/domain-core";
+import {
+  type BaselineFix,
+  type BaselineMethod,
+  createBaselinePoint,
+  duplicateGoalLabels,
+  editArcDate,
+  setGoalLabel,
+} from "@teacher-assistant/domain-core";
 import {
   type BaselinePoint,
+  type BaselineRemoveReason,
   type IEPGoal,
   type IsoDate,
-  newOpaqueId,
+  normalizeInitials,
   type OpaqueId,
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
-import { buildToScoreQueue } from "@teacher-assistant/store";
+import { buildToScoreQueue, type DashboardLens } from "@teacher-assistant/store";
 import { SyncError } from "@teacher-assistant/sync";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
 import { QuickScoreSheet, type ParaFixEdit } from "./app/QuickScoreSheet.js";
 import { BaselineScreen } from "./app/screens/baseline/BaselineScreen.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
 import {
-  GoalDetailBody,
   GoalDetailScreen,
   type GoalDetailScreenProps,
 } from "./app/screens/goal-detail/GoalDetailScreen.js";
@@ -40,7 +47,11 @@ import { ParaScreen } from "./app/screens/para/ParaScreen.js";
 import { ValidationQueueScreen } from "./app/screens/para/ValidationQueueScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
 import { ToScoreScreen } from "./app/screens/ToScoreScreen.js";
-import { buildLookups } from "./app/screens/dashboard/dashboard-vm.js";
+import {
+  buildLookups,
+  orderValidationQueue,
+  periodLabelOf,
+} from "./app/screens/dashboard/dashboard-vm.js";
 import { type SheetTarget, targetForGoal, targetForQueued } from "./app/sheet-target.js";
 import { useOnline } from "./app/useOnline.js";
 import { useSessionRecords } from "./app/useSessionRecords.js";
@@ -64,6 +75,9 @@ import {
   addBaselinePointMutator,
   adoptGoalMutator,
   createGoalMutator,
+  fixBaselinePointMutator,
+  keepBaselineTotalMutator,
+  removeBaselinePointMutator,
   upsertGoalMutator,
 } from "./data/writes.js";
 
@@ -218,6 +232,11 @@ function ReadyApp({
   const [role, setRole] = useState<Role>("teacher");
   const [tab, setTab] = useState<Tab>("track");
   const [trackView, setTrackView] = useState<TrackView>("dashboard");
+  // The dashboard grouping lives here, not in DashboardScreen, so it survives Goal
+  // Detail, the score modal and tab switches (TEACH-43). ReadyApp mounts on unlock, so
+  // each unlock starts on owes-first; it is never persisted across reloads.
+  const [lens, setLens] = useState<DashboardLens>("owes_first");
+  const lensControl = useMemo(() => ({ lens, onChange: setLens }), [lens]);
   const [detailGoalId, setDetailGoalId] = useState<OpaqueId | null>(null);
   const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
   const [paraFix, setParaFix] = useState<ProgressDataPoint | null>(null);
@@ -231,6 +250,8 @@ function ReadyApp({
     () => buildLookups(records, new Set(paraQueue.map((p) => p.goal_id))),
     [records, paraQueue],
   );
+  // Both validation surfaces (mobile queue + desktop strip) render this display order.
+  const validationQueue = useMemo(() => orderValidationQueue(paraQueue, lk), [paraQueue, lk]);
   const today = isoDateOf(now);
 
   // Pull any para-device captures into the teacher's para stream (ciphertext) and
@@ -266,10 +287,29 @@ function ReadyApp({
   // U5 create: resolve the student by initials (existing, else a new roster entry),
   // assemble the goal + probe (engine gate ran in the form), persist, then land on
   // the dashboard (adopt → active) or the baseline track (draft → proposed).
+  // The roster match New-Goal uses: the submit below and the form's IEP goal #
+  // duplicate warning resolve initials to the SAME existing student.
+  const studentForInitials = useCallback(
+    (raw: string) => {
+      const initials = normalizeInitials(raw);
+      if (initials === undefined) {
+        return undefined;
+      }
+      // Normalize the stored side too, so a pre-TEACH-40 "J.A.S." still matches "JAS".
+      return records.students.find((s) => normalizeInitials(s.initials) === initials);
+    },
+    [records.students],
+  );
+
   const submitNewGoal = useCallback(
     (form: NewGoalForm) => {
-      const initials = form.initials.trim().toUpperCase();
-      const existing = records.students.find((s) => s.initials.toUpperCase() === initials);
+      // Canonical initials for the roster match + hue. The form gates submit on
+      // valid initials, so this guard is defensive.
+      const initials = normalizeInitials(form.initials);
+      if (initials === undefined) {
+        return;
+      }
+      const existing = studentForInitials(initials);
       const student =
         existing ?? makeStudent(initials, `--s-${hueClassForInitials(initials)}` as const);
       const assembled = assembleGoal(
@@ -281,28 +321,47 @@ function ReadyApp({
       void apply(createGoalMutator(assembled.goal, assembled.probe, assembled.student));
       setTrackView(form.path === "adopt" ? "dashboard" : "baseline");
     },
-    [apply, records.students],
+    [apply, studentForInitials],
   );
 
   // U5 baseline track handlers (M7). Baseline points share the goal's assigned probe
   // id as their comparable condition; adoption + arc-date edits go through the engine.
   const addBaselinePoint = useCallback(
     (goal: IEPGoal, numerator: number, denominator: number) => {
-      const point: BaselinePoint = {
-        baseline_point_id: newOpaqueId(),
-        goal_id: goal.goal_id,
-        student_id: goal.student_id,
-        admin_date: today,
-        entry_ts: nowTs(),
+      // TEACH-46: the engine builds the point (proposed-only, teacher-only, whole
+      // numbers, 0 ≤ n ≤ d) and flags a total that differs from the probe's (C8).
+      const point = createBaselinePoint({
+        goal,
+        probe: records.probes.find((p) => p.goal_id === goal.goal_id),
+        adminDate: today,
         numerator,
-        denominator_used: denominator,
-        computed_value: numerator / denominator,
-        probe_condition_id: goal.probe_definition_id ?? goal.goal_id,
-        scorer: "teacher",
-      };
+        denominator,
+        who: "teacher",
+        entryTs: nowTs(),
+      });
       void apply(addBaselinePointMutator(point));
     },
-    [apply, today],
+    [apply, today, records.probes],
+  );
+
+  // TEACH-46 audited baseline edits — each appends a Revision; nothing is deleted.
+  const fixBaseline = useCallback(
+    (goal: IEPGoal, point: BaselinePoint, fix: BaselineFix) => {
+      void apply(fixBaselinePointMutator(point, goal, fix, nowTs()));
+    },
+    [apply],
+  );
+  const removeBaseline = useCallback(
+    (goal: IEPGoal, point: BaselinePoint, reason: BaselineRemoveReason) => {
+      void apply(removeBaselinePointMutator(point, goal, reason, nowTs()));
+    },
+    [apply],
+  );
+  const keepBaseline = useCallback(
+    (goal: IEPGoal, point: BaselinePoint) => {
+      void apply(keepBaselineTotalMutator(point, goal, nowTs()));
+    },
+    [apply],
   );
 
   const adopt = useCallback(
@@ -318,6 +377,15 @@ function ReadyApp({
       const result = editArcDate(goal, newArcDate as IsoDate, isNonInstructionalWeek);
       void apply(upsertGoalMutator(result.goal));
       return result.alert;
+    },
+    [apply],
+  );
+
+  // TEACH-41: every IEP goal # change is an audited Revision (setGoalLabel), persisted
+  // through the same goal upsert as any other goal edit.
+  const saveGoalLabel = useCallback(
+    (goal: IEPGoal, label: string | undefined) => {
+      void apply(upsertGoalMutator(setGoalLabel(goal, label, { who: "teacher", when: nowTs() })));
     },
     [apply],
   );
@@ -386,24 +454,19 @@ function ReadyApp({
   // Period label for one student (baseline track needs it per-row); hoisted out of
   // the track cascade so each branch below is a flat return with no nested ternary.
   const periodLabelByStudent = useCallback(
-    (sid: OpaqueId): string | null => {
-      const pid = lk.periodByStudent(sid);
-      return pid !== null ? (lk.periodLabelById.get(pid) ?? null) : null;
-    },
+    (sid: OpaqueId): string | null => periodLabelOf(sid, lk),
     [lk],
   );
 
   const detailGoal =
     detailGoalId !== null ? records.goals.find((g) => g.goal_id === detailGoalId) : undefined;
 
-  // ── U7 desktop shell wiring (design §2/§3.1). Inert on mobile: the mobile chrome and
-  // the mobile DashboardScreen path ignore isDesktop/renderDetailPane/validationStrip. ──
+  // ── U7 desktop shell wiring (design §2). Inert on mobile: the mobile chrome and the
+  // mobile DashboardScreen path ignore isDesktop/validationStrip. ──
   const toScoreCount = buildToScoreQueue(records.points).length;
   const baselineCount = records.goals.filter((g) => g.status === "proposed").length;
 
-  // The shared Goal Detail props for a goal — assembled once so the master-detail pane
-  // and the deep-linked full screen never drift (a new GoalDetailBody prop is added here,
-  // not in two call sites). The two sites differ only in layout vs onBack.
+  // The Goal Detail props for a goal (everything but onBack).
   const goalBodyProps = useCallback(
     (g: IEPGoal): Omit<GoalDetailScreenProps, "onBack"> => ({
       goal: g,
@@ -412,21 +475,27 @@ function ReadyApp({
       initials: lk.initialsById.get(g.student_id) ?? "??",
       periodLabel: periodLabelByStudent(g.student_id),
       probeLabel: lk.probeByGoal.get(g.goal_id)?.label ?? "probe",
+      labelDuplicates: duplicateGoalLabels(records.goals, g.student_id).get(g.goal_id) ?? [],
+      onSetGoalLabel: (label) => saveGoalLabel(g, label),
       isNonInstructional: isNonInstructionalWeek,
       onAddPoint: () => setSheetTarget(targetForGoal(g, lk, today)),
       onEditPoint: (point) => setSheetTarget(targetForGoal(g, lk, today, point)),
       onAckMastery: (candidate) => void apply(acknowledgeMasteryMutator(candidate)),
+      baselinePoints: records.baselinePoints,
+      onFixBaselinePoint: (point, fix) => fixBaseline(g, point, fix),
     }),
-    [records.points, records.observations, lk, periodLabelByStudent, today, apply],
-  );
-
-  // The master-detail right pane: the selected goal's full Goal Detail (pane layout).
-  const renderDetailPane = useCallback(
-    (goalId: OpaqueId): ReactNode => {
-      const g = records.goals.find((x) => x.goal_id === goalId);
-      return g === undefined ? null : <GoalDetailBody {...goalBodyProps(g)} layout="pane" />;
-    },
-    [records.goals, goalBodyProps],
+    [
+      records.goals,
+      records.points,
+      records.observations,
+      lk,
+      periodLabelByStudent,
+      today,
+      apply,
+      saveGoalLabel,
+      records.baselinePoints,
+      fixBaseline,
+    ],
   );
 
   // The full-width "Needs your OK" table strip (desktop dashboard); reuses the teacher
@@ -434,9 +503,10 @@ function ReadyApp({
   const validationStrip =
     paraQueue.length > 0 ? (
       <ValidationStrip
-        queue={paraQueue}
+        queue={validationQueue}
         initialsById={lk.initialsById}
         goalTextById={lk.goalTextById}
+        goalLabelById={lk.goalLabelById}
         periodLabelByStudent={periodLabelByStudent}
         onConfirm={confirmPara}
         onFix={fixPara}
@@ -454,7 +524,14 @@ function ReadyApp({
 
   const track = (() => {
     if (trackView === "new_goal") {
-      return <NewGoalScreen onSubmit={submitNewGoal} onBack={() => setTrackView("dashboard")} />;
+      return (
+        <NewGoalScreen
+          goals={records.goals}
+          studentIdForInitials={(initials) => studentForInitials(initials)?.student_id}
+          onSubmit={submitNewGoal}
+          onBack={() => setTrackView("dashboard")}
+        />
+      );
     }
     if (trackView === "baseline") {
       return (
@@ -468,6 +545,10 @@ function ReadyApp({
           onAddBaselinePoint={addBaselinePoint}
           onAdopt={adopt}
           onEditArcDate={editArc}
+          onSetGoalLabel={saveGoalLabel}
+          onFixBaselinePoint={fixBaseline}
+          onRemoveBaselinePoint={removeBaseline}
+          onKeepBaselineTotal={keepBaseline}
         />
       );
     }
@@ -484,9 +565,10 @@ function ReadyApp({
     if (trackView === "validation") {
       return (
         <ValidationQueueScreen
-          queue={paraQueue}
+          queue={validationQueue}
           initialsById={lk.initialsById}
           goalTextById={lk.goalTextById}
+          goalLabelById={lk.goalLabelById}
           onConfirm={confirmPara}
           onFix={fixPara}
           onBack={() => setTrackView("dashboard")}
@@ -511,8 +593,8 @@ function ReadyApp({
         onOpenScore={setSheetTarget}
         onOpenDetail={openDetail}
         apply={apply}
+        lensControl={lensControl}
         isDesktop={isDesktop}
-        renderDetailPane={renderDetailPane}
         validationStrip={validationStrip}
       />
     );

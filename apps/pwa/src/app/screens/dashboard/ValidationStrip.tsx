@@ -8,6 +8,7 @@
 
 import type { OpaqueId, ProgressDataPoint } from "@teacher-assistant/schema";
 import { Avatar } from "../../../design/Avatar.js";
+import { GoalTitle } from "../../../design/GoalTitle.js";
 import { pointValueLabel, SETTING_LABEL } from "../para/labels.js";
 
 export interface ValidationStripProps {
@@ -15,6 +16,8 @@ export interface ValidationStripProps {
   readonly queue: readonly ProgressDataPoint[];
   readonly initialsById: ReadonlyMap<string, string>;
   readonly goalTextById: ReadonlyMap<string, string>;
+  /** IEP goal label per goal (TEACH-41); unlabeled goals are absent. */
+  readonly goalLabelById: ReadonlyMap<string, string>;
   readonly periodLabelByStudent: (studentId: OpaqueId) => string | null;
   readonly onConfirm: (pending: ProgressDataPoint) => void;
   readonly onFix: (pending: ProgressDataPoint) => void;
@@ -24,6 +27,7 @@ export function ValidationStrip({
   queue,
   initialsById,
   goalTextById,
+  goalLabelById,
   periodLabelByStudent,
   onConfirm,
   onFix,
@@ -58,7 +62,12 @@ export function ValidationStrip({
                   <td>
                     <Avatar initials={initials} small />
                   </td>
-                  <td>{goalTextById.get(p.goal_id) ?? "(goal)"}</td>
+                  <td>
+                    <GoalTitle
+                      label={goalLabelById.get(p.goal_id)}
+                      text={goalTextById.get(p.goal_id) ?? "(goal)"}
+                    />
+                  </td>
                   <td>{period ?? "—"}</td>
                   <td>
                     <b>{pointValueLabel(p)}</b>
