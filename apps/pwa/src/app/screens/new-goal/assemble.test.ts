@@ -1,0 +1,142 @@
+import { canBeginMonitoring } from "@teacher-assistant/domain-core";
+import { newOpaqueId } from "@teacher-assistant/schema";
+import { describe, expect, it } from "vitest";
+import { assembleGoal, emptyForm, makeStudent, type NewGoalForm, nowTs } from "./assemble.js";
+
+function filledDraft(over?: Partial<NewGoalForm>): NewGoalForm {
+  return {
+    ...emptyForm(),
+    path: "draft",
+    initials: "ab",
+    behavior: "solve two-step equations",
+    circumstance: "given a 5-item probe",
+    level: "80",
+    consistency: "4",
+    methodTool: "curriculum probe",
+    total: "5",
+    accomMod: "none",
+    ...over,
+  };
+}
+
+describe("assembleGoal (U5 create)", () => {
+  it("a DRAFT builds a PROPOSED goal with no baseline, linked to its probe", () => {
+    const { goal, probe } = assembleGoal(filledDraft(), newOpaqueId(), nowTs());
+    expect(goal.status).toBe("proposed");
+    expect(goal.baseline_value).toBeUndefined();
+    expect(goal.baseline_source).toBeUndefined();
+    expect(goal.probe_definition_id).toBe(probe.probe_definition_id);
+    expect(probe.expected_denominator).toBe(5);
+    // goal_text carries the initials (stranger test: audience = initials only).
+    // TEACH-40: the canonical (normalized) initials, not the raw "ab" entry.
+    expect(goal.goal_text.startsWith("AB will ")).toBe(true);
+  });
+
+  it("an ADOPT builds an ACTIVE goal with the baseline locked in", () => {
+    const { goal } = assembleGoal(
+      filledDraft({ path: "adopt", baseline: "20" }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.status).toBe("active");
+    expect(goal.baseline_value).toBe(20);
+    expect(goal.baseline_source).toBe("eval");
+    // A baselined active goal clears the engine's baseline-mandatory gate.
+    expect(canBeginMonitoring(goal).ok).toBe(true);
+  });
+
+  it("a blank OR non-numeric baseline stays undefined (never a stray 0% that fakes the gate)", () => {
+    for (const bad of ["", "   ", "x", "n/a"]) {
+      const { goal } = assembleGoal(
+        filledDraft({ path: "adopt", baseline: bad }),
+        newOpaqueId(),
+        nowTs(),
+      );
+      expect(goal.baseline_value).toBeUndefined();
+      expect(canBeginMonitoring(goal).ok).toBe(false); // baseline-mandatory gate blocks
+    }
+  });
+
+  it("carries method_general + the descriptive accom/mod detail from the form (method not hardcoded)", () => {
+    const { goal } = assembleGoal(
+      filledDraft({
+        methodGeneral: "direct",
+        accomMod: "accommodation",
+        accomDetail: "read-aloud + extended time",
+      }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.method_general).toBe("direct"); // was hardcoded "cbm" before the restore
+    expect(goal.accom_mod).toBe("accommodation"); // the category (drives M8)
+    expect(goal.accom_mod_detail).toBe("read-aloud + extended time"); // the descriptive label
+    // The descriptive accom text is NOT part of the composed goal_text (stranger-test surface).
+    expect(goal.goal_text).not.toContain("read-aloud");
+  });
+
+  it("omits accom_mod_detail when the field is blank", () => {
+    const { goal } = assembleGoal(filledDraft({ accomDetail: "   " }), newOpaqueId(), nowTs());
+    expect(goal.accom_mod_detail).toBeUndefined();
+  });
+
+  it("a VARIABLE basis is carried onto the goal (F-2 escape valve)", () => {
+    const { goal } = assembleGoal(
+      filledDraft({ denominatorBasis: "variable" }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.denominator_basis).toBe("variable");
+  });
+
+  it("the default basis is FIXED (deliberate, never defaulted to variable)", () => {
+    expect(emptyForm().denominatorBasis).toBe("fixed");
+    const { goal } = assembleGoal(filledDraft(), newOpaqueId(), nowTs());
+    expect(goal.denominator_basis).toBe("fixed");
+  });
+
+  it("makeStudent upper-cases the initials and carries a color token", () => {
+    const s = makeStudent("ab", "--s-ab");
+    expect(s.initials).toBe("AB");
+    expect(s.color_token).toBe("--s-ab");
+    expect(s.active).toBe(true);
+  });
+
+  it("makeStudent normalizes dotted/spaced initials (TEACH-40)", () => {
+    expect(makeStudent("j.a.s.", "--s-ab").initials).toBe("JAS");
+  });
+
+  it.each(["John Smith", "J", "ABCD", "A1"])(
+    "makeStudent throws on invalid initials %j (TEACH-40)",
+    (raw) => {
+      expect(() => makeStudent(raw, "--s-ab")).toThrow(/initials/);
+    },
+  );
+
+  it("the goal text carries the normalized initials, not the raw entry (TEACH-40)", () => {
+    const { goal } = assembleGoal({ ...filledDraft(), initials: "j.a.s." }, newOpaqueId(), nowTs());
+    expect(goal.goal_text.startsWith("JAS will ")).toBe(true);
+  });
+
+  it("IEP goal #: parsed trimmed, blank → absent, invalid → absent (TEACH-41)", () => {
+    const labelOf = (goalLabel: string) =>
+      assembleGoal(filledDraft({ goalLabel }), newOpaqueId(), nowTs()).goal.goal_label;
+    expect(labelOf(" 2 ")).toBe("2");
+    expect(labelOf("1a")).toBe("1a");
+    expect(labelOf("")).toBeUndefined();
+    expect(labelOf("   ")).toBeUndefined();
+    expect(labelOf("Goal 2")).toBeUndefined();
+    const blank = assembleGoal(filledDraft(), newOpaqueId(), nowTs()).goal;
+    expect("goal_label" in blank).toBe(false);
+  });
+
+  it("the label is outside the baseline-mandatory gate and is never auto-filled", () => {
+    expect(emptyForm().goalLabel).toBe("");
+    const { goal } = assembleGoal(
+      filledDraft({ path: "adopt", baseline: "20" }),
+      newOpaqueId(),
+      nowTs(),
+    );
+    expect(goal.goal_label).toBeUndefined();
+    expect(canBeginMonitoring(goal).ok).toBe(true);
+  });
+});

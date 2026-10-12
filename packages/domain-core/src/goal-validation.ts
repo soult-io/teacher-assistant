@@ -1,0 +1,92 @@
+// M5 — baseline-mandatory gate + construct-integrity guard (design §B, §A,
+// data-model §2.1/§2.3). A goal cannot begin monitoring without a baseline; a
+// probe logs goal progress only if it matches the goal's circumstance (the probe
+// condition must equal/derive it) — exposure-level content never auto-logs.
+
+import type { IEPGoal, ProbeDefinition } from "@teacher-assistant/schema";
+
+export interface GoalActivationCheck {
+  readonly ok: boolean;
+  /** Field names that block activation (empty iff ok). */
+  readonly missing: readonly string[];
+}
+
+/**
+ * Whether a goal may begin active monitoring. Baseline is MANDATORY (value +
+ * source), alongside the other components a defensible active goal requires.
+ * This is the gate the goal-creation path enforces (design §B baseline-mandatory).
+ */
+export function canBeginMonitoring(goal: IEPGoal): GoalActivationCheck {
+  const missing: string[] = [];
+  if (goal.baseline_value === undefined) {
+    missing.push("baseline_value");
+  }
+  if (goal.baseline_source === undefined) {
+    missing.push("baseline_source");
+  }
+  // "Consistency" is inherently multi-probe: a window of 1 is not a consistency
+  // window, so a goal cannot begin monitoring with n_probes < 2 (SME ruling).
+  if (goal.criterion_consistency.n_probes < 2) {
+    missing.push("criterion_consistency");
+  }
+  if (goal.criterion_level <= 0) {
+    missing.push("criterion_level");
+  }
+  if (goal.behavior.trim() === "") {
+    missing.push("behavior");
+  }
+  if (goal.circumstance.trim() === "") {
+    missing.push("circumstance");
+  }
+  return { ok: missing.length === 0, missing };
+}
+
+function normalize(text: string): string {
+  return text.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Construct-integrity guard: a probe logs goal progress only if it belongs to the
+ * goal AND its condition equals/derives the goal's circumstance. A probe that
+ * doesn't match must not be recorded as progress for this goal.
+ */
+export function probeMatchesGoal(goal: IEPGoal, probe: ProbeDefinition): boolean {
+  if (probe.goal_id !== goal.goal_id) {
+    return false;
+  }
+  const condition = normalize(probe.condition);
+  const circumstance = normalize(goal.circumstance);
+  // "equal or derive": the probe condition is, or contains, the goal circumstance.
+  return condition === circumstance || condition.includes(circumstance);
+}
+
+/** TEACH-41: an IEP goal label is 1–6 of [A-Za-z0-9.] — "2", "1a", "3.1", "10". */
+const GOAL_LABEL_PATTERN = /^[A-Za-z0-9.]{1,6}$/;
+
+export type GoalLabelCheck =
+  | { readonly ok: true; readonly label: string | undefined }
+  | { readonly ok: false; readonly reason: "invalid" };
+
+/**
+ * Validate a typed IEP goal label. The input is trimmed; blank means "no label"
+ * (ok, `label` undefined) — whether a label is REQUIRED is the caller's path rule
+ * (ADOPT requires one, DRAFT does not), not this check. Otherwise the trimmed text
+ * must be 1–6 of [A-Za-z0-9.], and is kept as typed (no case change).
+ */
+export function validateGoalLabel(raw: string): GoalLabelCheck {
+  const label = raw.trim();
+  if (label === "") {
+    return { ok: true, label: undefined };
+  }
+  return GOAL_LABEL_PATTERN.test(label) ? { ok: true, label } : { ok: false, reason: "invalid" };
+}
+
+/**
+ * The usable IEP goal label: the trimmed label if it validates and is non-blank,
+ * else undefined. The one definition behind "this goal is numbered" — the New-Goal
+ * ADOPT path and ARC adoption (canAdopt) both read it.
+ */
+export function usableGoalLabel(raw: string | undefined): string | undefined {
+  const check = validateGoalLabel(raw ?? "");
+  return check.ok ? check.label : undefined;
+}

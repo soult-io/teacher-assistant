@@ -1,0 +1,271 @@
+// Closed enumerations (data-model §1–§7). These are LOCKED vocabularies: several
+// (the para observation chips §2.7, the para capability set §1.4) are FERPA hard
+// gates — any addition must re-clear the privacy gate before it ships. They are
+// expressed as `as const` tuples so the union type and the runtime membership
+// list can never drift apart.
+
+/** Helper: the element union of a readonly string tuple. */
+type Member<T extends readonly string[]> = T[number];
+
+// ── Identity / roster ──────────────────────────────────────────────────────
+
+/**
+ * Fixed per-student identity colour tokens (data-model §1.2, design §E.2) — the
+ * six locked hues. The palette excludes the status hues (green/amber/red). A
+ * token is assigned per student; it carries no PII on its own.
+ */
+export const COLOR_TOKENS = ["--s-ab", "--s-cd", "--s-ef", "--s-gh", "--s-jm", "--s-rt"] as const;
+export type ColorToken = Member<typeof COLOR_TOKENS>;
+
+/** Class-period instructional format (data-model §1.3). Drives the day template. */
+export const PERIOD_FORMATS = ["blended_resource", "sdi_only_strategies", "co_teach"] as const;
+export type PeriodFormat = Member<typeof PERIOD_FORMATS>;
+
+/**
+ * The para capability set (data-model §1.4) — FIXED. It CANNOT include
+ * edit_goal, view_goal_definition, mark_mastered, push_ic, export, or
+ * view_other_period; those are structurally impossible on the para path.
+ */
+export const PARA_CAPABILITIES = [
+  "administer_probe",
+  "enter_data_point",
+  "record_no_data",
+] as const;
+export type ParaCapability = Member<typeof PARA_CAPABILITIES>;
+
+// ── IEP track (Engine A) ─────────────────────────────────────────────────────
+
+/** Goal lifecycle (data-model §2.5). The app never auto-transitions active→mastered. */
+export const GOAL_STATUSES = ["proposed", "active", "mastered", "retired"] as const;
+export type GoalStatus = Member<typeof GOAL_STATUSES>;
+
+/** Progress-monitoring method, general class (data-model §2.1). */
+export const METHODS_GENERAL = ["cbm", "direct", "indirect", "authentic"] as const;
+export type MethodGeneral = Member<typeof METHODS_GENERAL>;
+
+/** Scoring model (data-model §2.1). MVP builds %-only UI; never %-coerce the others. */
+export const DENOMINATOR_MODELS = [
+  "percent_correct_over_total",
+  "rubric_score",
+  "frequency_count",
+  "duration_latency",
+] as const;
+export type DenominatorModel = Member<typeof DENOMINATOR_MODELS>;
+
+/** Monitoring cadence (data-model §2.1). Drives per-goal owes. */
+export const FREQUENCIES = ["daily", "weekly", "twice_monthly", "monthly"] as const;
+export type Frequency = Member<typeof FREQUENCIES>;
+
+/** Accommodation / modification posture (data-model §2.1). Never silent-defaulted. */
+export const ACCOM_MODS = ["accommodation", "modification", "none"] as const;
+export type AccomMod = Member<typeof ACCOM_MODS>;
+
+/** Valid probe settings / the para setting picklist (data-model §2.1). */
+export const SETTINGS = ["math_resource", "gen_ed", "home_scored"] as const;
+export type Setting = Member<typeof SETTINGS>;
+
+/** Who produced a value (data-model §2.2/§2.4). The para does not baseline. */
+export const SCORERS = ["teacher", "para"] as const;
+export type Scorer = Member<typeof SCORERS>;
+
+export const BASELINE_SOURCES = ["eval", "computed_from_baseline_points"] as const;
+export type BaselineSource = Member<typeof BASELINE_SOURCES>;
+
+/**
+ * Denominator basis (design §F.F5 / F-2 SME ruling). "fixed" = the probe has a set
+ * total, and a differing entered total trips the F-2 off-basis acknowledgment.
+ * "variable" = the teacher's probes routinely vary (3/5/12 items), so every entered
+ * total is accepted as-is and NO mismatch is flagged — the deliberate escape valve.
+ * Absent = fixed (back-compatible; the F-2 ack stays intact by default).
+ */
+export const DENOMINATOR_BASES = ["fixed", "variable"] as const;
+export type DenominatorBasis = Member<typeof DENOMINATOR_BASES>;
+
+export const ARC_DATE_FLAGS = ["tentative", "confirmed"] as const;
+export type ArcDateFlag = Member<typeof ARC_DATE_FLAGS>;
+
+/** Monitoring point state (data-model §2.4/§2.6). */
+export const DATA_POINT_STATES = ["scored", "no_data", "incomplete", "queued", "pending"] as const;
+export type DataPointState = Member<typeof DATA_POINT_STATES>;
+
+/**
+ * F-2 teacher election on a denominator-mismatched scored point (design §B). Two
+ * values only; the pending/unresolved state is the NULL case (the field absent),
+ * never a third enum value. State machine: pending → counted | excluded.
+ *   - "counted"  = in the consistency/quarterly math + trend, carried with a
+ *                  non-strippable off-basis flag in every rendering.
+ *   - "excluded" = out of the computed math, but retained + visible in audit/history.
+ * The M8 auto-statement HARD-excludes every mismatched point regardless of this
+ * election (a statement cannot flip on an off-basis point).
+ */
+export const MISMATCH_DISPOSITIONS = ["counted", "excluded"] as const;
+export type MismatchDisposition = Member<typeof MISMATCH_DISPOSITIONS>;
+
+/**
+ * Baseline point lifecycle (data-model §2.2, TEACH-46 C1). A baseline point is
+ * never hard-deleted: a removed point keeps its values, stays visible in the
+ * card's History, and is excluded from the baseline estimate, n and canAdopt.
+ */
+export const BASELINE_POINT_STATUSES = ["recorded", "removed"] as const;
+export type BaselinePointStatus = Member<typeof BASELINE_POINT_STATUSES>;
+
+/**
+ * Why a baseline point was removed (TEACH-46 C2). A CLOSED list — no free text,
+ * no "Other" (ky-sped-lbd-sdi-sme ruling 2026-10-09). Any addition must re-clear
+ * the SME and the privacy gate.
+ */
+export const BASELINE_REMOVE_REASONS = [
+  "entered_by_mistake",
+  "duplicate",
+  "wrong_student_or_goal",
+  "probe_not_per_goal_condition",
+] as const;
+export type BaselineRemoveReason = Member<typeof BASELINE_REMOVE_REASONS>;
+
+/**
+ * No-data reason (data-model §2.4, §A.2). `no_time` is a fidelity gap (accrues
+ * the No-time counter, NOT excused); absent/testing/no_school are excused and
+ * pause (never break) the consistency run. The para path may write only a
+ * restricted subset (§4) — enforced on the write projection, not here.
+ */
+export const NO_DATA_REASONS = ["no_time", "absent", "testing", "behavior", "no_school"] as const;
+export type NoDataReason = Member<typeof NO_DATA_REASONS>;
+
+/**
+ * Para observation chips — LOCKED closed enum (data-model §2.7). Multi-select,
+ * no "Other", no free text, no diagnosis labels. FERPA hard gate: any addition
+ * must re-clear the privacy gate.
+ */
+export const PARA_OBSERVATIONS = [
+  "Independent",
+  "Accommodation",
+  "Within2Prompts",
+  "ThreePlusPrompts",
+  "Frustrated",
+  "OffTask",
+  "TaskRefusal",
+  "OnTaskNeededMoreTime",
+  "UsedLearnedStrategy",
+  "SelfCorrected",
+] as const;
+export type ParaObservation = Member<typeof PARA_OBSERVATIONS>;
+
+/** Accommodation sub-enum (data-model §2.7) — also the teacher accommodation vocab. */
+export const ACCOMMODATION_SUBTYPES = [
+  "Calculator",
+  "MultiplicationGrid",
+  "WorkedExample",
+  "Manipulatives",
+  "KeywordList",
+  "SymbolChart",
+] as const;
+export type AccommodationSubtype = Member<typeof ACCOMMODATION_SUBTYPES>;
+
+// ── MYP track (Engine B) ─────────────────────────────────────────────────────
+
+/** Formative progress value (data-model §3.1). NO 0, NO %. M = missing opportunity. */
+export const MYP_PROGRESS_VALUES = ["3", "2", "1", "M"] as const;
+export type MypProgressValue = Member<typeof MYP_PROGRESS_VALUES>;
+
+/** MYP math criteria (data-model §3.2/§3.4). */
+export const MYP_CRITERIA = ["A", "B", "C", "D"] as const;
+export type MypCriterion = Member<typeof MYP_CRITERIA>;
+
+/** Achievement retest state machine, per (criterion, standard) (data-model §3.2). */
+export const RETEST_STATES = ["none", "required", "offered", "complete"] as const;
+export type RetestState = Member<typeof RETEST_STATES>;
+
+/**
+ * Modified-assessment tags (data-model §3.2) — STRUCTURED, never free text (a
+ * free-text "modified" note is a re-ID/disability leak). Closed vocabulary.
+ */
+export const MODIFIED_NOTE_TAGS = [
+  "read_aloud",
+  "scribe",
+  "extended_time",
+  "chunked",
+  "fewer_items_same_strand",
+  "manipulatives",
+  "simplified_prompt_language",
+  "calculator",
+] as const;
+export type ModifiedNoteTag = Member<typeof MODIFIED_NOTE_TAGS>;
+
+/** ATL skill cluster (data-model §3.4 reference table). */
+export const ATL_CLUSTERS = [
+  "Communication",
+  "Social",
+  "Self-management",
+  "Research",
+  "Thinking",
+] as const;
+export type AtlCluster = Member<typeof ATL_CLUSTERS>;
+
+// ── Planning ─────────────────────────────────────────────────────────────────
+
+/** Intra-day block type (data-model §7.3). Color by type is a design concern. */
+export const BLOCK_TYPES = [
+  "warmup",
+  "core",
+  "brain_break",
+  "sdi_stations",
+  "review_core",
+  "fluency",
+] as const;
+export type BlockType = Member<typeof BLOCK_TYPES>;
+
+// ── Differentiation toolkit (M10, D-ARCH-4/4a) ────────────────────────────────
+// Tag facets on a `Material` (a PII-FREE curriculum artifact). LOCKED by the two
+// SME rulings in the M10-U1 spec (§A ky-sped-lbd-sdi-sme, §B ib-myp-math-sme).
+
+/**
+ * `AccessBand` (spec §A.1) — REQUIRED on a material, no default. Describes the
+ * MATERIAL's pitch, NEVER the child (§A.5): it is never a de-facto student level
+ * or disability label and never exports into an IC/Toddle value. Ordered ladder,
+ * most→least grade-level demand. REPLACES the earlier `approaching` placeholder.
+ */
+export const ACCESS_BANDS = [
+  "on_grade",
+  "grade_level_scaffolded",
+  "foundational_bridge",
+  "access_foundational",
+] as const;
+export type AccessBand = Member<typeof ACCESS_BANDS>;
+
+/** Support facet a material provides (spec §A.2, plan §1). Multi-select. */
+export const MATERIAL_SUPPORT_TYPES = [
+  "worked_example_full",
+  "worked_example_faded",
+  "guided_notes",
+  "graphic_organizer",
+  "cra_manipulative",
+  "visual_scaffold",
+  "vocab_keyword",
+  "reference_tool",
+  "step_chunked",
+  "adapted_practice",
+  "modified_assessment",
+] as const;
+export type MaterialSupportType = Member<typeof MATERIAL_SUPPORT_TYPES>;
+
+/** Gradual-release slot a material fits (spec field table). Multi-select. */
+export const LESSON_BLOCKS = ["i_do", "we_do", "you_do", "assessment", "reference"] as const;
+export type LessonBlock = Member<typeof LESSON_BLOCKS>;
+
+/** UDL principle a material serves (plan §3). Multi-select. */
+export const UDL_PRINCIPLES = ["representation", "action_expression", "engagement"] as const;
+export type UdlPrinciple = Member<typeof UDL_PRINCIPLES>;
+
+/** CRA stage a material sits at (plan §3, concrete→representational→abstract). */
+export const CRA_STAGES = ["concrete", "representational", "abstract"] as const;
+export type CraStage = Member<typeof CRA_STAGES>;
+
+/** Provenance of a material (spec field table). Source-agnostic; no runtime AI. */
+export const MATERIAL_ORIGINS = [
+  "teacher_authored",
+  "imported_colleague",
+  "imported_arc_binder",
+  "imported_seed",
+  "purchased",
+] as const;
+export type MaterialOrigin = Member<typeof MATERIAL_ORIGINS>;

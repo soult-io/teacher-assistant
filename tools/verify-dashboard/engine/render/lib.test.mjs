@@ -1,0 +1,173 @@
+import { describe, expect, it } from "vitest";
+import {
+  aggregate,
+  escapeHtml,
+  fillTemplate,
+  formatDuration,
+  pillClass,
+  renderBars,
+  renderCallouts,
+  renderCiPills,
+  renderSection,
+  renderTiles,
+} from "./lib.mjs";
+
+describe("formatDuration", () => {
+  it("renders sub-second as ms", () => {
+    expect(formatDuration(820)).toBe("820ms");
+    expect(formatDuration(0)).toBe("0ms");
+  });
+  it("renders seconds with one decimal", () => {
+    expect(formatDuration(4200)).toBe("4.2s");
+    expect(formatDuration(59_900)).toBe("59.9s");
+  });
+  it("renders minutes and zero-padded seconds", () => {
+    expect(formatDuration(63_000)).toBe("1m 03s");
+    expect(formatDuration(600_000)).toBe("10m 00s");
+  });
+  it("renders an em dash for null/negative/non-finite", () => {
+    expect(formatDuration(null)).toBe("—");
+    expect(formatDuration(-5)).toBe("—");
+    expect(formatDuration(Number.NaN)).toBe("—");
+  });
+});
+
+describe("escapeHtml", () => {
+  it("escapes the four HTML-significant characters", () => {
+    expect(escapeHtml('a & b < c > d "e"')).toBe("a &amp; b &lt; c &gt; d &quot;e&quot;");
+  });
+  it("stringifies non-strings", () => {
+    expect(escapeHtml(42)).toBe("42");
+  });
+});
+
+describe("aggregate", () => {
+  it("sums per-package numbers to totals + package count", () => {
+    const packages = [
+      { pass: 107, files: 8 },
+      { pass: 100, files: 16 },
+      { pass: 36, files: 7 },
+    ];
+    expect(aggregate(packages)).toEqual({ unitTotal: 243, fileTotal: 31, pkgCount: 3 });
+  });
+});
+
+describe("renderBars", () => {
+  it("makes the top package full-width and scales the rest relative to it", () => {
+    const html = renderBars([
+      { label: "domain-core", sub: "engine", pass: 100, barClass: "eng" },
+      { label: "store", sub: "projections", pass: 25 },
+    ]);
+    expect(html).toContain('class="barrow eng"');
+    expect(html).toContain("domain-core<span>engine</span>");
+    expect(html).toContain('style="width:100%"');
+    expect(html).toContain('style="width:25%"');
+    expect(html).toContain('<div class="val tnum">25</div>');
+  });
+  it("does not divide by zero when every count is zero", () => {
+    expect(renderBars([{ label: "x", sub: "y", pass: 0 }])).toContain('style="width:0%"');
+  });
+  it("tolerates a missing sub", () => {
+    expect(renderBars([{ label: "x", pass: 1 }])).toContain("x<span></span>");
+  });
+});
+
+const BUILT_AT = "2026-09-24T10:00:00Z";
+
+describe("pillClass / renderCiPills", () => {
+  it("maps conclusions to pass/fail/note", () => {
+    expect(pillClass("success")).toBe("pass");
+    expect(pillClass("failure")).toBe("fail");
+    expect(pillClass("in_progress")).toBe("note");
+    expect(pillClass(undefined)).toBe("note");
+  });
+  it("maps the two non-verdicts to distinct neutral classes", () => {
+    expect(pillClass("no_run")).toBe("none");
+    expect(pillClass("unknown")).toBe("unk");
+  });
+  it("renders a pill per status with escaped labels", () => {
+    const html = renderCiPills(
+      [
+        { label: "verify", conclusion: "success" },
+        { label: "e2e", conclusion: "failure" },
+        { label: "a<b", conclusion: "success" },
+      ],
+      { builtAt: BUILT_AT },
+    );
+    expect(html).toContain('<span class="pill pass"><span class="dot"></span>verify</span>');
+    expect(html).toContain('<span class="pill fail"><span class="dot"></span>e2e</span>');
+    expect(html).toContain("a&lt;b</span>");
+  });
+  it("labels an in-progress pill as in progress AT BUILD TIME, with the ISO time", () => {
+    const html = renderCiPills([{ label: "CodeQL", conclusion: "in_progress" }], {
+      builtAt: BUILT_AT,
+    });
+    expect(html).toContain('class="pill note"');
+    expect(html).toContain(`CodeQL <span class="q">· in progress at build time ${BUILT_AT}</span>`);
+    expect(html).toContain(
+      `title="This run had not finished when the page was generated (${BUILT_AT})`,
+    );
+  });
+  it("labels no_run and unknown distinguishably, neither green", () => {
+    const html = renderCiPills(
+      [
+        { label: "ci", conclusion: "no_run" },
+        { label: "e2e", conclusion: "unknown" },
+      ],
+      { builtAt: BUILT_AT },
+    );
+    expect(html).toContain('<span class="pill none" title="No push run of this workflow exists');
+    expect(html).toContain('ci <span class="q">· no run for this commit</span>');
+    expect(html).toContain('<span class="pill unk" title="CI status could not be determined');
+    expect(html).toContain('e2e <span class="q">· status unknown</span>');
+    expect(html).not.toContain("pill pass");
+  });
+});
+
+describe("renderTiles", () => {
+  it("renders a tile per entry with variant class and escaped value/label", () => {
+    const html = renderTiles([
+      { value: 287, label: "tests passing", variant: "accent" },
+      { value: 39, label: "files & <stuff>" },
+    ]);
+    expect(html).toContain('<div class="tile accent"><div class="n tnum">287</div>');
+    expect(html).toContain("files &amp; &lt;stuff&gt;");
+  });
+});
+
+describe("renderCallouts", () => {
+  it("tints info callouts and passes trusted html through", () => {
+    const html = renderCallouts([
+      { kind: "info", heading: "Deep", html: "the <b>engine</b>" },
+      { kind: "", heading: "Gaps", html: "scaffolds" },
+    ]);
+    expect(html).toContain('<div class="callout info"><h4>Deep</h4><p>the <b>engine</b></p></div>');
+    expect(html).toContain('<div class="callout"><h4>Gaps</h4><p>scaffolds</p></div>');
+  });
+});
+
+describe("renderSection", () => {
+  it("wraps a body with title and optional meta", () => {
+    const html = renderSection({ title: "Test suite", meta: "live", body: "<p>x</p>" });
+    expect(html).toContain("<h2>Test suite</h2>");
+    expect(html).toContain('<span class="k">live</span>');
+    expect(html).toContain("<p>x</p>");
+  });
+  it("omits the meta span when meta is absent", () => {
+    const html = renderSection({ title: "T", body: "b" });
+    expect(html).not.toContain('class="k"');
+  });
+});
+
+describe("fillTemplate", () => {
+  it("substitutes known tokens and leaves unknown ones visible", () => {
+    expect(fillTemplate("a={{A}} b={{B}} c={{MISSING}}", { A: 1, B: "x" })).toBe(
+      "a=1 b=x c={{MISSING}}",
+    );
+  });
+  it("does not re-escape HTML-valued tokens (trusted)", () => {
+    expect(fillTemplate("{{BARS}}", { BARS: '<div class="barrow"></div>' })).toBe(
+      '<div class="barrow"></div>',
+    );
+  });
+});

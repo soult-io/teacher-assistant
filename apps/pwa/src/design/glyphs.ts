@@ -1,0 +1,49 @@
+// Status glyphs (design §E, round-3). The settled TRACK status set — kept
+// visually distinct so status always dominates a row:
+//   ● logged   ○ owes   ⊘ no-data   ★ mastery   ⏳ pending   ◐ incomplete   ◷ queued
+// plus one action marker (not a status): 🕐 score later (SCORE_LATER, TEACH-47).
+// The glyph carries the state to grayscale / colour-vision-deficient readers;
+// the chip colour reinforces. Ported from the prototype's glyph() map.
+
+import type { DashboardState } from "@teacher-assistant/store";
+
+/** A chip is a (glyph, className) pair; the className maps to a --status colour. */
+export interface Chip {
+  readonly glyph: string;
+  readonly className: string;
+}
+
+/** The full status vocabulary (used by U2–U6; U1 renders the dashboard subset). */
+export const STATUS_CHIPS = {
+  logged: { glyph: "●", className: "logged" },
+  owes: { glyph: "○", className: "owes" },
+  nodata: { glyph: "⊘", className: "nodata" },
+  mastery: { glyph: "★", className: "mastery" },
+  pending: { glyph: "⏳", className: "pending" },
+  incomplete: { glyph: "◐", className: "incomplete" },
+  queued: { glyph: "◷", className: "queued" },
+} as const satisfies Record<string, Chip>;
+
+/**
+ * Score-later (TEACH-47): "probe given, score later". A clock reads as "do this
+ * later"; the old ⚑ flag read to teachers as an error. Not ⏳ (that is the para
+ * `pending` cue) and kept apart from the ◷ `queued` chip: 🕐 is a full-colour emoji
+ * clock face, ◷ a single-colour geometric glyph. The glyph is decorative next to
+ * the plain `label`, which is the accessible name wherever the marker appears.
+ */
+export const SCORE_LATER = {
+  glyph: "🕐",
+  label: "Collected — score later",
+} as const;
+
+/** Map a weekly-dashboard row state (M3 projection) to its chip. */
+export function chipForDashboardState(state: DashboardState): Chip {
+  switch (state) {
+    case "has_point":
+      return STATUS_CHIPS.logged;
+    case "documented_no_data":
+      return STATUS_CHIPS.nodata;
+    case "owes":
+      return STATUS_CHIPS.owes;
+  }
+}

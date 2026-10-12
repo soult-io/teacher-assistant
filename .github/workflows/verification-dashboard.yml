@@ -1,0 +1,368 @@
+name: verification-dashboard
+
+# Regenerates the live TRACK Verification dashboard from main and publishes it as a
+# small static nginx image to GHCR (ghcr.io/<owner>/teacher-assistant-verify). On a PR
+# it builds the page and validates the image build (no push). It publishes only when a
+# main push's e2e run completes green: the image is built from THAT run's commit and
+# THAT run's evidence and pushed as sha-<that commit> (+ latest while it is main's
+# tip). The deploy stack (nsoult-agentic/stack-lexington-teacher-assistant) pins the
+# image by tag + digest and serves the PAGE on Lexington behind the NPM (Neil's
+# access gate) — replacing the previous public GitHub Pages target. The IMAGE is
+# PUBLIC on GHCR (as are this repo and its Actions artifacts): anyone can pull it
+# and read every video, still and trace in it. So the generator refuses to build
+# unless the evidence is from a run of the local synthetic build and the output
+# passes the PII scan (tools/verify-dashboard/engine/pii-scan.mjs).
+
+on:
+  pull_request:
+  # The publish path: waits for the e2e run (walkthrough job included) to complete, so
+  # the image is built from that run's commit and evidence, never the previous one's
+  # (TEACH-21). `branches` matches head_branch only — see the build job's `if`.
+  workflow_run:
+    workflows: [e2e]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      e2e_run_id:
+        description: >-
+          Build from this e2e run's evidence instead of the latest successful main run
+          (e.g. to render a PR's stills before merge). It must be a successful e2e.yml
+          run. Never published: the image is only pushed from a main e2e completion.
+        required: false
+        default: ""
+
+# Jobs grant their own permissions; nothing is inherited.
+permissions: {}
+
+# The event name is in the group so a manual (dispatch) run on main can never cancel
+# the run that publishes the image for a merge. Publish runs are grouped per tested
+# commit and never cancelled: each one is the only image for its commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_run' }}
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository_owner }}/teacher-assistant-verify
+  # The commit this run builds from: the e2e run's commit when publishing, else the
+  # event's own commit (the PR merge ref, or the dispatched ref).
+  # (Under workflow_run, github.sha is main's tip when this run starts, not the tested
+  # commit.)
+  COMMIT_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+  PUBLISH: ${{ github.event_name == 'workflow_run' }}
+
+jobs:
+  build:
+    # Publish runs only for a green e2e run of a same-repo push to main: a fork PR from a
+    # branch named "main" also passes the trigger's `branches` filter. A failed e2e run
+    # publishes nothing for its commit (never the previous commit's evidence). Keep in
+    # step with the checks in "Resolve e2e run", which re-reads the run from the API.
+    if: >-
+      github.event_name != 'workflow_run' || (
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository
+      )
+    runs-on: ubuntu-latest
+    outputs:
+      evidence_sha: ${{ steps.e2e.outputs.head_sha }}
+    permissions:
+      contents: read
+      actions: read # the generator reads other workflows' run status via the Actions API
+    # Node 22 base matching e2e.yml. The generator ingests the e2e run's videos/traces
+    # and renders — it drives no browser itself, so no Playwright browsers are needed.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble
+    env:
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      # The tested commit: live unit counts and the generator come from it too.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11.17.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      # Build first: vitest cross-package imports and the PWA `vite preview`
+      # both resolve to dist.
+      - name: Build all workspaces
+        run: pnpm -r run build
+
+      # Resolve the e2e run whose artifacts are the journey evidence: the triggering run
+      # when publishing, else the dispatch-supplied run, else the newest successful main
+      # run (PR build check only). Bounding to one run keeps artifact handling to a
+      # single set.
+      - name: Resolve e2e run
+        id: e2e
+        uses: actions/github-script@v7
+        env:
+          E2E_RUN_ID: ${{ inputs.e2e_run_id }}
+          COMMIT_SHA: ${{ env.COMMIT_SHA }}
+        with:
+          script: |
+            const pinned = (process.env.E2E_RUN_ID || "").trim();
+            const triggering = context.eventName === "workflow_run" ? context.payload.workflow_run : null;
+            const repo = `${context.repo.owner}/${context.repo.repo}`;
+            // Why a run by id cannot be evidence; empty = usable. Same-repo runs only: a
+            // fork PR's artifacts are attacker-controlled bytes.
+            const problemsOf = (run, extra = []) =>
+              [
+                !run.path.endsWith(".github/workflows/e2e.yml") && `path ${run.path}`,
+                run.conclusion !== "success" && `conclusion ${run.conclusion}`,
+                run.head_repository?.full_name !== repo && `head_repository ${run.head_repository?.full_name}`,
+                ...extra,
+              ].filter(Boolean);
+            let run;
+            if (triggering || pinned) {
+              if (!triggering && !/^\d+$/.test(pinned)) {
+                core.setFailed(`e2e_run_id must be a numeric run id, got ${JSON.stringify(pinned)}`);
+                return;
+              }
+              const runId = triggering ? triggering.id : Number(pinned);
+              ({ data: run } = await github.rest.actions.getWorkflowRun({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                run_id: runId,
+              }));
+              // Publishing: re-check everything the publish relies on from the API, incl.
+              // the attempt (a re-run started since would swap in its artifacts).
+              const problems = problemsOf(
+                run,
+                triggering
+                  ? [
+                      run.event !== "push" && `event ${run.event}`,
+                      run.head_branch !== "main" && `head_branch ${run.head_branch}`,
+                      run.head_sha !== process.env.COMMIT_SHA &&
+                        `head_sha ${run.head_sha} != ${process.env.COMMIT_SHA}`,
+                      run.run_attempt !== triggering.run_attempt &&
+                        `run_attempt ${run.run_attempt} != ${triggering.run_attempt}`,
+                    ]
+                  : [],
+              );
+              // Loud, never a silent fallback to main: nothing publishes rather than the
+              // wrong commit's evidence, and a dispatch asked for THIS run.
+              if (problems.length) {
+                core.setFailed(`e2e run ${runId} is not usable evidence: ${problems.join("; ")}`);
+                return;
+              }
+            } else {
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: "e2e.yml",
+                branch: "main",
+                // push only: a fork PR from a branch named "main" also has
+                // head_branch "main" — its artifacts must never become the evidence.
+                event: "push",
+                status: "success",
+                per_page: 1,
+              });
+              run = runs.data.workflow_runs[0];
+              if (!run) {
+                core.warning("no successful main e2e run yet — journeys will render UNVERIFIED");
+                return;
+              }
+            }
+            core.setOutput("run_id", String(run.id));
+            core.setOutput("head_sha", run.head_sha);
+            core.setOutput("run_url", run.html_url);
+            core.setOutput("created_at", run.created_at);
+
+      # Download that run's results.json + per-test videos/traces/step stills +
+      # journey-evidence.json.
+      # continue-on-error: a pre-reporter run has no evidence file; the generator then
+      # renders every journey UNVERIFIED rather than failing (loud, never a silent pass).
+      # Not when publishing: a green e2e run always uploads it, so its absence is a fault.
+      - name: Download e2e artifacts
+        if: steps.e2e.outputs.run_id
+        continue-on-error: ${{ env.PUBLISH != 'true' }}
+        uses: actions/download-artifact@v7
+        with:
+          name: playwright-test-results
+          path: e2e-artifacts
+          run-id: ${{ steps.e2e.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      # The human-pace walkthrough recordings (TEACH-16) come from the walkthrough job of
+      # the SAME e2e run — same run, same commit as the gating evidence above. The job
+      # is non-gating, so it may have failed or not run: then its artifact is absent and
+      # every card shows "no walkthrough recorded for this commit" (never the fast video).
+      - name: Resolve walkthrough job
+        id: walkthrough
+        if: steps.e2e.outputs.run_id
+        uses: actions/github-script@v7
+        env:
+          E2E_RUN_ID: ${{ steps.e2e.outputs.run_id }}
+        with:
+          script: |
+            const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: Number(process.env.E2E_RUN_ID),
+              filter: "latest",
+            });
+            const job = jobs.find((j) => j.name === "walkthrough");
+            if (!job) {
+              core.warning(`run ${process.env.E2E_RUN_ID} has no walkthrough job — cards show no video`);
+              return;
+            }
+            core.info(`walkthrough job ${job.id}: ${job.status}/${job.conclusion}`);
+            if (job.conclusion !== "success") {
+              core.warning(`walkthrough job concluded ${job.conclusion} — failed journeys show no video`);
+            }
+            core.setOutput("job_url", job.html_url);
+
+      - name: Download walkthrough recordings
+        if: steps.walkthrough.outputs.job_url
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: playwright-walkthrough
+          path: walkthrough-artifacts
+          run-id: ${{ steps.e2e.outputs.run_id }}
+          github-token: ${{ github.token }}
+
+      - name: Generate dashboard
+        env:
+          # Absent file → no walkthrough (the generator warns and renders the no-video panel).
+          WALKTHROUGH_EVIDENCE_FILE: ${{ steps.walkthrough.outputs.job_url && format('{0}/walkthrough-artifacts/walkthrough-evidence.json', github.workspace) || '' }}
+          WALKTHROUGH_RUN_ID: ${{ steps.e2e.outputs.run_id }}
+          WALKTHROUGH_RUN_URL: ${{ steps.walkthrough.outputs.job_url }}
+          # The engine derives the artifact digest by hashing this file's bytes.
+          EVIDENCE_FILE: ${{ github.workspace }}/e2e-artifacts/journey-evidence.json
+          SOURCE_RUN_ID: ${{ steps.e2e.outputs.run_id }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_URL: ${{ steps.e2e.outputs.run_url }}
+          SOURCE_COMMIT_SHA: ${{ steps.e2e.outputs.head_sha }}
+          SOURCE_WORKFLOW: e2e
+          SOURCE_JOB: e2e
+          SOURCE_RUN_STARTED: ${{ steps.e2e.outputs.created_at }}
+        # The generator binds the COMMIT header and the CI pills to COMMIT_SHA (job env).
+        # GITHUB_SHA is main's tip under workflow_run and is the generator's fallback, so the
+        # shell also sets it to the tested commit (a step's env: cannot override GITHUB_*).
+        run: GITHUB_SHA="$COMMIT_SHA" pnpm --filter @teacher-assistant/verify-dashboard run generate
+
+      # Hand the static output (index.html + videos/ + traces/ + stills/) to the publish job, which
+      # builds it into the nginx image outside this container (no docker-in-docker).
+      - name: Upload dashboard artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dashboard
+          path: dist-dashboard
+          retention-days: 7
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      # Checkout supplies the Dockerfile + nginx.conf; the generated page comes
+      # from the build job's artifact.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.COMMIT_SHA }}
+
+      # Last gate before the push: the sha tag, the checked-out tree and the evidence
+      # must all be the same commit.
+      - name: Assert same-commit evidence
+        if: env.PUBLISH == 'true'
+        env:
+          EVIDENCE_SHA: ${{ needs.build.outputs.evidence_sha }}
+        run: |
+          head="$(git rev-parse HEAD)"
+          echo "tag sha-$COMMIT_SHA | checkout $head | evidence $EVIDENCE_SHA"
+          if [ "$head" != "$COMMIT_SHA" ] || [ "$EVIDENCE_SHA" != "$COMMIT_SHA" ]; then
+            echo "::error::evidence/checkout/tag commits differ — refusing to publish"
+            exit 1
+          fi
+
+      # e2e runs of consecutive commits can finish out of order; only the image of
+      # main's current tip moves :latest, so an older commit does not overwrite it. (A
+      # newer commit publishing between this check and the push below can still be
+      # overwritten; the stack pins by digest, so only :latest readers see it.)
+      - name: Check whether this commit is main's tip
+        id: tip
+        if: env.PUBLISH == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.getBranch({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              branch: "main",
+            });
+            const latest = data.commit.sha === process.env.COMMIT_SHA;
+            core.info(`main tip ${data.commit.sha}; this commit ${process.env.COMMIT_SHA}; move latest: ${latest}`);
+            core.setOutput("move_latest", String(latest));
+
+      - name: Download dashboard artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: dashboard
+          path: dist-dashboard
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Build and scan BEFORE any push: an image that fails the scan must never reach
+      # GHCR, where the stack's pin bump would pick up its sha-* tag. Runs on every PR
+      # too, so a vulnerable base fails the PR check. pull: true re-resolves the base
+      # tag each run, so a patched base is used as soon as it is published.
+      - name: Build the static dashboard image (local, for the scan)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: tools/verify-dashboard/Dockerfile
+          pull: true
+          load: true
+          push: false
+          tags: teacher-assistant-verify:scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Trivy image scan
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: teacher-assistant-verify:scan
+          severity: CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+
+      # Log in only after the scan: the third-party scan step never sees a push token.
+      - name: Log in to GHCR (publish only)
+        if: env.PUBLISH == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Push the exact image Trivy scanned (a rebuild could re-resolve the base tag to a
+      # digest that was never scanned): sha-<tested commit>, + latest while it is main's
+      # tip. The stack repo pins by sha tag + digest, mirroring the app images.
+      - name: Push the scanned image (publish only)
+        if: env.PUBLISH == 'true'
+        env:
+          MOVE_LATEST: ${{ steps.tip.outputs.move_latest }}
+        run: |
+          docker tag teacher-assistant-verify:scan "$IMAGE:sha-$COMMIT_SHA"
+          docker push "$IMAGE:sha-$COMMIT_SHA"
+          if [ "$MOVE_LATEST" = "true" ]; then
+            docker tag teacher-assistant-verify:scan "$IMAGE:latest"
+            docker push "$IMAGE:latest"
+          fi

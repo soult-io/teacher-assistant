@@ -2,7 +2,7 @@
   "name": "@teacher-assistant/crypto",
   "version": "0.0.0",
   "private": true,
-  "description": "M0 crypto/keyring core: key hierarchy (master key + per-period DEKs + device keypairs), AEAD, key wrapping, device enrollment (QR), paper recovery code, para-scoped key issuance + rotation. Scaffold only — the crypto module lands with the Phase-0 M0 spec.",
+  "description": "M0 crypto/keyring core: key hierarchy (master key + per-period DEKs + device keypairs), XChaCha20-Poly1305 record AEAD, X25519 key wrapping, Argon2id paper-recovery wrap, OOB-QR device + para enrollment, DEK rotation/revocation. Client-side only — the server never receives an unwrapped key.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,12 +15,16 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "echo \"(no tests yet — @teacher-assistant/crypto is a scaffold; M0 spec follows)\" && exit 0"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "@teacher-assistant/schema": "workspace:*"
+    "@teacher-assistant/schema": "workspace:*",
+    "libsodium-wrappers-sumo": "0.8.4"
   },
   "devDependencies": {
-    "typescript": "~5.9.3"
+    "@vitest/coverage-v8": "~4.1.10",
+    "typescript": "~5.9.3",
+    "vitest": "~4.1.10"
   }
 }

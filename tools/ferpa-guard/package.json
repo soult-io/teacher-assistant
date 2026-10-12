@@ -8,6 +8,13 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
+  "dependencies": {
+    "@teacher-assistant/crypto": "workspace:*",
+    "@teacher-assistant/domain-core": "workspace:*",
+    "@teacher-assistant/schema": "workspace:*",
+    "@teacher-assistant/store": "workspace:*",
+    "@teacher-assistant/sync-relay": "workspace:*"
+  },
   "devDependencies": {
     "@types/node": "~26.2.0",
     "typescript": "~5.9.3",

@@ -1,0 +1,139 @@
+// A flat dashboard goal row (owes-first + by-period lenses). Status glyph +
+// monogram avatar + title/meta + value. Owes and scored rows are tappable — owes
+// opens the Quick-Score sheet, scored opens it for an audited [Fix]. Owes rows
+// also carry the score-later 🕐 toggle (writes an M5 bookmark). All data is on the
+// RowVM; the handlers are wired by DashboardScreen.
+
+import type { DashboardState } from "@teacher-assistant/store";
+import { Avatar } from "../../../design/Avatar.js";
+import { DuplicateLabelCue, goalLabelSpoken } from "../../../design/GoalTitle.js";
+import { chipForDashboardState, SCORE_LATER } from "../../../design/glyphs.js";
+import { StatusChip } from "../../../design/StatusChip.js";
+import { type RowVM, rowValueText } from "./dashboard-vm.js";
+import { ScoreLaterButton } from "./ScoreLaterButton.js";
+import { TrendHistoryButton } from "./TrendHistoryButton.js";
+
+const STATE_LABEL: Readonly<Record<DashboardState, string>> = {
+  owes: "owes",
+  documented_no_data: "no data",
+  has_point: "scored",
+};
+
+function rightValue(vm: RowVM) {
+  const text = rowValueText(vm);
+  if (text === null) {
+    return null;
+  }
+  const dim = vm.state === "documented_no_data";
+  // The ⊘ no-data value carries a stable marker so a journey can assert the row shows
+  // a documented gap (distinct from a scored %), independent of the reason text/CSS.
+  return (
+    <span className={`rowval${dim ? " dim" : ""}`} data-testid={dim ? "row-nodata" : undefined}>
+      {text}
+    </span>
+  );
+}
+
+function RowMain({ vm, scoreLater }: { readonly vm: RowVM; readonly scoreLater: boolean }) {
+  const isOwes = vm.state === "owes";
+  return (
+    <>
+      <span className="rowtitle">{vm.goalText}</span>
+      <span className="rowmeta">
+        {/* TEACH-41: the IEP goal # leads the grey meta line. */}
+        {vm.goalLabel !== null ? <span className="goalnum">Goal {vm.goalLabel} · </span> : null}
+        {vm.periodLabel !== null ? <span className="period">{vm.periodLabel}</span> : null}
+        {vm.duplicateLabel ? <DuplicateLabelCue label={vm.goalLabel} /> : null}
+        {/* Owes rows carry glanceable mid-class context: the probe + criterion. */}
+        {isOwes && vm.probe !== "" ? ` · ${vm.probe}` : null}
+        {isOwes && vm.criterion !== "" ? ` · ${vm.criterion}` : null}
+        {scoreLater ? (
+          <span className="laternote">
+            {" · "}
+            <span aria-hidden="true">{SCORE_LATER.glyph}</span> score later
+          </span>
+        ) : null}
+      </span>
+      {vm.pending ? <span className="pendnote">⏳ para point — awaiting your OK</span> : null}
+    </>
+  );
+}
+
+export interface GoalRowProps {
+  readonly vm: RowVM;
+  readonly scoreLater: boolean;
+  readonly onScoreLater: (vm: RowVM) => void;
+  readonly onOpenScore: (vm: RowVM) => void;
+  /** Open Goal Detail (trend + history) — reachable from EVERY goal (design R3 D2). */
+  readonly onOpenDetail: (vm: RowVM) => void;
+  /**
+   * Desktop master-detail (design §3.1/§4): when present, a row CLICK selects this goal
+   * into the right detail pane (no navigation, no scoring) — every row is selectable, and
+   * the selected one is highlighted. Absent on mobile, where the row-main tap scores.
+   */
+  readonly onSelect?: (vm: RowVM) => void;
+  readonly selected?: boolean;
+}
+
+function RowBody({ vm, scoreLater }: { readonly vm: RowVM; readonly scoreLater: boolean }) {
+  return (
+    <div className="rowmain">
+      <RowMain vm={vm} scoreLater={scoreLater} />
+    </div>
+  );
+}
+
+export function GoalRow({
+  vm,
+  scoreLater,
+  onScoreLater,
+  onOpenScore,
+  onOpenDetail,
+  onSelect,
+  selected = false,
+}: GoalRowProps) {
+  const chip = chipForDashboardState(vm.state);
+  const isOwes = vm.state === "owes";
+  const tappable = vm.state === "owes" || vm.state === "has_point";
+  const right = rightValue(vm);
+  // Desktop: the whole row-main selects into the pane (any state). Mobile: only owes/scored
+  // rows are tappable, and the tap scores (unchanged).
+  const main =
+    onSelect !== undefined ? (
+      <button
+        type="button"
+        className="rowmain tap"
+        aria-label={`open ${goalLabelSpoken(vm.goalLabel, vm.goalText)}`}
+        onClick={() => onSelect(vm)}
+      >
+        <RowMain vm={vm} scoreLater={scoreLater} />
+      </button>
+    ) : tappable ? (
+      <button
+        type="button"
+        className="rowmain tap"
+        aria-label={`score ${goalLabelSpoken(vm.goalLabel, vm.goalText)}`}
+        onClick={() => onOpenScore(vm)}
+      >
+        <RowMain vm={vm} scoreLater={scoreLater} />
+      </button>
+    ) : (
+      <RowBody vm={vm} scoreLater={scoreLater} />
+    );
+  return (
+    <div
+      className={`row${isOwes ? " owes" : ""}${selected ? " selected" : ""}`}
+      data-testid="goal-row"
+    >
+      <StatusChip chip={chip} label={STATE_LABEL[vm.state]} />
+      <Avatar initials={vm.initials} />
+      {main}
+      {right !== null ? <div className="rowright">{right}</div> : null}
+      <div className="rowactions">
+        {isOwes ? <ScoreLaterButton vm={vm} on={scoreLater} onScoreLater={onScoreLater} /> : null}
+        {/* ↗ trend/history is on EVERY row — the always-available path to Goal Detail. */}
+        <TrendHistoryButton vm={vm} onOpenDetail={onOpenDetail} />
+      </div>
+    </div>
+  );
+}

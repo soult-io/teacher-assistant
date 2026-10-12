@@ -1,0 +1,14 @@
+{
+  // Type-checks the service worker (src/sw.ts) in a WebWorker context — the app's
+  // own tsconfig.json excludes it because it uses the DOM lib. vite-plugin-pwa does
+  // the actual SW compilation; this only gives `pnpm typecheck` coverage of it.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "WebWorker"],
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["src/sw.ts"]
+}

@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { collectFiles, fileContains, scanForPattern } from "../src/checks.js";
+import { collectFiles, fileContains, scanCodeForPattern, scanForPattern } from "../src/checks.js";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -37,7 +37,39 @@ describe("FERPA-guard (M14) — enforced from day one", () => {
   // the crypto package at all — decryption is exclusively client-side.
   it("no-decrypt: sync-relay does not import @teacher-assistant/crypto", () => {
     const relayFiles = collectFiles(join(repoRoot, "services", "sync-relay"), [".ts"]);
-    const hits = scanForPattern(relayFiles, /@teacher-assistant\/crypto/);
+    // Comment-stripped: a comment that merely explains the rule must not trip it.
+    const hits = scanCodeForPattern(relayFiles, /@teacher-assistant\/crypto/);
+    expect(hits, JSON.stringify(hits, null, 2)).toEqual([]);
+  });
+
+  // H-PUB-2 + FERPA cache boundary (D1 / Item-2a). The PWA service worker is the
+  // one place an HTTP response could be cached, so the privacy invariant is
+  // enforced right here: the SW caches ONLY the shell + build assets, and the app
+  // -shell update path (a deploy must reach a returning online visitor) is present.
+  const swFile = join(repoRoot, "apps", "pwa", "src", "sw.ts");
+
+  it("H-PUB-2: the PWA service worker ships the app-shell update path", () => {
+    expect(existsSync(swFile), "apps/pwa/src/sw.ts must exist").toBe(true);
+    // NetworkFirst navigations (fresh shell online) + prompt takeover so a deploy
+    // reaches a returning visitor on a normal reload, not only after unregister.
+    for (const token of [
+      "NavigationRoute",
+      "NetworkFirst",
+      "skipWaiting",
+      "clientsClaim",
+      "cleanupOutdatedCaches",
+    ]) {
+      expect(fileContains(swFile, token), `sw.ts must use ${token}`).toBe(true);
+    }
+  });
+
+  it("Item-2a: the service worker HTTP-caches no data endpoint", () => {
+    // No runtime cache in the SW code can ever match a data endpoint, so
+    // student-linked data stays server-uncached, served only from the local
+    // encrypted store. API fetches are not navigations, so the shell route misses
+    // them and they always reach the network uncached. Comment-stripped: a comment
+    // that merely explains which endpoints are excluded must not trip the rule.
+    const hits = scanCodeForPattern([swFile], /\/(sync|reference|differentiate)\b/);
     expect(hits, JSON.stringify(hits, null, 2)).toEqual([]);
   });
 

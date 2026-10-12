@@ -1,0 +1,33 @@
+{
+  "name": "@teacher-assistant/sync",
+  "version": "0.0.0",
+  "private": true,
+  "description": "M1 sync client: local Yjs docs (one per (period,purpose) stream), app-level encrypted-update relay client, offline queue, reconnect reconciliation (conflict-free, no overwrite/dup), ciphertext-only persistence, identity-clean errors. Client-side only.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@teacher-assistant/crypto": "workspace:*",
+    "@teacher-assistant/schema": "workspace:*",
+    "yjs": "13.6.32"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.5.8",
+    "@teacher-assistant/sync-relay": "workspace:*",
+    "@vitest/coverage-v8": "~4.1.10",
+    "typescript": "~5.9.3",
+    "vitest": "~4.1.10"
+  }
+}

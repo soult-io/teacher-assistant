@@ -12,6 +12,7 @@
     "dev": "pnpm -r --parallel run dev",
     "build": "pnpm -r run build",
     "test": "pnpm -r run test",
+    "test:coverage": "pnpm -r run test:coverage",
     "typecheck": "pnpm -r run typecheck",
     "lint": "biome check",
     "format": "biome format --write",

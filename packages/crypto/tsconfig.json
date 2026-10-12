@@ -1,6 +1,9 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    // Isomorphic (browser + Node). DOM provides the Web Crypto global,
+    // TextEncoder/TextDecoder — all standard in both runtimes.
+    "lib": ["ES2022", "DOM"],
     "outDir": "dist",
     "rootDir": "src",
     "noEmit": false

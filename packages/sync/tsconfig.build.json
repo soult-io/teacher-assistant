@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  // Production build only: exclude test files so the emitted dist carries no
+  // *.test.js and — critically — the build does not compile sync.test.ts, whose
+  // test-only imports (@teacher-assistant/sync-relay, a devDependency, and
+  // node's Buffer) are absent when a downstream consumer (the pwa image) builds
+  // this package in a services-less context. Type-checking of the tests stays on
+  // tsconfig.json via the `typecheck` script (run in the full workspace).
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}
