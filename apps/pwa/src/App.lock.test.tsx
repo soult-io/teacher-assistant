@@ -72,6 +72,21 @@ describe("App — Lock", () => {
   });
 });
 
+describe("App — a failed para bootstrap", () => {
+  it("locks the teacher session it already opened", async () => {
+    const h = harness();
+    render(
+      <App
+        bootstrap={h.bootstrap}
+        bootstrapPara={() => Promise.reject(new Error("para failed"))}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("unlock"));
+    await screen.findByText("Unlock failed. Check your passkey and try again.");
+    expect(h.locks.teacher).toBe(1);
+  });
+});
+
 describe("App — hidden page", () => {
   it("returning after more than 2 minutes locks synchronously, before any render", async () => {
     const h = harness();
@@ -91,11 +106,22 @@ describe("App — hidden page", () => {
   });
 });
 
+/**
+ * Unlock with real timers, then move to fake timers and give one real input, which
+ * re-arms the idle timer on the fake clock. No real time leaks into the fake clock.
+ */
+async function unlockThenFakeClock(h: ReturnType<typeof harness>) {
+  await unlockApp(h);
+  vi.useFakeTimers();
+  act(() => {
+    fireEvent.pointerDown(document.body);
+  });
+}
+
 describe("App — idle", () => {
   it("warns at 9 minutes, the warning does not extend the timer, and it locks at 10", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     const h = harness();
-    await unlockApp(h);
+    await unlockThenFakeClock(h);
     act(() => {
       vi.advanceTimersByTime(9 * MIN);
     });
@@ -111,9 +137,8 @@ describe("App — idle", () => {
   });
 
   it("Keep open (a real tap) resets the timer and hides the warning", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     const h = harness();
-    await unlockApp(h);
+    await unlockThenFakeClock(h);
     act(() => {
       vi.advanceTimersByTime(9 * MIN);
     });
@@ -128,5 +153,9 @@ describe("App — idle", () => {
     });
     expect(screen.getByTestId("header-line")).toBeInTheDocument();
     expect(h.locks).toEqual({ teacher: 0, para: 0 });
+    act(() => {
+      vi.advanceTimersByTime(5 * MIN);
+    });
+    expect(h.locks).toEqual({ teacher: 1, para: 1 });
   });
 });

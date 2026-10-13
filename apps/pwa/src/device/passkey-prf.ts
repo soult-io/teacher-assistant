@@ -106,10 +106,12 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
     }
     const response = credential.response as AuthenticatorAssertionResponse;
     const flags = new Uint8Array(response.authenticatorData)[FLAGS_OFFSET] ?? 0;
+    const first = (credential.getClientExtensionResults() as PrfClientOutputs).prf?.results?.first;
+    const prf = first === undefined ? null : copyBytes(first); // clears the browser's copy
     if ((flags & UV_FLAG) === 0) {
+      prf?.fill(0);
       throw new UserVerificationError();
     }
-    const first = (credential.getClientExtensionResults() as PrfClientOutputs).prf?.results?.first;
-    return { prf: first === undefined ? null : copyBytes(first) };
+    return { prf };
   }
 }

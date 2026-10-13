@@ -78,10 +78,11 @@ const GRANT_AAD = "ta-device-grant-v1";
  * or at least 10 digits. A 6-digit PIN is never accepted.
  */
 export function isAcceptablePassphrase(passphrase: string): boolean {
-  if (/^\d{10,}$/.test(passphrase)) {
+  const text = passphrase.normalize("NFC");
+  if (/^\d{10,}$/.test(text)) {
     return true;
   }
-  return [...passphrase].length >= 8 && /\p{L}/u.test(passphrase) && /\d/.test(passphrase);
+  return [...text].length >= 8 && /\p{L}/u.test(text) && /\d/.test(text);
 }
 
 /**
@@ -103,7 +104,8 @@ export function stretchPassphrase(passphrase: string, salt: Uint8Array): Uint8Ar
       "passphrase does not meet the rule (8+ with letters and digits, or 10+ digits)",
     );
   }
-  const bytes = utf8(passphrase);
+  // NFC, so the same visible passphrase typed as composed or decomposed accents matches.
+  const bytes = utf8(passphrase.normalize("NFC"));
   try {
     return argon2idModerate(bytes, salt);
   } finally {

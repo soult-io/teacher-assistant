@@ -36,6 +36,7 @@ import {
   probeTier,
   SetupNeedsHomeScreenError,
   UnlockBackoffError,
+  UnlockInProgressError,
   unlockBackoffMs,
   unlockDevice,
   WeakPassphraseError,
@@ -473,7 +474,56 @@ describe("the grant at rest is AEAD-protected", () => {
   });
 });
 
+describe("reviewer round 1 fixes", () => {
+  it("a clock that moved backwards never adds a wait below the third failure", async () => {
+    const store = new DeviceStore();
+    const { passkey } = await enrollTierW(store);
+    const record = await store.load();
+    if (record === null) {
+      throw new Error("expected a record");
+    }
+    await rawPut({ ...record, unlockFailures: { count: 2, lastAt: 5_000_000 } });
+    const device = await unlockDevice({ store, passkey, passphrase: "abcd1234", now: () => 1_000 });
+    device.lock();
+  });
+
+  it("refuses a second unlock while one is running", async () => {
+    const store = new DeviceStore();
+    const { passkey } = await enrollTierW(store);
+    const first = unlockDevice({ store, passkey, passphrase: "abcd1234" });
+    await expect(unlockDevice({ store, passkey, passphrase: "abcd1234" })).rejects.toThrow(
+      UnlockInProgressError,
+    );
+    (await first).lock();
+  });
+
+  it("composed and decomposed accents unlock the same vault (NFC)", async () => {
+    const store = new DeviceStore();
+    const composed = "caf\u00e9bleu7";
+    const { passkey } = await enrollTierW(store, composed);
+    const device = await unlockDevice({ store, passkey, passphrase: "cafe\u0301bleu7" });
+    device.lock();
+  });
+});
+
 describe("setup gates (A-3)", () => {
+  it("probeTier refuses on iOS outside the Home Screen app before any passkey is created", async () => {
+    const passkey = new FakePasskey(new Uint8Array(32).fill(1));
+    let created = 0;
+    passkey.create = () => {
+      created += 1;
+      return Promise.resolve({ credentialId: new Uint8Array(16) });
+    };
+    const ios: PlatformEnv = {
+      ...ANDROID,
+      userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)",
+      platform: "iPhone",
+      navigatorStandalone: false,
+    };
+    await expect(probeTier(passkey, ios)).rejects.toThrow(SetupNeedsHomeScreenError);
+    expect(created).toBe(0);
+  });
+
   it("iOS outside the Home Screen app: setup refused, nothing stored, no persist() call", async () => {
     let persistCalls = 0;
     const ios: PlatformEnv = {

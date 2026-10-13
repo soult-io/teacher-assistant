@@ -122,6 +122,12 @@ export class AutoLock {
     if (this.#locked) {
       return;
     }
+    // Timers can pause while the page stays visible (a sleeping laptop): the first input
+    // after a long idle must lock, not reset the clock.
+    if (Date.now() - this.#lastInput >= this.idleMs) {
+      this.#lock("idle");
+      return;
+    }
     this.#lastInput = Date.now();
     if (this.#warned) {
       this.#warned = false;

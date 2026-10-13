@@ -111,6 +111,15 @@ describe("idle", () => {
   });
 });
 
+describe("paused timers while visible (a sleeping laptop)", () => {
+  it("the first input after more than N idle locks instead of resetting the timer", () => {
+    const { doc, locks } = setup();
+    vi.setSystemTime(Date.now() + 11 * MIN); // no timer ran; the page never went hidden
+    doc.tap();
+    expect(locks).toEqual(["idle"]);
+  });
+});
+
 describe("hidden page", () => {
   it("locks after M minutes hidden", () => {
     const { doc, locks } = setup();

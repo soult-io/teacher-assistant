@@ -189,14 +189,20 @@ export function App({
   const lock = useCallback((reason: LockReason) => {
     const held = sessionsRef.current;
     sessionsRef.current = null;
-    held?.teacher.lock();
-    held?.para.lock();
-    flushSync(() => {
-      setSessions(null);
-      setPhase("locked");
-      setLockReason(reason);
-      setLockWarning(false);
-    });
+    try {
+      held?.teacher.lock();
+    } finally {
+      try {
+        held?.para.lock();
+      } finally {
+        flushSync(() => {
+          setSessions(null);
+          setPhase("locked");
+          setLockReason(reason);
+          setLockWarning(false);
+        });
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -224,7 +230,13 @@ export function App({
       .then(async (teacher) => {
         // Enter the para-device session from the handoff (wrapped Period DEK only) —
         // it opens ONLY the para stream and cannot decrypt master.
-        const para = await bootstrapPara(teacher.paraHandoff);
+        let para: ParaSession;
+        try {
+          para = await bootstrapPara(teacher.paraHandoff);
+        } catch (err) {
+          teacher.lock(); // never leave MK and the period keys behind a failed unlock
+          throw err;
+        }
         // The local encrypted store is open — unlock has SUCCEEDED. The relay reconcile
         // is best-effort and offline-first: fire-and-forget, and swallow even a contract
         // violation so it can NEVER surface as an unlock error or an unhandled rejection.

@@ -64,7 +64,7 @@ export class DeviceLockedError extends Error {
 /** Fail closed: this device cannot produce its unlock (Tier P PRF missing, Kdev gone, vault damaged). */
 export class DeviceCannotUnlockError extends Error {
   constructor() {
-    super("this device can't unlock — remove it and add it again");
+    super("This device can't unlock anymore. Remove it from your other device and add it again.");
     this.name = "DeviceCannotUnlockError";
   }
 }
@@ -78,7 +78,7 @@ export class NoDeviceError extends Error {
 
 export class WeakPassphraseError extends Error {
   constructor() {
-    super("use at least 8 characters with letters and numbers, or at least 10 numbers");
+    super("Use at least 8 characters with letters and numbers, or at least 10 numbers.");
     this.name = "WeakPassphraseError";
   }
 }
@@ -92,7 +92,7 @@ export class PassphraseRequiredError extends Error {
 
 export class WrongPassphraseError extends Error {
   constructor() {
-    super("that passphrase didn't match");
+    super("That passphrase didn't match. Try again.");
     this.name = "WrongPassphraseError";
   }
 }
@@ -100,7 +100,7 @@ export class WrongPassphraseError extends Error {
 /** Thrown while the on-device wait after repeated wrong passphrases is running. */
 export class UnlockBackoffError extends Error {
   constructor(readonly retryAfterMs: number) {
-    super("too many tries — wait before trying again");
+    super("Too many tries. Wait, then try again.");
     this.name = "UnlockBackoffError";
   }
 }
@@ -108,7 +108,7 @@ export class UnlockBackoffError extends Error {
 /** iOS outside the Home Screen app: setup is refused (A-3). */
 export class SetupNeedsHomeScreenError extends Error {
   constructor() {
-    super("add the app to the Home Screen first");
+    super("Add to Home Screen first");
     this.name = "SetupNeedsHomeScreenError";
   }
 }
@@ -142,7 +142,14 @@ export function unlockBackoffMs(count: number): number {
  * Enrollment step 1: create the passkey (UV required) and run a test get(). PRF output
  * → Tier P; none → Tier W. The tier is then fixed for this device.
  */
-export async function probeTier(passkey: PasskeyPrfPort): Promise<TierProbe> {
+export async function probeTier(
+  passkey: PasskeyPrfPort,
+  platform: PlatformEnv = browserPlatform(),
+): Promise<TierProbe> {
+  // A-3 before the ceremony: no passkey is created in an iOS Safari tab (no orphan credential).
+  if (isIosOutsideHomeScreen(platform)) {
+    throw new SetupNeedsHomeScreenError();
+  }
   const { credentialId } = await passkey.create();
   const { prf } = await passkey.assert(credentialId);
   return { credentialId, tier: prf === null ? "passphrase" : "prf", prf };
@@ -252,6 +259,34 @@ export class UnlockedDevice implements RequestSigner {
   }
 }
 
+/** The tier's KEK at enrollment, plus the Tier W fields stored beside the vault. */
+async function enrollmentKek(input: CreateVaultInput): Promise<{
+  readonly kek: Uint8Array;
+  readonly tierFields: Pick<DeviceRecord, "pwSalt" | "kdev">;
+}> {
+  const { probe } = input;
+  if (probe.tier === "prf") {
+    if (probe.prf === null) {
+      throw new DeviceCannotUnlockError();
+    }
+    try {
+      return { kek: deriveTierPKek(probe.prf), tierFields: {} };
+    } finally {
+      zeroize(probe.prf);
+    }
+  }
+  const passphrase = input.passphrase;
+  if (passphrase === undefined || !isAcceptablePassphrase(passphrase)) {
+    throw new WeakPassphraseError();
+  }
+  const kdev = await generateKdev();
+  const salt = newVaultSalt();
+  return {
+    kek: await deriveTierWKek(kdev, passphrase, salt),
+    tierFields: { pwSalt: toBase64(salt), kdev },
+  };
+}
+
 export interface CreateVaultInput {
   readonly store: DeviceStore;
   readonly probe: TierProbe;
@@ -279,47 +314,39 @@ export async function createDeviceVault(
     throw new DeviceAlreadyEnrolledError();
   }
   const { probe } = input;
-  let kek: Uint8Array;
-  let tierFields: Pick<DeviceRecord, "pwSalt" | "kdev"> = {};
-  if (probe.tier === "prf") {
-    if (probe.prf === null) {
-      throw new DeviceCannotUnlockError();
-    }
-    kek = deriveTierPKek(probe.prf);
-    zeroize(probe.prf);
-  } else {
-    const passphrase = input.passphrase;
-    if (passphrase === undefined || !isAcceptablePassphrase(passphrase)) {
-      throw new WeakPassphraseError();
-    }
-    const kdev = await generateKdev();
-    const salt = newVaultSalt();
-    kek = await deriveTierWKek(kdev, passphrase, salt);
-    tierFields = { pwSalt: toBase64(salt), kdev };
-  }
-  const generated = generateVaultSecrets();
-  const record: DeviceRecord = {
-    version: 1,
-    signPk: toBase64(generated.signPk),
-    boxPk: toBase64(generated.boxPk),
-    tier: probe.tier,
-    credentialId: toBase64(probe.credentialId),
-    ...tierFields,
-    vault: "",
-    role: input.role,
-    enrolled: false,
-  };
+  let kek: Uint8Array | null = null;
+  let secrets: VaultSecrets | null = null;
   try {
-    const vault = sealVault(kek, generated.secrets, bindingOf(record));
+    const enrollment = await enrollmentKek(input);
+    kek = enrollment.kek;
+    const tierFields = enrollment.tierFields;
+    const generated = generateVaultSecrets();
+    secrets = generated.secrets;
+    const record: DeviceRecord = {
+      version: 1,
+      signPk: toBase64(generated.signPk),
+      boxPk: toBase64(generated.boxPk),
+      tier: probe.tier,
+      credentialId: toBase64(probe.credentialId),
+      ...tierFields,
+      vault: "",
+      role: input.role,
+      enrolled: false,
+    };
+    const vault = sealVault(kek, secrets, bindingOf(record));
     await input.store.create({ ...record, vault: toBase64(vault) });
+    const persisted = await requestPersistentStorage(platform);
+    return { device: new UnlockedDevice(record, secrets), persisted };
   } catch (err) {
-    zeroizeVaultSecrets(generated.secrets);
+    if (secrets !== null) {
+      zeroizeVaultSecrets(secrets);
+    }
     throw err;
   } finally {
-    zeroize(kek);
+    if (kek !== null) {
+      zeroize(kek);
+    }
   }
-  const persisted = await requestPersistentStorage(platform);
-  return { device: new UnlockedDevice(record, generated.secrets), persisted };
 }
 
 export interface UnlockInput {
@@ -397,8 +424,33 @@ function openTierP(record: DeviceRecord, prf: Uint8Array | null): VaultSecrets {
   }
 }
 
-/** Unlock: the passkey gesture, then the tier's KEK, then the vault. */
+let unlockRunning = false;
+
+/** Thrown when an unlock starts while another is still running (one attempt at a time). */
+export class UnlockInProgressError extends Error {
+  constructor() {
+    super("an unlock is already running");
+    this.name = "UnlockInProgressError";
+  }
+}
+
+/**
+ * Unlock: the passkey gesture, then the tier's KEK, then the vault. One attempt at a time,
+ * so parallel guesses cannot all pass the backoff check before any failure is recorded.
+ */
 export async function unlockDevice(input: UnlockInput): Promise<UnlockedDevice> {
+  if (unlockRunning) {
+    throw new UnlockInProgressError();
+  }
+  unlockRunning = true;
+  try {
+    return await unlockOnce(input);
+  } finally {
+    unlockRunning = false;
+  }
+}
+
+async function unlockOnce(input: UnlockInput): Promise<UnlockedDevice> {
   await sodiumReady();
   const record = await input.store.load();
   if (record === null) {
@@ -407,7 +459,8 @@ export async function unlockDevice(input: UnlockInput): Promise<UnlockedDevice> 
   const now = (input.now ?? Date.now)();
   if (record.tier === "passphrase" && record.unlockFailures !== undefined) {
     const wait = unlockBackoffMs(record.unlockFailures.count);
-    const remaining = record.unlockFailures.lastAt + wait - now;
+    // A clock that moved backwards counts as no time elapsed, never as a longer wait.
+    const remaining = wait - Math.max(0, now - record.unlockFailures.lastAt);
     if (remaining > 0) {
       throw new UnlockBackoffError(remaining);
     }
@@ -421,7 +474,12 @@ export async function unlockDevice(input: UnlockInput): Promise<UnlockedDevice> 
       zeroize(prf); // Tier W ignores PRF output; the tier never changes after enrollment
     }
     secrets = await openTierW(input, record, now);
-    await clearFailures(input.store, record);
+    try {
+      await clearFailures(input.store, record);
+    } catch (err) {
+      zeroizeVaultSecrets(secrets);
+      throw err;
+    }
   }
   return new UnlockedDevice(record, secrets);
 }

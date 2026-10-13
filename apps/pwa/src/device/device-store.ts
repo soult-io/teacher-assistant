@@ -102,14 +102,20 @@ export class DeviceStore {
   }
 
   #database(): Promise<IDBDatabase> {
-    this.#db ??= openDb(this.#factory).then((db) => {
-      // Yield to a delete or upgrade from elsewhere (a wipe, another tab); reopen on next use.
-      db.onversionchange = () => {
-        db.close();
-        this.#db = null;
-      };
-      return db;
-    });
+    this.#db ??= openDb(this.#factory).then(
+      (db) => {
+        // Yield to a delete or upgrade from elsewhere (a wipe, another tab); reopen on next use.
+        db.onversionchange = () => {
+          db.close();
+          this.#db = null;
+        };
+        return db;
+      },
+      (err: unknown) => {
+        this.#db = null; // a failed open is retried on the next call, not cached
+        throw err;
+      },
+    );
     return this.#db;
   }
 
