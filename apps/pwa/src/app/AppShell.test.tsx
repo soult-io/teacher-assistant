@@ -18,6 +18,7 @@ function base(over: Partial<AppShellProps>): AppShellProps {
     onRole: vi.fn(),
     theme: "system",
     onThemeCycle: vi.fn(),
+    onLock: vi.fn(),
     tab: "track",
     onTab: vi.fn(),
     title: "Weekly Dashboard",
@@ -87,5 +88,14 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "‹ Dashboard" })).toBeNull();
     rerender(<AppShell {...base({ isDesktop: true, nav, onBack, title: "Goal Detail" })} />);
     expect(screen.getByRole("button", { name: "‹ Dashboard" })).toBeInTheDocument();
+  });
+});
+
+describe("AppShell — the Lock action (EU-6)", () => {
+  it.each([false, true])("isDesktop=%s: one tap on Lock calls onLock, no confirm", (isDesktop) => {
+    const onLock = vi.fn();
+    render(<AppShell {...base({ isDesktop, onLock })} />);
+    screen.getByTestId("lock").click();
+    expect(onLock).toHaveBeenCalledTimes(1);
   });
 });

@@ -91,6 +91,7 @@ export function makeFakeSession(seed: SyntheticSeed): Session {
     },
     paraHandoff: handoff,
     sync: () => Promise.resolve(false),
+    lock: () => {},
   };
 }
 
@@ -108,5 +109,6 @@ export function makeFakeParaSession(handoff: ParaHandoff): Promise<ParaSession> 
     refreshRecords: () => Promise.resolve(),
     readParaRecords: () => readParaVisible(para),
     sync: () => Promise.resolve(false),
+    lock: () => {},
   });
 }

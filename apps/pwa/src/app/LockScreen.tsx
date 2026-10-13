@@ -7,10 +7,13 @@ export function LockScreen({
   onUnlock,
   busy,
   error,
+  reason = null,
 }: {
   readonly onUnlock: () => void;
   readonly busy: boolean;
   readonly error: string | null;
+  /** Why the app locked (flows U3), shown only after a lock. No student data. */
+  readonly reason?: string | null;
 }) {
   return (
     <div className="lock">
@@ -35,6 +38,11 @@ export function LockScreen({
         >
           {busy ? "Unlocking…" : "Unlock with passkey"}
         </button>
+        {reason !== null ? (
+          <p className="locknote" data-testid="lock-reason">
+            {reason}
+          </p>
+        ) : null}
         <p className="err" role="alert">
           {error ?? ""}
         </p>

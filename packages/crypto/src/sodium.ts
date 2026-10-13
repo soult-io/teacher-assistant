@@ -133,8 +133,8 @@ export function pwhashSaltBytes(): number {
  * key with Argon2id. INTERACTIVE parameters are used deliberately: the recovery
  * code carries ≥128 bits of entropy by construction (it is machine-generated, not
  * a human passphrase), so the heavier MODERATE/SENSITIVE parameters — meant to
- * slow brute force of weak passphrases — buy nothing here. The system has no
- * password path (H-PUB-1), so no low-entropy secret is ever stretched.
+ * slow brute force of weak passphrases — buy nothing here. The one low-entropy
+ * secret, the Tier W local unlock passphrase, uses argon2idModerate instead.
  */
 export function deriveKeyFromSecret(secret: Uint8Array, salt: Uint8Array): Uint8Array {
   const sodium = s();
@@ -145,6 +145,29 @@ export function deriveKeyFromSecret(secret: Uint8Array, salt: Uint8Array): Uint8
     sodium.crypto_pwhash_OPSLIMIT_INTERACTIVE,
     sodium.crypto_pwhash_MEMLIMIT_INTERACTIVE,
     sodium.crypto_pwhash_ALG_ARGON2ID13,
+  );
+}
+
+/**
+ * The Argon2id cost for a human passphrase (Tier W vault, device-enrollment-spec DN-1):
+ * libsodium MODERATE (opslimit 3, memlimit 256 MiB). Unlike the recovery code, a
+ * passphrase is low-entropy, so the heavier cost is what bounds guessing. Never lower.
+ */
+export const argon2idModerateParams = {
+  opsLimit: (): number => s().crypto_pwhash_OPSLIMIT_MODERATE,
+  memLimit: (): number => s().crypto_pwhash_MEMLIMIT_MODERATE,
+  alg: (): number => s().crypto_pwhash_ALG_ARGON2ID13,
+} as const;
+
+/** Argon2id(secret, salt) → 32 bytes at argon2idModerateParams. */
+export function argon2idModerate(secret: Uint8Array, salt: Uint8Array): Uint8Array {
+  return s().crypto_pwhash(
+    32,
+    secret,
+    salt,
+    argon2idModerateParams.opsLimit(),
+    argon2idModerateParams.memLimit(),
+    argon2idModerateParams.alg(),
   );
 }
 

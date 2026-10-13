@@ -25,8 +25,15 @@ import {
 import { buildToScoreQueue, type DashboardLens } from "@teacher-assistant/store";
 import { SyncError } from "@teacher-assistant/sync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
+import {
+  AutoLock,
+  HIDDEN_DEFAULT_MS,
+  IDLE_DEFAULT_MS,
+  type LockReason,
+} from "./device/auto-lock.js";
 import { QuickScoreSheet, type ParaFixEdit } from "./app/QuickScoreSheet.js";
 import { BaselineScreen } from "./app/screens/baseline/BaselineScreen.js";
 import { DashboardScreen } from "./app/screens/DashboardScreen.js";
@@ -170,7 +177,45 @@ export function App({
   const [phase, setPhase] = useState<Phase>("locked");
   const [sessions, setSessions] = useState<Sessions | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lockReason, setLockReason] = useState<LockReason | null>(null);
+  const [lockWarning, setLockWarning] = useState(false);
+  const autoLockRef = useRef<AutoLock | null>(null);
   const nowRef = useRef<Date>(new Date());
+  const sessionsRef = useRef<Sessions | null>(null);
+
+  // Lock (device-enrollment-spec §3.1): destroy BOTH sessions' keys — the para keyring
+  // included — then drop the sessions. flushSync commits the lock screen inside the
+  // triggering event, so on a resume from a hidden page nothing else renders first (N2).
+  const lock = useCallback((reason: LockReason) => {
+    const held = sessionsRef.current;
+    sessionsRef.current = null;
+    held?.teacher.lock();
+    held?.para.lock();
+    flushSync(() => {
+      setSessions(null);
+      setPhase("locked");
+      setLockReason(reason);
+      setLockWarning(false);
+    });
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "ready") {
+      return;
+    }
+    const controller = new AutoLock({
+      surface: document,
+      onLock: lock,
+      onWarn: () => setLockWarning(true),
+      onWarnClear: () => setLockWarning(false),
+    });
+    controller.start();
+    autoLockRef.current = controller;
+    return () => {
+      controller.stop();
+      autoLockRef.current = null;
+    };
+  }, [phase, lock]);
 
   const unlock = useCallback(() => {
     setError(null);
@@ -183,7 +228,9 @@ export function App({
         // The local encrypted store is open — unlock has SUCCEEDED. The relay reconcile
         // is best-effort and offline-first: fire-and-forget, and swallow even a contract
         // violation so it can NEVER surface as an unlock error or an unhandled rejection.
+        sessionsRef.current = { teacher, para };
         setSessions({ teacher, para });
+        setLockReason(null);
         setPhase("ready");
         void teacher.sync().catch(() => {});
       })
@@ -199,18 +246,60 @@ export function App({
   if (phase !== "ready" || sessions === null) {
     return (
       <div className="phone">
-        <LockScreen onUnlock={unlock} busy={phase === "unlocking"} error={error} />
+        <LockScreen
+          onUnlock={unlock}
+          busy={phase === "unlocking"}
+          error={error}
+          reason={lockReason === null ? null : lockReasonCopy(lockReason)}
+        />
       </div>
     );
   }
   return (
-    <ReadyApp
-      teacher={sessions.teacher}
-      para={sessions.para}
-      online={online}
-      theme={theme}
-      now={nowRef.current}
-    />
+    <>
+      <ReadyApp
+        teacher={sessions.teacher}
+        para={sessions.para}
+        online={online}
+        theme={theme}
+        now={nowRef.current}
+        onLock={() => {
+          if (autoLockRef.current === null) {
+            lock("manual");
+          } else {
+            autoLockRef.current.lockNow();
+          }
+        }}
+      />
+      {lockWarning ? <LockWarning onKeepOpen={() => setLockWarning(false)} /> : null}
+    </>
+  );
+}
+
+/** The lock screen's reason line (flows U3). Minutes come from the auto-lock defaults. */
+function lockReasonCopy(reason: LockReason): string {
+  switch (reason) {
+    case "manual":
+      return "You locked the app.";
+    case "idle":
+      return `Locked after ${IDLE_DEFAULT_MS / 60_000} minutes without use. Everything you saved is still here.`;
+    case "hidden":
+      return `Locked because you left the app for more than ${HIDDEN_DEFAULT_MS / 60_000} minutes.`;
+  }
+}
+
+/**
+ * The idle warning at N − 1 (flows U3). Showing it never extends the timer (A-10); the
+ * tap on Keep open is ordinary input, which is what resets the timer.
+ */
+function LockWarning({ onKeepOpen }: { readonly onKeepOpen: () => void }) {
+  return (
+    <div className="locktoast" role="status" data-testid="lock-warning">
+      <span>Locking in 60 seconds</span>
+      <button type="button" className="btn primary" onClick={onKeepOpen}>
+        Keep open
+      </button>
+    </div>
   );
 }
 
@@ -220,12 +309,14 @@ function ReadyApp({
   online,
   theme,
   now,
+  onLock,
 }: {
   readonly teacher: Session;
   readonly para: ParaSession;
   readonly online: boolean;
   readonly theme: ThemeControl;
   readonly now: Date;
+  readonly onLock: () => void;
 }) {
   const { records, apply, refresh } = useSessionRecords(teacher);
   const isDesktop = useIsDesktop();
@@ -618,6 +709,7 @@ function ReadyApp({
       onRole={setRole}
       theme={theme.choice}
       onThemeCycle={theme.cycle}
+      onLock={onLock}
       tab={tab}
       onTab={onTab}
       title={shell.title}

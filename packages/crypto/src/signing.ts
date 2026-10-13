@@ -6,10 +6,12 @@
 // package, because it never decrypts).
 //
 // The signing PRIVATE key, like every private key, never crosses the wire and is
-// never serialised; in the browser it belongs in a non-extractable WebCrypto /
-// OS-keystore slot (see the DeviceKeyStore contract in @teacher-assistant/sync).
+// never serialised. In the browser it lives ONLY inside the device vault (vault.ts) and
+// is unwrapped into memory after unlock — never as a WebCrypto key at rest, which would
+// stay usable while locked (device-enrollment-spec rev 2.1 N1).
 
-import { signDetached, type SodiumSignKeyPair, signKeypair } from "./sodium.js";
+import { KeyringDestroyedError } from "./keyring.js";
+import { isAllZero, signDetached, type SodiumSignKeyPair, signKeypair } from "./sodium.js";
 
 /** An Ed25519 device signing keypair. */
 export type DeviceSigningKeypair = SodiumSignKeyPair;
@@ -19,8 +21,15 @@ export function generateSigningKeypair(): DeviceSigningKeypair {
   return signKeypair();
 }
 
-/** Sign `message` with a device signing private key (detached Ed25519). */
+/**
+ * Sign `message` with a device signing private key (detached Ed25519). An all-zero key
+ * was zeroized by a lock; it throws KeyringDestroyedError rather than sign with zeros
+ * (device-enrollment-spec §11 EU-6: while locked, no signing operation is possible).
+ */
 export function sign(message: Uint8Array, privateKey: Uint8Array): Uint8Array {
+  if (isAllZero(privateKey)) {
+    throw new KeyringDestroyedError();
+  }
   return signDetached(message, privateKey);
 }
 
