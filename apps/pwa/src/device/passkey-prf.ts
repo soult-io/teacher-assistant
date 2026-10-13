@@ -34,6 +34,8 @@ const PRF_INPUT = new TextEncoder().encode("ta-vault-prf-v1");
 const UV_FLAG = 0x04;
 const FLAGS_OFFSET = 32; // authenticatorData = rpIdHash (32) ‖ flags (1) ‖ …
 const RP_NAME = "Teacher Assistant";
+// Bounds a ceremony that never settles, so one hung prompt cannot block later unlocks.
+const CEREMONY_TIMEOUT_MS = 120_000;
 
 interface PrfClientOutputs {
   readonly prf?: { readonly results?: { readonly first?: ArrayBuffer | ArrayBufferView } };
@@ -76,6 +78,7 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
           displayName: RP_NAME,
         },
         challenge: randomChallenge(),
+        timeout: CEREMONY_TIMEOUT_MS,
         pubKeyCredParams: [
           { type: "public-key", alg: -8 }, // EdDSA
           { type: "public-key", alg: -7 }, // ES256
@@ -96,6 +99,7 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
       publicKey: {
         challenge: randomChallenge(),
         rpId: this.#rpId,
+        timeout: CEREMONY_TIMEOUT_MS,
         allowCredentials: [{ type: "public-key", id: new Uint8Array(credentialId) }],
         userVerification: "required",
         extensions: { prf: { eval: { first: PRF_INPUT } } } as AuthenticationExtensionsClientInputs,

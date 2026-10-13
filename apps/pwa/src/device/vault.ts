@@ -459,8 +459,15 @@ async function unlockOnce(input: UnlockInput): Promise<UnlockedDevice> {
   const now = (input.now ?? Date.now)();
   if (record.tier === "passphrase" && record.unlockFailures !== undefined) {
     const wait = unlockBackoffMs(record.unlockFailures.count);
-    // A clock that moved backwards counts as no time elapsed, never as a longer wait.
-    const remaining = wait - Math.max(0, now - record.unlockFailures.lastAt);
+    const { lastAt } = record.unlockFailures;
+    if (now < lastAt) {
+      // The clock moved backwards: restart the wait from now rather than from a future time.
+      await input.store.update((r) => ({
+        ...r,
+        unlockFailures: { count: record.unlockFailures?.count ?? 0, lastAt: now },
+      }));
+    }
+    const remaining = wait - Math.max(0, now - lastAt);
     if (remaining > 0) {
       throw new UnlockBackoffError(remaining);
     }

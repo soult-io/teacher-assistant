@@ -487,6 +487,25 @@ describe("reviewer round 1 fixes", () => {
     device.lock();
   });
 
+  it("after 3+ failures, a backwards clock restarts the wait from now (not from the future)", async () => {
+    const store = new DeviceStore();
+    const { passkey } = await enrollTierW(store);
+    const record = await store.load();
+    if (record === null) {
+      throw new Error("expected a record");
+    }
+    await rawPut({ ...record, unlockFailures: { count: 3, lastAt: 10_000_000 } });
+    const first = await unlockDevice({
+      store,
+      passkey,
+      passphrase: "abcd1234",
+      now: () => 1_000,
+    }).catch((e: unknown) => e);
+    expect((first as UnlockBackoffError).retryAfterMs).toBe(30_000);
+    const later = await unlockDevice({ store, passkey, passphrase: "abcd1234", now: () => 31_000 });
+    later.lock();
+  });
+
   it("refuses a second unlock while one is running", async () => {
     const store = new DeviceStore();
     const { passkey } = await enrollTierW(store);
