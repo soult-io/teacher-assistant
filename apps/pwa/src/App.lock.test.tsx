@@ -112,6 +112,10 @@ describe("App — hidden page", () => {
  */
 async function unlockThenFakeClock(h: ReturnType<typeof harness>) {
   await unlockApp(h);
+  // Flush React's passive effects (the AutoLock is created in one) BEFORE the clock is
+  // faked: under load the effect can otherwise run late on the fake clock and shift every
+  // deadline past the advance window.
+  await act(async () => {});
   vi.useFakeTimers();
   act(() => {
     fireEvent.pointerDown(document.body);
