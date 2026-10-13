@@ -37,6 +37,8 @@ export interface AppShellProps {
   readonly onRole: (role: Role) => void;
   readonly theme: ThemeChoice;
   readonly onThemeCycle: () => void;
+  /** The explicit Lock action (device-enrollment-spec §3.1): 1 tap, no confirm. */
+  readonly onLock: () => void;
   readonly tab: Tab;
   readonly onTab: (tab: Tab) => void;
   /** Desktop top-bar title (current screen). Unused on mobile. */
@@ -107,6 +109,14 @@ function ThemeToggle({
   );
 }
 
+function LockButton({ onLock }: { readonly onLock: () => void }) {
+  return (
+    <button type="button" className="iconbtn" onClick={onLock} title="Lock" data-testid="lock">
+      🔒 Lock
+    </button>
+  );
+}
+
 function TabButton({
   active,
   label,
@@ -130,7 +140,8 @@ function TabButton({
 
 /** MOBILE chrome — the exact prototype markup (status bar · screen · Track/Plan tab bar). */
 function MobileChrome(props: AppShellProps) {
-  const { online, role, onRole, theme, onThemeCycle, tab, onTab, children, overlay } = props;
+  const { online, role, onRole, theme, onThemeCycle, onLock, tab, onTab, children, overlay } =
+    props;
   return (
     <div className="phone" id="phone">
       <div className="statusbar">
@@ -138,6 +149,7 @@ function MobileChrome(props: AppShellProps) {
         <span className="grow" />
         <RoleSeg role={role} onRole={onRole} />
         <ThemeToggle theme={theme} onThemeCycle={onThemeCycle} />
+        <LockButton onLock={onLock} />
       </div>
 
       <div className="screen" id="screen">
@@ -256,8 +268,20 @@ function Sidebar({
 
 /** DESKTOP chrome — persistent sidebar + thin top bar + capped, centered content column. */
 function DesktopShell(props: AppShellProps) {
-  const { online, role, onRole, theme, onThemeCycle, tab, onTab, title, onBack, nav, paraContext } =
-    props;
+  const {
+    online,
+    role,
+    onRole,
+    theme,
+    onThemeCycle,
+    onLock,
+    tab,
+    onTab,
+    title,
+    onBack,
+    nav,
+    paraContext,
+  } = props;
   return (
     <div className="phone shell" id="phone">
       <Sidebar
@@ -284,6 +308,7 @@ function DesktopShell(props: AppShellProps) {
             <OfflineBadge online={online} />
             <RoleSeg role={role} onRole={onRole} />
             <ThemeToggle theme={theme} onThemeCycle={onThemeCycle} />
+            <LockButton onLock={onLock} />
           </div>
         </div>
         <div className="screen" id="screen">

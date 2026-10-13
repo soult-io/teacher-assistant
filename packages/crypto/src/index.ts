@@ -13,6 +13,8 @@
 //   - Enrollment binds BOTH device keys (box + signing) into the typed code; a para
 //     grant can never carry MK; Keyring.destroy() zeroizes keys and ends the keyring.
 //   - Rotating a Period DEK revokes a para's post-rotation read access.
+//   - The device vault wraps the device private keys once under a tiered KEK (PRF, or
+//     HMAC(non-extractable Kdev, Argon2id ≥ MODERATE)); a zeroized signing key never signs.
 
 export { sodiumReady, bytesEqual, zeroize, toBase64, fromBase64, utf8 } from "./sodium.js";
 export {
@@ -75,3 +77,22 @@ export {
   type PairingPurpose,
 } from "./pairing.js";
 export { rotatePeriodKey } from "./rotation.js";
+export {
+  isAcceptablePassphrase,
+  PASSPHRASE_ARGON2,
+  newVaultSalt,
+  stretchPassphrase,
+  deriveTierPKek,
+  generateKdev,
+  deriveTierWKek,
+  generateVaultSecrets,
+  sealVault,
+  openVault,
+  zeroizeVaultSecrets,
+  sealGrantAtRest,
+  openGrantAtRest,
+  VaultOpenError,
+  type VaultTier,
+  type VaultBinding,
+  type VaultSecrets,
+} from "./vault.js";

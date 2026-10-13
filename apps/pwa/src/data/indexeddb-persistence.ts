@@ -9,31 +9,11 @@
 // (also ciphertext-only) adapter instead — never localStorage of plaintext.
 
 import type { PersistedStream, PersistenceAdapter } from "@teacher-assistant/sync";
+import { openSingleStoreDb, promisifyRequest } from "./idb.js";
 
 const DB_NAME = "ta-sync";
 const STORE = "streams";
 const DB_VERSION = 1;
-
-function promisifyRequest<T>(req: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
-  });
-}
-
-function openDb(factory: IDBFactory): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = factory.open(DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      const db = req.result;
-      if (!db.objectStoreNames.contains(STORE)) {
-        db.createObjectStore(STORE); // keyed explicitly by opaque docId (no in-value key)
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("IndexedDB open failed"));
-  });
-}
 
 /**
  * Ciphertext-only IndexedDB persistence. Keyed by opaque doc id; the stored
@@ -53,7 +33,7 @@ export class IndexedDbPersistence implements PersistenceAdapter {
   }
 
   #database(): Promise<IDBDatabase> {
-    this.#db ??= openDb(this.#factory);
+    this.#db ??= openSingleStoreDb(this.#factory, DB_NAME, DB_VERSION, STORE);
     return this.#db;
   }
 

@@ -609,6 +609,25 @@ button.btn:disabled {
   min-height: 1rem;
 }
 
+/* idle auto-lock warning (EU-6, flows U3): bottom toast, high contrast, large */
+.locktoast {
+  position: fixed;
+  left: 50%;
+  bottom: 1.2rem;
+  transform: translateX(-50%);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 1rem;
+  border-radius: 12px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 1.05rem;
+  font-weight: 700;
+  max-width: calc(100vw - 2rem);
+}
+
 /* coming-soon stub (Plan tab) */
 .comingsoon {
   display: inline-flex;

@@ -20,7 +20,7 @@ import { EncryptedStream } from "./doc.js";
 import { SyncEngine } from "./engine.js";
 import { RelayRequestError } from "./errors.js";
 import { InMemoryPersistence } from "./persistence.js";
-import { RelayClient, type Transport } from "./relay-client.js";
+import { keypairSigner, RelayClient, type Transport } from "./relay-client.js";
 
 beforeAll(async () => {
   await sodiumReady();
@@ -43,7 +43,7 @@ describe("RelayClient.pull — 404 is an empty pull, not an error", () => {
         () => ({ status: 404, body: jsonBody({ error: "not_found", record_id: "r1" }) }),
         () => ({ status: 200, body: jsonBody({ cursor: "unused" }) }),
       ),
-      signingKeypair: generateSigningKeypair(),
+      signer: keypairSigner(generateSigningKeypair()),
     });
 
     const fromStart = await client.pull("doc-1", "scope-1", null);
@@ -60,7 +60,7 @@ describe("RelayClient.pull — 404 is an empty pull, not an error", () => {
         () => ({ status: 500, body: jsonBody({ error: "server_error", record_id: "r2" }) }),
         () => ({ status: 200, body: jsonBody({ cursor: "unused" }) }),
       ),
-      signingKeypair: generateSigningKeypair(),
+      signer: keypairSigner(generateSigningKeypair()),
     });
     await expect(client.pull("doc-1", "scope-1", null)).rejects.toBeInstanceOf(RelayRequestError);
   });
@@ -84,7 +84,7 @@ describe("SyncEngine.sync — a 404 pull still pushes the local backlog", () => 
     const stream = new EncryptedStream(newOpaqueId(), period.scopeTag, new ParaKeyring([period]));
     const engine = new SyncEngine(
       stream,
-      new RelayClient({ transport, signingKeypair: generateSigningKeypair() }),
+      new RelayClient({ transport, signer: keypairSigner(generateSigningKeypair()) }),
       new InMemoryPersistence(),
     );
 
@@ -94,5 +94,30 @@ describe("SyncEngine.sync — a 404 pull still pushes the local backlog", () => 
     await expect(engine.sync()).resolves.toBeUndefined(); // no throw
     expect(engine.pendingCount).toBe(0); // backlog was pushed
     expect(pushed).toHaveLength(1);
+  });
+});
+
+describe("EU-6 — a locked signer never reaches the transport", () => {
+  it("push and pull reject with the signer's error and send nothing", async () => {
+    let sent = 0;
+    const transport: Transport = () => {
+      sent += 1;
+      return Promise.resolve({ status: 200, body: new Uint8Array(0) });
+    };
+    class LockedError extends Error {}
+    const relay = new RelayClient({
+      transport,
+      signer: {
+        publicKey: generateSigningKeypair().publicKey,
+        sign: () => {
+          throw new LockedError("locked");
+        },
+      },
+    });
+    await expect(relay.push(newOpaqueId(), newScopeTag(), [new Uint8Array(1)])).rejects.toThrow(
+      LockedError,
+    );
+    await expect(relay.pull(newOpaqueId(), newScopeTag(), null)).rejects.toThrow(LockedError);
+    expect(sent).toBe(0);
   });
 });

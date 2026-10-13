@@ -34,6 +34,7 @@ import {
   type ParaEnrollmentGrant,
   sodiumReady,
   TeacherKeyring,
+  zeroize,
 } from "@teacher-assistant/crypto";
 import { unlockParaKeyring, unlockTeacherKeyring } from "@teacher-assistant/auth";
 import { applyEdit, type EditableFields, validateParaPoint } from "@teacher-assistant/domain-core";
@@ -43,8 +44,10 @@ import {
   EncryptedStream,
   fetchTransport,
   InMemoryPersistence,
+  keypairSigner,
   type PersistenceAdapter,
   RelayClient,
+  type RequestSigner,
   SyncEngine,
 } from "@teacher-assistant/sync";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
@@ -111,6 +114,12 @@ export interface Session {
   readonly paraHandoff: ParaHandoff;
   /** Best-effort reconcile with the relay (offline-first: false when unreachable). */
   sync(): Promise<boolean>;
+  /**
+   * Lock (auto-lock or the Lock action): destroy the keyring (MK + period DEKs) and zeroize
+   * every other private key this session made. Every later key use throws. Idempotent.
+   * The caller also locks the para session and the device, then drops both sessions.
+   */
+  lock(): void;
 }
 
 /** The PARA-device session: opens ONLY the Period-DEK para stream (ParaKeyring). */
@@ -125,6 +134,8 @@ export interface ParaSession {
   /** Re-read the para-visible doc (after a capture, a refresh, or a teacher republish). */
   readParaRecords(): ParaDocRecords;
   sync(): Promise<boolean>;
+  /** Lock: destroy the para keyring and zeroize this session's private keys. Idempotent. */
+  lock(): void;
 }
 
 export interface BootstrapOptions {
@@ -135,6 +146,13 @@ export interface BootstrapOptions {
   readonly persistence?: PersistenceAdapter;
   /** Injectable clock for the synthetic seed's admin dates (tests pin it). */
   readonly now?: Date;
+  /**
+   * The unlocked device vault: the persistent relay identity (device-enrollment-spec §3.1).
+   * Both streams sign with it, so the relay sees the same device across reloads, and it
+   * signs nothing once locked. Absent until EU-7 builds setup: the synthetic path then
+   * uses one throwaway identity per session, zeroized on lock.
+   */
+  readonly device?: RequestSigner;
 }
 
 /** Ciphertext-only at-rest store: IndexedDB when available, else in-memory — never plaintext. */
@@ -146,11 +164,24 @@ function defaultPersistence(): PersistenceAdapter {
   }
 }
 
-function relayFor(baseUrl: string): RelayClient {
-  return new RelayClient({
-    transport: fetchTransport(baseUrl),
-    signingKeypair: generateSigningKeypair(),
-  });
+function relayFor(baseUrl: string, signer: RequestSigner): RelayClient {
+  return new RelayClient({ transport: fetchTransport(baseUrl), signer });
+}
+
+/** A per-session throwaway relay identity (no device vault yet). lock() zeroizes it. */
+function throwawayIdentity(): { readonly signer: RequestSigner; readonly lock: () => void } {
+  const keypair = generateSigningKeypair();
+  return { signer: keypairSigner(keypair), lock: () => zeroize(keypair.privateKey) };
+}
+
+/**
+ * An enrollment request for in-process key material. The request only needs the signing
+ * PUBLIC key, so the throwaway signing private key is zeroized at once.
+ */
+function throwawayEnrollmentRequest(boxPublicKey: Uint8Array) {
+  const signing = generateSigningKeypair();
+  zeroize(signing.privateKey);
+  return createEnrollmentRequest({ boxPublicKey, signingPublicKey: signing.publicKey });
 }
 
 /**
@@ -180,15 +211,18 @@ async function synthesizeTeacherKeyring(gateway: PasskeyGateway): Promise<Teache
   const masterScopeTag = newScopeTag();
   const issuing = new TeacherKeyring(masterScopeTag, generateMasterKey());
   // EU-5 API shape only: the request now carries a signing key too, and the grant a
-  // master doc id. Both are throwaway here, as before; EU-6/EU-7 replace this
-  // synthesis with the persistent device identity and the real master doc id.
-  const { request, verificationCode } = createEnrollmentRequest({
-    boxPublicKey: deviceKeypair.publicKey,
-    signingPublicKey: generateSigningKeypair().publicKey,
-  });
-  const grant = approveDeviceEnrollment(issuing, request, verificationCode, newOpaqueId());
-  const authentication = await gateway.authenticate();
-  return unlockTeacherKeyring({ authentication, deviceKeypair, grant });
+  // master doc id. Both are throwaway here, as before; EU-7 replaces this synthesis
+  // with the vault-held grant and the real master doc id.
+  try {
+    const { request, verificationCode } = throwawayEnrollmentRequest(deviceKeypair.publicKey);
+    const grant = approveDeviceEnrollment(issuing, request, verificationCode, newOpaqueId());
+    const authentication = await gateway.authenticate();
+    return unlockTeacherKeyring({ authentication, deviceKeypair, grant });
+  } finally {
+    // The issuing MK copy and the throwaway box key must not outlive the unlock.
+    issuing.destroy();
+    zeroize(deviceKeypair.privateKey);
+  }
 }
 
 /** Load an engine's persisted ciphertext (snapshot + backlog) if any exists. */
@@ -231,6 +265,11 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   const relayBaseUrl = options.relayBaseUrl ?? "";
   const now = options.now ?? new Date();
   const seed = buildSyntheticSeed(now);
+  // The unlocked device signs; without one, a throwaway identity that lock() zeroizes.
+  // The device itself is locked by the caller, so its lock here is a no-op.
+  const identity =
+    options.device === undefined ? throwawayIdentity() : { signer: options.device, lock: () => {} };
+  const { signer } = identity;
 
   // Keys: MK (TeacherKeyring) + a minted Period DEK the teacher also holds.
   const keyring = await synthesizeTeacherKeyring(gateway);
@@ -242,8 +281,8 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   const paraDocId = newOpaqueId();
   const masterStream = new EncryptedStream(masterDocId, keyring.masterScopeTag, keyring);
   const paraStream = new EncryptedStream(paraDocId, periodKey.scopeTag, keyring);
-  const masterEngine = new SyncEngine(masterStream, relayFor(relayBaseUrl), persistence);
-  const paraEngine = new SyncEngine(paraStream, relayFor(relayBaseUrl), persistence);
+  const masterEngine = new SyncEngine(masterStream, relayFor(relayBaseUrl, signer), persistence);
+  const paraEngine = new SyncEngine(paraStream, relayFor(relayBaseUrl, signer), persistence);
 
   await loadEngine(masterEngine);
   await loadEngine(paraEngine);
@@ -280,10 +319,7 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   // key possession: the teacher holds both keys; the para handoff carries only the
   // Period DEK, wrapped to the para device.
   const paraDeviceKeypair = generateDeviceKeypair();
-  const { request, verificationCode } = createEnrollmentRequest({
-    boxPublicKey: paraDeviceKeypair.publicKey,
-    signingPublicKey: generateSigningKeypair().publicKey,
-  });
+  const { request, verificationCode } = throwawayEnrollmentRequest(paraDeviceKeypair.publicKey);
   const grant = approveParaEnrollment(
     keyring,
     periodKey.scopeTag,
@@ -340,6 +376,11 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
       const paraOk = await reconcile(paraEngine);
       return masterOk && paraOk;
     },
+    lock: () => {
+      keyring.destroy(); // MK + every period DEK, zeroized in place
+      zeroize(paraDeviceKeypair.privateKey); // the in-process para device's box key
+      identity.lock();
+    },
   };
 }
 
@@ -357,8 +398,14 @@ export async function bootstrapParaSession(handoff: ParaHandoff): Promise<ParaSe
     deviceKeypair: handoff.deviceKeypair,
     grant: handoff.grant,
   });
+  // The in-process para device has no vault of its own (EU-8 pairs a real one).
+  const identity = throwawayIdentity();
   const stream = new EncryptedStream(handoff.paraDocId, handoff.grant.scopeTag, paraKeyring);
-  const engine = new SyncEngine(stream, relayFor(handoff.relayBaseUrl), handoff.persistence);
+  const engine = new SyncEngine(
+    stream,
+    relayFor(handoff.relayBaseUrl, identity.signer),
+    handoff.persistence,
+  );
   await engine.load(); // rebuild from the teacher-published para ciphertext
 
   const refresh = (): Promise<void> =>
@@ -375,5 +422,10 @@ export async function bootstrapParaSession(handoff: ParaHandoff): Promise<ParaSe
     refreshRecords: refresh,
     readParaRecords: () => readParaVisible(stream.doc),
     sync: () => reconcile(engine), // best-effort, offline-first (never throws)
+    lock: () => {
+      paraKeyring.destroy();
+      zeroize(handoff.deviceKeypair.privateKey);
+      identity.lock();
+    },
   };
 }

@@ -26,6 +26,7 @@ import { EncryptedStream } from "./doc.js";
 import { SyncEngine } from "./engine.js";
 import { InMemoryPersistence } from "./persistence.js";
 import {
+  keypairSigner,
   RelayClient,
   type RelayHttpRequest,
   type RelayHttpResponse,
@@ -70,7 +71,10 @@ async function makeDevice(
   const signing = generateSigningKeypair();
   await seedAcl(store, toBase64(signing.publicKey), period.scopeTag);
   const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
-  const relay = new RelayClient({ transport: injectTransport(app, sent), signingKeypair: signing });
+  const relay = new RelayClient({
+    transport: injectTransport(app, sent),
+    signer: keypairSigner(signing),
+  });
   return { engine: new SyncEngine(stream, relay, new InMemoryPersistence()), stream };
 }
 
@@ -161,7 +165,7 @@ describe("unauthorized gets zero bytes + zero existence signal (H-PUB-3)", () =>
     };
     const outsider = new RelayClient({
       transport: recording,
-      signingKeypair: generateSigningKeypair(),
+      signer: keypairSigner(generateSigningKeypair()),
     });
 
     // Client side (offline-first): a 404 is the relay's deliberately-ambiguous "no state
@@ -202,7 +206,7 @@ describe("unauthorized gets zero bytes + zero existence signal (H-PUB-3)", () =>
         raw = res;
         return res;
       },
-      signingKeypair: generateSigningKeypair(), // never granted the scope
+      signer: keypairSigner(generateSigningKeypair()), // never granted the scope
     });
 
     const shapeOf = async (docId: string): Promise<{ status: number; keys: string[] }> => {
@@ -246,7 +250,7 @@ describe("authorized never-synced doc pulls 200-empty (the invariant the 404-han
         raw = res;
         return res;
       },
-      signingKeypair: signing,
+      signer: keypairSigner(signing),
     });
 
     const result = await client.pull(newOpaqueId(), period.scopeTag, null);
@@ -285,7 +289,7 @@ describe("no silent loss under concurrency", () => {
     const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
     const engine = new SyncEngine(
       stream,
-      new RelayClient({ transport, signingKeypair: signing }),
+      new RelayClient({ transport, signer: keypairSigner(signing) }),
       new InMemoryPersistence(),
     );
 
@@ -389,7 +393,7 @@ describe("TEACH-49 — a relay restored from an older backup does not make a cli
       }
       const transport: Transport = (req) => injectTransport(app, [])(req);
       const stream = new EncryptedStream(docId, period.scopeTag, new ParaKeyring([period]));
-      const relay = new RelayClient({ transport, signingKeypair: signing });
+      const relay = new RelayClient({ transport, signer: keypairSigner(signing) });
       return { engine: new SyncEngine(stream, relay, new InMemoryPersistence()), stream };
     };
     const a = await device();

@@ -50,9 +50,28 @@ export function fetchTransport(baseUrl: string): Transport {
   };
 }
 
+/**
+ * The device's request signer: its Ed25519 relay identity (`x-ta-device`) and a sign
+ * operation. In the app this is the unlocked device vault, so the identity is the same
+ * across reloads and signing throws once the device is locked (device-enrollment-spec
+ * §3.1, §11 EU-6). The private key never leaves the signer.
+ */
+export interface RequestSigner {
+  readonly publicKey: Uint8Array;
+  sign(message: Uint8Array): Uint8Array;
+}
+
+/** A signer over a raw keypair (tests and in-process fixtures). */
+export function keypairSigner(keypair: DeviceSigningKeypair): RequestSigner {
+  return {
+    publicKey: keypair.publicKey,
+    sign: (message) => sign(message, keypair.privateKey),
+  };
+}
+
 export interface RelayClientConfig {
   readonly transport: Transport;
-  readonly signingKeypair: DeviceSigningKeypair;
+  readonly signer: RequestSigner;
   /** Clock for the request timestamp (injectable for tests). */
   readonly now?: () => number;
 }
@@ -68,12 +87,12 @@ function parseRecordId(body: Uint8Array): string | null {
 
 export class RelayClient {
   readonly #transport: Transport;
-  readonly #signing: DeviceSigningKeypair;
+  readonly #signer: RequestSigner;
   readonly #now: () => number;
 
   constructor(config: RelayClientConfig) {
     this.#transport = config.transport;
-    this.#signing = config.signingKeypair;
+    this.#signer = config.signer;
     this.#now = config.now ?? Date.now;
   }
 
@@ -86,9 +105,9 @@ export class RelayClient {
     const timestamp = String(this.#now());
     const nonce = toBase64(crypto.getRandomValues(new Uint8Array(16)));
     const canonical = canonicalRequest(method, path, scope, timestamp, nonce, body);
-    const signature = sign(canonical, this.#signing.privateKey);
+    const signature = this.#signer.sign(canonical);
     return {
-      [SYNC_HEADERS.device]: toBase64(this.#signing.publicKey),
+      [SYNC_HEADERS.device]: toBase64(this.#signer.publicKey),
       [SYNC_HEADERS.scope]: scope,
       [SYNC_HEADERS.timestamp]: timestamp,
       [SYNC_HEADERS.nonce]: nonce,
