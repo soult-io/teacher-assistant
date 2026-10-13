@@ -18,7 +18,7 @@ import {
 } from "@teacher-assistant/crypto";
 import { newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
 import { RelayClient, type Transport } from "@teacher-assistant/sync";
-import { beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEVICE_DB_NAME,
   DeviceRecordImmutableError,
@@ -42,6 +42,10 @@ import {
   WeakPassphraseError,
   WrongPassphraseError,
 } from "./vault.js";
+
+// Argon2id MODERATE (256 MiB) takes about 2 s per call on a CI runner; tests here run up to
+// four per case, so the 5 s default timeout is too short. The cost itself is never lowered.
+vi.setConfig({ testTimeout: 60_000 });
 
 /** A fake authenticator: returns a fixed PRF output (or none) on every UV assertion. */
 class FakePasskey implements PasskeyPrfPort {

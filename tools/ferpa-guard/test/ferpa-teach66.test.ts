@@ -38,8 +38,12 @@ import {
   utf8,
   VaultOpenError,
 } from "@teacher-assistant/crypto";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { containsBytes } from "./bytes.js";
+
+// Argon2id MODERATE (256 MiB) takes about 2 s per call on a CI runner; tests here run up to
+// four per case, so the 5 s default timeout is too short. The cost itself is never lowered.
+vi.setConfig({ testTimeout: 60_000 });
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const pwaSrc = join(repoRoot, "apps", "pwa", "src");

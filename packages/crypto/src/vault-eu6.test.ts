@@ -6,7 +6,7 @@
 // tools/ferpa-guard/test/ferpa-teach66.test.ts.
 
 import _sodium from "libsodium-wrappers-sumo";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import {
   deriveTierPKek,
   deriveTierWKek,
@@ -30,6 +30,10 @@ import {
   type VaultBinding,
   zeroizeVaultSecrets,
 } from "./index.js";
+
+// Argon2id MODERATE (256 MiB) takes about 2 s per call on a CI runner; tests here run up to
+// four per case, so the 5 s default timeout is too short. The cost itself is never lowered.
+vi.setConfig({ testTimeout: 60_000 });
 
 beforeAll(async () => {
   await sodiumReady();
