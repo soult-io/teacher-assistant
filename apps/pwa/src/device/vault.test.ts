@@ -525,6 +525,18 @@ describe("reviewer round 1 fixes", () => {
   });
 });
 
+describe("a refused setup zeroizes the probe's PRF output", () => {
+  it("on an already-enrolled device", async () => {
+    const store = new DeviceStore();
+    await enrollTierP(store);
+    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(4)), ANDROID);
+    await expect(
+      createDeviceVault({ store, probe, role: "teacher", platform: ANDROID }),
+    ).rejects.toThrow(DeviceAlreadyEnrolledError);
+    expect(probe.prf?.every((b) => b === 0)).toBe(true);
+  });
+});
+
 describe("setup gates (A-3)", () => {
   it("probeTier refuses on iOS outside the Home Screen app before any passkey is created", async () => {
     const passkey = new FakePasskey(new Uint8Array(32).fill(1));

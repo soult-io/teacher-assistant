@@ -315,11 +315,17 @@ export async function createDeviceVault(
 ): Promise<{ readonly device: UnlockedDevice; readonly persisted: boolean }> {
   await sodiumReady();
   const platform = input.platform ?? browserPlatform();
+  const refuse = (err: Error): never => {
+    if (input.probe.prf !== null) {
+      zeroize(input.probe.prf); // the probe's PRF output never outlives a refused setup
+    }
+    throw err;
+  };
   if (isIosOutsideHomeScreen(platform)) {
-    throw new SetupNeedsHomeScreenError();
+    refuse(new SetupNeedsHomeScreenError());
   }
   if ((await input.store.load()) !== null) {
-    throw new DeviceAlreadyEnrolledError();
+    refuse(new DeviceAlreadyEnrolledError());
   }
   const { probe } = input;
   let kek: Uint8Array | null = null;
