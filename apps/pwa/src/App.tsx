@@ -33,6 +33,7 @@ import {
   HIDDEN_DEFAULT_MS,
   IDLE_DEFAULT_MS,
   type LockReason,
+  WARN_BEFORE_MS,
 } from "./device/auto-lock.js";
 import { QuickScoreSheet, type ParaFixEdit } from "./app/QuickScoreSheet.js";
 import { BaselineScreen } from "./app/screens/baseline/BaselineScreen.js";
@@ -307,7 +308,7 @@ function lockReasonCopy(reason: LockReason): string {
 function LockWarning({ onKeepOpen }: { readonly onKeepOpen: () => void }) {
   return (
     <div className="locktoast" role="status" data-testid="lock-warning">
-      <span>Locking in 60 seconds</span>
+      <span>Locking in {WARN_BEFORE_MS / 1000} seconds</span>
       <button type="button" className="btn primary" onClick={onKeepOpen}>
         Keep open
       </button>

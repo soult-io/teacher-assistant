@@ -265,11 +265,11 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   const relayBaseUrl = options.relayBaseUrl ?? "";
   const now = options.now ?? new Date();
   const seed = buildSyntheticSeed(now);
-  const identity = options.device === undefined ? throwawayIdentity() : null;
-  const signer = options.device ?? identity?.signer;
-  if (signer === undefined) {
-    throw new Error("unreachable: no relay signer");
-  }
+  // The unlocked device signs; without one, a throwaway identity that lock() zeroizes.
+  // The device itself is locked by the caller, so its lock here is a no-op.
+  const identity =
+    options.device === undefined ? throwawayIdentity() : { signer: options.device, lock: () => {} };
+  const { signer } = identity;
 
   // Keys: MK (TeacherKeyring) + a minted Period DEK the teacher also holds.
   const keyring = await synthesizeTeacherKeyring(gateway);
@@ -379,7 +379,7 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
     lock: () => {
       keyring.destroy(); // MK + every period DEK, zeroized in place
       zeroize(paraDeviceKeypair.privateKey); // the in-process para device's box key
-      identity?.lock();
+      identity.lock();
     },
   };
 }

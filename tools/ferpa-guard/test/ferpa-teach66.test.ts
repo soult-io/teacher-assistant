@@ -69,7 +69,10 @@ function productionSources(dir: string): { path: string; text: string }[] {
 function functionBody(text: string, name: string): string {
   const start = text.indexOf(`function ${name}(`);
   expect(start).toBeGreaterThanOrEqual(0);
-  const next = text.slice(start + 1).search(/\n(export )?(async )?(function|class|const) /);
+  // Stop before the next top-level declaration AND its leading doc comment.
+  const next = text
+    .slice(start + 1)
+    .search(/\n(\/\*\*[\s\S]*?\*\/\n)?(export )?(async )?(function|class|const|let) /);
   return next < 0 ? text.slice(start) : text.slice(start, start + 1 + next);
 }
 

@@ -105,6 +105,14 @@ export class UnlockBackoffError extends Error {
   }
 }
 
+/** Thrown when an unlock starts while another is still running (one attempt at a time). */
+export class UnlockInProgressError extends Error {
+  constructor() {
+    super("an unlock is already running");
+    this.name = "UnlockInProgressError";
+  }
+}
+
 /** iOS outside the Home Screen app: setup is refused (A-3). */
 export class SetupNeedsHomeScreenError extends Error {
   constructor() {
@@ -371,6 +379,29 @@ async function clearFailures(store: DeviceStore, record: DeviceRecord): Promise<
   await store.update(({ unlockFailures: _cleared, ...rest }) => rest);
 }
 
+/** Tier W: refuse (UnlockBackoffError) while the wait after wrong passphrases is running. */
+async function enforceBackoff(
+  store: DeviceStore,
+  record: DeviceRecord,
+  now: number,
+): Promise<void> {
+  const failures = record.unlockFailures;
+  if (record.tier !== "passphrase" || failures === undefined) {
+    return;
+  }
+  if (now < failures.lastAt) {
+    // The clock moved backwards: restart the wait from now rather than from a future time.
+    await store.update((r) => ({
+      ...r,
+      unlockFailures: { count: failures.count, lastAt: now },
+    }));
+  }
+  const remaining = unlockBackoffMs(failures.count) - Math.max(0, now - failures.lastAt);
+  if (remaining > 0) {
+    throw new UnlockBackoffError(remaining);
+  }
+}
+
 /** Tier W: KEK from Kdev + passphrase, then the vault. Counts a wrong passphrase. */
 async function openTierW(
   input: UnlockInput,
@@ -426,14 +457,6 @@ function openTierP(record: DeviceRecord, prf: Uint8Array | null): VaultSecrets {
 
 let unlockRunning = false;
 
-/** Thrown when an unlock starts while another is still running (one attempt at a time). */
-export class UnlockInProgressError extends Error {
-  constructor() {
-    super("an unlock is already running");
-    this.name = "UnlockInProgressError";
-  }
-}
-
 /**
  * Unlock: the passkey gesture, then the tier's KEK, then the vault. One attempt at a time,
  * so parallel guesses cannot all pass the backoff check before any failure is recorded.
@@ -457,21 +480,7 @@ async function unlockOnce(input: UnlockInput): Promise<UnlockedDevice> {
     throw new NoDeviceError();
   }
   const now = (input.now ?? Date.now)();
-  if (record.tier === "passphrase" && record.unlockFailures !== undefined) {
-    const wait = unlockBackoffMs(record.unlockFailures.count);
-    const { lastAt } = record.unlockFailures;
-    if (now < lastAt) {
-      // The clock moved backwards: restart the wait from now rather than from a future time.
-      await input.store.update((r) => ({
-        ...r,
-        unlockFailures: { count: record.unlockFailures?.count ?? 0, lastAt: now },
-      }));
-    }
-    const remaining = wait - Math.max(0, now - lastAt);
-    if (remaining > 0) {
-      throw new UnlockBackoffError(remaining);
-    }
-  }
+  await enforceBackoff(input.store, record, now);
   const { prf } = await input.passkey.assert(fromBase64(record.credentialId));
   let secrets: VaultSecrets;
   if (record.tier === "prf") {

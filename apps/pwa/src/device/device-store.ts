@@ -13,6 +13,7 @@
 // existing record (keys are never regenerated).
 
 import type { VaultTier } from "@teacher-assistant/crypto";
+import { openSingleStoreDb, promisifyRequest, transactionDone } from "../data/idb.js";
 
 export const DEVICE_DB_NAME = "ta-device";
 const STORE = "device";
@@ -61,34 +62,6 @@ export class DeviceAlreadyEnrolledError extends Error {
 
 const IMMUTABLE = ["tier", "signPk", "boxPk", "credentialId", "kdev", "role"] as const;
 
-function promisify<T>(req: IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("IndexedDB request failed"));
-  });
-}
-
-function done(tx: IDBTransaction): Promise<void> {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error("IndexedDB transaction failed"));
-    tx.onabort = () => reject(tx.error ?? new Error("IndexedDB transaction aborted"));
-  });
-}
-
-function openDb(factory: IDBFactory): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = factory.open(DEVICE_DB_NAME, DB_VERSION);
-    req.onupgradeneeded = () => {
-      if (!req.result.objectStoreNames.contains(STORE)) {
-        req.result.createObjectStore(STORE);
-      }
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error ?? new Error("IndexedDB open failed"));
-  });
-}
-
 /** The one device record in IndexedDB. */
 export class DeviceStore {
   readonly #factory: IDBFactory;
@@ -102,7 +75,7 @@ export class DeviceStore {
   }
 
   #database(): Promise<IDBDatabase> {
-    this.#db ??= openDb(this.#factory).then(
+    this.#db ??= openSingleStoreDb(this.#factory, DEVICE_DB_NAME, DB_VERSION, STORE).then(
       (db) => {
         // Yield to a delete or upgrade from elsewhere (a wipe, another tab); reopen on next use.
         db.onversionchange = () => {
@@ -122,7 +95,7 @@ export class DeviceStore {
   async load(): Promise<DeviceRecord | null> {
     const db = await this.#database();
     const tx = db.transaction(STORE, "readonly");
-    const value = await promisify<unknown>(tx.objectStore(STORE).get(RECORD_KEY));
+    const value = await promisifyRequest<unknown>(tx.objectStore(STORE).get(RECORD_KEY));
     return (value as DeviceRecord | undefined) ?? null;
   }
 
@@ -130,9 +103,9 @@ export class DeviceStore {
   async create(record: DeviceRecord): Promise<void> {
     const db = await this.#database();
     const tx = db.transaction(STORE, "readwrite");
-    const added = promisify(tx.objectStore(STORE).add(record, RECORD_KEY));
+    const added = promisifyRequest(tx.objectStore(STORE).add(record, RECORD_KEY));
     try {
-      await Promise.all([added, done(tx)]);
+      await Promise.all([added, transactionDone(tx)]);
     } catch (err) {
       if (err instanceof DOMException && err.name === "ConstraintError") {
         throw new DeviceAlreadyEnrolledError();
@@ -146,8 +119,10 @@ export class DeviceStore {
     const db = await this.#database();
     const tx = db.transaction(STORE, "readwrite");
     const store = tx.objectStore(STORE);
-    const committed = done(tx);
-    const current = (await promisify<unknown>(store.get(RECORD_KEY))) as DeviceRecord | undefined;
+    const committed = transactionDone(tx);
+    const current = (await promisifyRequest<unknown>(store.get(RECORD_KEY))) as
+      | DeviceRecord
+      | undefined;
     if (current === undefined) {
       tx.abort();
       await committed.catch(() => {});

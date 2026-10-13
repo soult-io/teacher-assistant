@@ -36,7 +36,7 @@ export const IDLE_DEFAULT_MS = 10 * MINUTE;
 export const IDLE_CEILING_MS = 15 * MINUTE;
 export const HIDDEN_DEFAULT_MS = 2 * MINUTE;
 export const HIDDEN_CEILING_MS = 5 * MINUTE;
-const WARN_BEFORE_MS = MINUTE;
+export const WARN_BEFORE_MS = MINUTE;
 
 // Real user input. Pointer movement alone is not input: a hover must not keep it open.
 const INPUT_EVENTS = ["pointerdown", "keydown", "touchstart", "wheel"] as const;
