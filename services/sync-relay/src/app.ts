@@ -218,7 +218,7 @@ export interface BuildAppOptions {
   /** Where log lines go (default stdout). Tests capture them to assert what is logged. */
   readonly logStream?: { write(line: string): void };
   /**
-   * Peers (IPs/CIDRs — the proxy-web network) whose X-Forwarded-For sets req.ip
+   * Peers (IPs/CIDRs — the reverse proxy's address) whose X-Forwarded-For sets req.ip
    * (config.ts loadTrustProxy). Omitted: no proxy is trusted. Never trust-all.
    */
   readonly trustProxy?: readonly string[];

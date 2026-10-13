@@ -84,7 +84,8 @@ export function loadStoreConfig(env: Env, readSecret: (path: string) => string):
 
 /**
  * TEACH-55: the peers whose X-Forwarded-For is believed, from TRUST_PROXY — a
- * comma-separated list of IPs/CIDRs (the proxy-web network). Fail closed:
+ * comma-separated list of IPs/CIDRs (the reverse proxy's address; on Lexington npm's
+ * pinned ta-edge address, stack-lexington-teacher-assistant). Fail closed:
  *   - unset, NODE_ENV=production → throws. Behind the NPM every client would
  *     otherwise share the proxy's IP, so the per-IP rate limit is one global one.
  *   - unset otherwise            → undefined (no proxy trusted; tests, local dev).
@@ -97,7 +98,9 @@ export function loadTrustProxy(env: Env): string[] | undefined {
   const raw = env["TRUST_PROXY"];
   if (raw === undefined) {
     if (env["NODE_ENV"] === "production") {
-      throw new ConfigError("TRUST_PROXY is required in production (the proxy-web CIDR)");
+      throw new ConfigError(
+        "TRUST_PROXY is required in production (the reverse proxy's IP, see the deploy compose)",
+      );
     }
     return undefined;
   }
