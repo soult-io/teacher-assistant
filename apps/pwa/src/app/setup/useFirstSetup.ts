@@ -8,6 +8,7 @@ import type { SetupPort } from "../../device/device-port.js";
 import type { SetupStageName } from "../../device/device-store.js";
 import type { RedeemStep } from "../../device/first-setup.js";
 import type { TeacherDeviceLabel } from "../../device/passkey-prf.js";
+import { SETUP_ERRORS } from "../../device/setup-copy.js";
 
 export type Step =
   | "welcome"
@@ -25,16 +26,7 @@ export type Step =
 /** A-3: navigator.storage.persist() refused — a one-line warning, never blocking. */
 const NOT_PERSISTED = "This browser may clear this device's setup. Install the app to keep it.";
 
-export const SETUP_ERRORS = {
-  code: "That setup code didn't work. Codes work once and last 24 hours. Check it with Neil, or ask him for a new one.",
-  tooMany: "Too many tries. Wait 15 minutes, then try again.",
-  connect: "Connect to the internet to finish setup.",
-  passkey:
-    "Try your passkey again. If Bitwarden doesn't pop up, choose Bitwarden in the window that appears.",
-  homeScreen: "Add to Home Screen first, then open the app from the icon.",
-  noPasskey:
-    "This device can't save a passkey yet. Open Bitwarden and make sure it's unlocked, or turn on a screen lock in your device's Settings. Then come back.",
-} as const;
+export { SETUP_ERRORS };
 
 /** E-S4 (retry), E-S5 (this device cannot save a passkey at all) or the A-3 install line. */
 function passkeyError(err: unknown): string {

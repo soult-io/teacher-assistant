@@ -1,11 +1,12 @@
 // First setup on the first teacher device — F1 (device-enrollment-spec rev 2.5 §4.1, §13
 // A-1/A-2/A-8, §11 EU-7). The UI (app/setup) drives these steps in the flows' order:
 //
-//   S1a name → S2 createPasskey(label)   passkey named after the device, created before
-//                                         anything else; the test get() picks the tier
+//   S1a      → setLabel(label)           the device's name, before any passkey exists
+//   S2       → createPasskey()           passkey named after the device; the test get()
+//                                         picks the tier
 //   S3       → sealVault(passphrase?)     keys generated once, sealed; stage keys_created
 //   (code)   → redeem(code)               signed redeem; stage redeemed + mode
-//            → finish(label)              mode "first" only: MK, master doc, self-grant of
+//            → finish()                   mode "first" only: MK, master doc, self-grant of
 //                                         the master tag as kind `master`; stage scopes_granted
 //   S4       → issueRecoveryCode()        stage recovery_pending, wrap uploaded, code shown
 //                                         only after the relay acknowledged it (A-2)
@@ -33,6 +34,7 @@ import { ControlClient, type ListedDevice } from "./control-client.js";
 import type { DeviceStore, SetupStage, SetupStageName } from "./device-store.js";
 import { passkeyDisplayName, type PasskeyPrfPort, type TeacherDeviceLabel } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
+import { SETUP_ERRORS } from "./setup-copy.js";
 import { createDeviceVault, probeTier, type TierProbe, type UnlockedDevice } from "./vault.js";
 
 /** How long a setup code lasts (the relay's OWNER_CODE_TTL): the A-8 resume window before redeem. */
@@ -44,7 +46,7 @@ const CONFIRM_CHARS = 8;
 /** Thrown when the relay definitively refuses the self-grant: retrying cannot help. */
 export class SetupRefusedError extends Error {
   constructor() {
-    super("Setup can't finish on this device — text Neil.");
+    super(SETUP_ERRORS.stopped);
     this.name = "SetupRefusedError";
   }
 }
@@ -52,7 +54,7 @@ export class SetupRefusedError extends Error {
 /** Thrown when a step needs the network and the relay gave no definite answer. */
 export class SetupOfflineError extends Error {
   constructor() {
-    super("Connect to the internet to finish setup.");
+    super(SETUP_ERRORS.connect);
     this.name = "SetupOfflineError";
   }
 }
@@ -99,10 +101,7 @@ export async function readDeviceStatus(
  * A-1 / relay rule: the redeem landed as `first` only if no active owner other than this
  * device exists and no master tag is registered; anything else is `recovery`.
  */
-export function inferRedeemMode(
-  devices: readonly ListedDevice[],
-  self: string,
-): "first" | "recovery" {
+function inferRedeemMode(devices: readonly ListedDevice[], self: string): "first" | "recovery" {
   const otherOwner = devices.some(
     (d) => d.device !== self && d.role === "owner" && d.status === "active",
   );
@@ -160,6 +159,15 @@ export class FirstSetup {
 
   async #writeStage(stage: SetupStageName, mode?: "first" | "recovery"): Promise<void> {
     this.#unlocked(); // a lock ends this run: a late step never moves the stage
+    await this.#recordStage(stage, mode);
+  }
+
+  /**
+   * Write the stage with no lock check. Only for `redeemed`: it records what the relay
+   * already decided, so it must land even if a lock came in between — an unrecorded
+   * redeem could be wiped after 24 h and leave an orphan owner (A-8).
+   */
+  async #recordStage(stage: SetupStageName, mode?: "first" | "recovery"): Promise<void> {
     const next: SetupStage =
       mode === undefined ? { stage, at: this.#now() } : { stage, mode, at: this.#now() };
     await this.#deps.store.update((record) => ({
@@ -238,13 +246,13 @@ export class FirstSetup {
     }
     if (probe.kind === "ok") {
       const mode = inferRedeemMode(probe.devices, self);
-      await this.#writeStage("redeemed", mode);
+      await this.#recordStage("redeemed", mode);
       return mode;
     }
     const outcome = await control.redeem(code);
     switch (outcome.kind) {
       case "redeemed":
-        await this.#writeStage("redeemed", outcome.mode);
+        await this.#recordStage("redeemed", outcome.mode);
         return outcome.mode;
       case "ambiguous":
         return "offline";

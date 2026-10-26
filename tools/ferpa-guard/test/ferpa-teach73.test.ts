@@ -156,7 +156,7 @@ describe("TEACH-73 HARD — nothing secret at rest (A-8)", () => {
 
   it("first setup writes only the stage and the enrolled flag to the device record", () => {
     const setup = code(source("device", "first-setup.ts"));
-    const write = member(setup, "async #writeStage(");
+    const write = member(setup, "async #recordStage(");
     expect(write).toContain("setupStage: next");
     expect(write).not.toMatch(/code|label|passphrase/i);
     expect(setup.match(/store\.update\(/g)).toHaveLength(1);

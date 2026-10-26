@@ -152,7 +152,7 @@ function StepView({
             🔒
           </span>
           <p className="locknote" data-testid="setup-stopped">
-            Setup can't finish on this device — text Neil.
+            {SETUP_ERRORS.stopped}
           </p>
         </>
       );
@@ -168,7 +168,7 @@ function HomeScreenFirst() {
       </span>
       <h1>Teacher Assistant</h1>
       <p className="locknote" data-testid="home-screen-first">
-        Add to Home Screen first, then open the app from the icon.
+        {SETUP_ERRORS.homeScreen}
       </p>
     </>
   );

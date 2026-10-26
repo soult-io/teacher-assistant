@@ -36,8 +36,8 @@ import {
   SetupOfflineError,
   SetupRefusedError,
 } from "./first-setup.js";
-import type { PasskeyAssertion, PasskeyPrfPort } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
+import { android, FakePasskey } from "../test/fake-passkey.js";
 import { unlockDevice, type UnlockedDevice } from "./vault.js";
 
 // Every Tier W step runs Argon2id MODERATE (about 2 s per call on a CI runner).
@@ -59,35 +59,7 @@ vi.mock("@teacher-assistant/crypto", async (importOriginal) => {
 const PASSPHRASE = "blue7kites";
 const NOW = new Date("2026-10-26T15:00:00Z").getTime();
 
-const ANDROID: PlatformEnv = {
-  userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8a) Chrome/130",
-  platform: "Linux armv8l",
-  maxTouchPoints: 5,
-  standaloneMedia: true,
-  navigatorStandalone: undefined,
-  persist: () => Promise.resolve(true),
-};
-
-/** A fake authenticator. `prf: null` is Bitwarden: no PRF output, so Tier W (C8). */
-class FakePasskey implements PasskeyPrfPort {
-  readonly names: string[] = [];
-  readonly allowed: Uint8Array[] = [];
-  credentialId: Uint8Array | null = null;
-  constructor(readonly prf: Uint8Array | null = null) {}
-  create(displayName: string): Promise<{ credentialId: Uint8Array }> {
-    this.names.push(displayName);
-    this.credentialId = crypto.getRandomValues(new Uint8Array(16));
-    return Promise.resolve({ credentialId: this.credentialId });
-  }
-  assert(credentialId: Uint8Array): Promise<PasskeyAssertion> {
-    this.allowed.push(credentialId);
-    return Promise.resolve({
-      prf: this.prf === null ? null : new Uint8Array(this.prf),
-      backupEligible: true,
-      backedUp: true,
-    });
-  }
-}
+const ANDROID: PlatformEnv = android({ standaloneMedia: true });
 
 type RelayApp = ReturnType<typeof buildApp>;
 
@@ -685,5 +657,27 @@ describe("review fixes", () => {
     await setup.redeem(await r.issueCode());
     await expect(setup.finish()).rejects.toThrow();
     expect((await d.store.load())?.setupStage?.stage).toBe("redeemed");
+  });
+
+  it("a lock during an accepted redeem still records `redeemed` (no orphan owner after 24 h)", async () => {
+    const r = relay();
+    const d = device();
+    let setup: FirstSetup | null = null;
+    setup = d.setup(
+      r.transport({
+        after: (p) => {
+          if (p === "/sync/enroll/redeem") {
+            setup?.device.lock();
+          }
+        },
+      }),
+    );
+    await createUnlock(setup);
+    expect(await setup.redeem(await r.issueCode())).toBe("first");
+    expect((await d.store.load())?.setupStage).toMatchObject({ stage: "redeemed", mode: "first" });
+    expect(await readDeviceStatus(d.store, NOW + 30 * SETUP_CODE_TTL_MS)).toMatchObject({
+      kind: "enrolled",
+      stage: "redeemed",
+    });
   });
 });

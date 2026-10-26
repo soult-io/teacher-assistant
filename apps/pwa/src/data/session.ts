@@ -56,7 +56,7 @@ import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
 import { SyntheticPasskeyGateway } from "./passkey.js";
 import type { Doc as YDoc } from "yjs";
-import { activeStream, readManifest } from "./manifest.js";
+import { activeStream, type Manifest, readManifest } from "./manifest.js";
 import {
   type DecryptedRecords,
   type ParaDocRecords,
@@ -233,9 +233,9 @@ export async function openStream(
   return { stream, engine };
 }
 
-/** Add every manifest period DEK (wrapped under MK) to the keyring. */
-function addPeriodKeys(keyring: TeacherKeyring, masterDoc: YDoc): void {
-  for (const [scopeTag, wrapped] of readManifest(masterDoc).periodKeys) {
+/** Add every manifest period DEK (wrapped under MK) to the keyring — retired ones too. */
+export function addPeriodKeys(keyring: TeacherKeyring, manifest: Manifest): void {
+  for (const [scopeTag, wrapped] of manifest.periodKeys) {
     keyring.addWrappedPeriodKey(scopeTag, fromBase64(wrapped));
   }
 }
@@ -315,8 +315,9 @@ async function openTeacherSession(
   );
   const masterStream = master.stream;
   const masterEngine = master.engine;
-  addPeriodKeys(keyring, masterStream.doc);
-  const active = activeStream(readManifest(masterStream.doc));
+  const manifest = readManifest(masterStream.doc);
+  addPeriodKeys(keyring, manifest);
+  const active = activeStream(manifest);
   const para =
     active === null
       ? null

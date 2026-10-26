@@ -17,14 +17,14 @@ import {
   createEnrollmentRequest,
   type DeviceEnrollmentGrant,
   type DeviceKeypair,
-  fromBase64,
   generateMasterKey,
   generatePeriodKey,
   TeacherKeyring,
   toBase64,
 } from "@teacher-assistant/crypto";
-import { asTimestamp, newOpaqueId, newScopeTag, type ScopeTag } from "@teacher-assistant/schema";
+import { asTimestamp, newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
 import { type PersistenceAdapter, RelayClient, type Transport } from "@teacher-assistant/sync";
+import type { ScopeGrant } from "../device/control-client.js";
 import { activeStream, addDevice, addStream, readManifest } from "./manifest.js";
 import { paraPeriodId } from "./para-publish.js";
 import {
@@ -34,18 +34,12 @@ import {
   upsertParaPending,
   writeRecords,
 } from "./repository.js";
-import { openStream, teacherKeyringFromGrant } from "./session.js";
+import { addPeriodKeys, openStream, teacherKeyringFromGrant } from "./session.js";
 import type { RequestSigner } from "@teacher-assistant/sync";
 import { buildSyntheticSeed } from "./synthetic-seed.js";
 
-/** A scope to self-grant at F1 step 6. */
-export interface ScopeGrantRequest {
-  readonly tag: ScopeTag;
-  readonly kind: "master" | "period";
-}
-
 /** Thrown when the master doc has no entry for this device and no name was given (resume). */
-export class DeviceNameRequiredError extends Error {
+class DeviceNameRequiredError extends Error {
   constructor() {
     super("this device needs a name before setup can finish");
     this.name = "DeviceNameRequiredError";
@@ -95,7 +89,7 @@ export interface InitializeMasterInput {
  */
 export async function initializeMasterDoc(
   input: InitializeMasterInput,
-): Promise<readonly ScopeGrantRequest[]> {
+): Promise<readonly ScopeGrant[]> {
   const keyring = teacherKeyringFromGrant(input.boxKeypair, input.grant);
   try {
     const relay = new RelayClient({ transport: input.transport, signer: input.signer });
@@ -111,9 +105,7 @@ export async function initializeMasterDoc(
       await master.engine.capture((doc) => writeRecords(doc, seed.master));
     }
     const manifest = readManifest(master.stream.doc);
-    for (const [scopeTag, wrapped] of manifest.periodKeys) {
-      keyring.addWrappedPeriodKey(scopeTag, fromBase64(wrapped));
-    }
+    addPeriodKeys(keyring, manifest);
     let active = activeStream(manifest);
     if (active === null) {
       const periodKey = generatePeriodKey(newScopeTag());

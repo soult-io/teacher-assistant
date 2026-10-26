@@ -9,7 +9,7 @@
 
 import type { RelayClient } from "@teacher-assistant/sync";
 
-export const CONTROL_ROUTES = {
+const CONTROL_ROUTES = {
   redeem: "/sync/enroll/redeem",
   list: "/sync/devices/list",
   grant: "/sync/devices/grant",
@@ -27,11 +27,17 @@ export type RedeemOutcome =
   | { readonly kind: "ambiguous" };
 
 /** One device as the relay lists it (opaque keys and tags only). */
+/** A scope as the control routes carry it: an opaque tag and its kind. */
+export interface ScopeGrant {
+  readonly tag: string;
+  readonly kind: "master" | "period";
+}
+
 export interface ListedDevice {
   readonly device: string;
   readonly role: "owner" | "member";
   readonly status: "active" | "revoked";
-  readonly scopes: readonly { readonly tag: string; readonly kind: "master" | "period" }[];
+  readonly scopes: readonly ScopeGrant[];
 }
 
 export type ListOutcome =
@@ -125,10 +131,7 @@ export class ControlClient {
   }
 
   /** F1 step 6: self-grant the master (kind `master`) and period scopes. */
-  async grant(
-    device: string,
-    scopes: readonly { readonly tag: string; readonly kind: "master" | "period" }[],
-  ): Promise<WriteOutcome> {
+  async grant(device: string, scopes: readonly ScopeGrant[]): Promise<WriteOutcome> {
     const res = await call(this.#relay, CONTROL_ROUTES.grant, {
       device,
       scopes: scopes.map(({ tag, kind }) => ({ tag, kind })),

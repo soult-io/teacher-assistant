@@ -5,12 +5,12 @@
 const SETUP_CODE_LENGTH = 26;
 
 /** Canonical Crockford characters of a typed setup code (what the relay hashes). */
-export function setupCodeChars(typed: string): string {
+function setupCodeChars(typed: string): string {
   return typed.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
 }
 
 /** Display grouping: XXXX-XXXX-…-XX (6×4 + 2). */
-export function groupSetupCode(typed: string): string {
+function groupSetupCode(typed: string): string {
   const chars = setupCodeChars(typed).slice(0, SETUP_CODE_LENGTH);
   return (chars.match(/.{1,4}/g) ?? []).join("-");
 }

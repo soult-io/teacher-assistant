@@ -25,8 +25,8 @@ import {
   type DeviceRecord,
   DeviceStore,
 } from "./device-store.js";
-import type { PasskeyAssertion, PasskeyPrfPort } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
+import { android, FakePasskey } from "../test/fake-passkey.js";
 import {
   createDeviceVault,
   DeviceAlreadyEnrolledError,
@@ -47,37 +47,9 @@ import {
 // four per case, so the 5 s default timeout is too short. The cost itself is never lowered.
 vi.setConfig({ testTimeout: 60_000 });
 
-/** A fake authenticator: returns a fixed PRF output (or none) on every UV assertion. */
-class FakePasskey implements PasskeyPrfPort {
-  assertions = 0;
-  names: string[] = [];
-  constructor(
-    public prf: Uint8Array | null,
-    public flags = { backupEligible: true, backedUp: true },
-  ) {}
-  create(displayName: string): Promise<{ credentialId: Uint8Array }> {
-    this.names.push(displayName);
-    return Promise.resolve({ credentialId: crypto.getRandomValues(new Uint8Array(16)) });
-  }
-  assert(_credentialId: Uint8Array): Promise<PasskeyAssertion> {
-    this.assertions += 1;
-    return Promise.resolve({
-      prf: this.prf === null ? null : new Uint8Array(this.prf),
-      ...this.flags,
-    });
-  }
-}
-
 const NAME = "Teacher Assistant — Phone, added Oct 26";
 
-const ANDROID: PlatformEnv = {
-  userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8a) Chrome/130",
-  platform: "Linux armv8l",
-  maxTouchPoints: 5,
-  standaloneMedia: false,
-  navigatorStandalone: undefined,
-  persist: () => Promise.resolve(true),
-};
+const ANDROID: PlatformEnv = android();
 
 function deleteDeviceDb(): Promise<void> {
   return new Promise((resolve, reject) => {

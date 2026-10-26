@@ -33,6 +33,7 @@ import { SetupFlow } from "./app/setup/SetupFlow.js";
 import { isSyntheticBuild } from "./build-flags.js";
 import type { SetupStageName } from "./device/device-store.js";
 import { browserPlatform, isIosOutsideHomeScreen } from "./device/platform.js";
+import { SETUP_ERRORS } from "./device/setup-copy.js";
 import {
   browserDevicePort,
   type DeviceHandle,
@@ -176,8 +177,7 @@ export interface AppProps {
   readonly synthetic?: boolean;
 }
 
-const PASSKEY_RETRY =
-  "Try your passkey again. If Bitwarden doesn't pop up, choose Bitwarden in the window that appears.";
+const PASSKEY_RETRY = SETUP_ERRORS.passkey;
 
 /**
  * Copy for a FAILED unlock (flows §4 "Unlock errors"). A relay/sync error (defensive:
@@ -238,20 +238,23 @@ export function App({
   // Bumped by every lock, so the device status (style, setup stage) is read again.
   const [statusReads, setStatusReads] = useState(0);
 
+  // The one way into setup: lock() relies on setupRef to drop the recovery code.
+  const enterSetup = useCallback((port: SetupPort, resumeAt: SetupStageName | null) => {
+    setupRef.current = port;
+    setSetup({ port, resumeAt });
+    setPhase("setup");
+  }, []);
+
   const startNewSetup = useCallback(
     (cleared: boolean) => {
-      const port = device.setup();
-      setupRef.current = port;
-      setSetup({ port, resumeAt: null });
       setError(cleared ? "Start over with a new setup code." : null);
-      setPhase("setup");
+      enterSetup(device.setup(), null);
     },
-    [device],
+    [device, enterSetup],
   );
 
   // Where the device stands on open (and after each lock): no record → first setup;
   // a record → the lock screen in its style.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: statusReads re-runs the read
   useEffect(() => {
     let live = true;
     void device.status().then(
@@ -407,15 +410,12 @@ export function App({
       }
       if (status.stage !== "done") {
         // An unfinished setup resumes only after this full unlock (A-2, A-8).
-        const port = device.setup(handle);
-        setupRef.current = port;
-        setSetup({ port, resumeAt: status.stage });
-        setPhase("setup");
+        enterSetup(device.setup(handle), status.stage);
         return;
       }
       await openSession(handle);
     },
-    [device, openSession, startNewSetup],
+    [device, openSession, startNewSetup, enterSetup],
   );
 
   const unlock = useCallback(
