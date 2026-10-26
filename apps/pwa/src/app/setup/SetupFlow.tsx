@@ -14,7 +14,8 @@ import type { VaultTier } from "@teacher-assistant/crypto";
 import type { ReactNode } from "react";
 import type { DeviceHandle, SetupPort } from "../../device/device-port.js";
 import type { SetupStageName } from "../../device/device-store.js";
-import { TEACHER_DEVICE_LABELS, type TeacherDeviceLabel } from "../../device/passkey-prf.js";
+import { TEACHER_DEVICE_LABELS } from "../../device/passkey-prf.js";
+import { NameStep } from "./NameStep.js";
 import { PassphraseStep } from "./PassphraseStep.js";
 import { RecoveryCheck, RecoveryShow } from "./RecoveryCode.js";
 import { SetupCodeStep } from "./SetupCodeStep.js";
@@ -109,10 +110,13 @@ function StepView({
     case "name":
       return (
         <NameStep
+          options={TEACHER_DEVICE_LABELS}
           label={flow.label}
+          note="Your passkey will carry this name, so you can find it in Bitwarden later."
           busy={busy}
           onLabel={flow.setLabel}
           onContinue={() => void flow.chooseName()}
+          testId="name-continue"
         />
       );
     case "passkey":
@@ -215,51 +219,6 @@ function Welcome({
           <span className="choicenote">I already use the app on another device</span>
         </button>
       )}
-    </>
-  );
-}
-
-function NameStep({
-  label,
-  busy,
-  onLabel,
-  onContinue,
-}: {
-  readonly label: TeacherDeviceLabel;
-  readonly busy: boolean;
-  readonly onLabel: (label: TeacherDeviceLabel) => void;
-  readonly onContinue: () => void;
-}) {
-  return (
-    <>
-      <h2>Name this device</h2>
-      <p className="locknote">
-        Your passkey will carry this name, so you can find it in Bitwarden later.
-      </p>
-      <fieldset className="namechoice">
-        <legend className="sr-only">Device name</legend>
-        {TEACHER_DEVICE_LABELS.map((option) => (
-          <label key={option} className={option === label ? "on" : ""}>
-            <input
-              type="radio"
-              name="device-name"
-              value={option}
-              checked={option === label}
-              onChange={() => onLabel(option)}
-            />
-            {option}
-          </label>
-        ))}
-      </fieldset>
-      <button
-        type="button"
-        className="btn primary wide"
-        disabled={busy}
-        onClick={onContinue}
-        data-testid="name-continue"
-      >
-        Continue
-      </button>
     </>
   );
 }

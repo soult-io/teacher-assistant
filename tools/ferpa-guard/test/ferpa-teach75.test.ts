@@ -70,6 +70,22 @@ beforeAll(async () => {
   await sodiumReady();
 });
 
+describe("TEACH-75 FERPA gate B-1 — a zeroized pairing key seals nothing", () => {
+  it("sealPairing and openPairing refuse an all-zero K", () => {
+    const secret = newPairingSecret();
+    const key = pairingKey(secret);
+    const sid = pairingSid(secret);
+    const { request } = createEnrollmentRequest({
+      boxPublicKey: generateDeviceKeypair().publicKey,
+      signingPublicKey: generateSigningKeypair().publicKey,
+    });
+    const blob = sealLabelledEnrollmentRequest(key, sid, request, "Phone");
+    key.fill(0);
+    expect(() => sealLabelledEnrollmentRequest(key, sid, request, "Phone")).toThrow(PairingError);
+    expect(() => openLabelledEnrollmentRequest(key, sid, blob)).toThrow(PairingError);
+  });
+});
+
 describe("TEACH-75 HARD — the device name only inside AEAD_K", () => {
   it("the sealed request blob never contains the name, and a tampered blob fails", () => {
     const secret = newPairingSecret();
@@ -165,9 +181,21 @@ describe("TEACH-75 HARD — matching code (A-4) and the fresh unlock", () => {
     expect(approve).toContain("fresh.lock();");
     // The grant comes from the freshly opened vault and is sealed with the typed helper.
     const build = method(pairing(), "async #grant(");
-    expect(build).toContain("fresh.readGrant(");
-    expect(build).toContain("sealTeacherGrant(key, sid, grant)");
     expect(build).toContain("keyring.destroy();");
+    // FERPA gate B-1: after every wait in #grant (the grant read, the name write) the live
+    // session is re-read, and only its key seals; abandon() zeroizes K in place.
+    const read = build.indexOf("await fresh.readGrant(");
+    const name = build.indexOf("await this.#deps.session.addDevice(");
+    const recheck = build.indexOf("const live = this.#live();");
+    const seal = build.indexOf("sealTeacherGrant(live.key, live.sid, grant)");
+    const put = build.indexOf("putPairingGrant(");
+    expect(read).toBeGreaterThanOrEqual(0);
+    expect(name).toBeGreaterThan(read);
+    expect(recheck).toBeGreaterThan(name);
+    expect(seal).toBeGreaterThan(recheck);
+    expect(put).toBeGreaterThan(seal);
+    // Nothing waits between the re-check and the seal, so K cannot be zeroized in between.
+    expect(build.slice(recheck, seal)).not.toContain("await ");
   });
 
   it("the matching-code screens never show or hint at the expected code", () => {

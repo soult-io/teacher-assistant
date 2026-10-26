@@ -14,6 +14,7 @@ import type { DeviceHandle, JoinPort } from "../../device/device-port.js";
 import { DEVICE_LABELS } from "../../device/passkey-prf.js";
 import { PAIRING_COPY } from "../../device/pairing-copy.js";
 import { STYLE_W_LINE } from "../../device/setup-copy.js";
+import { NameStep } from "../setup/NameStep.js";
 import { PassphraseStep } from "../setup/PassphraseStep.js";
 import { Countdown } from "./Countdown.js";
 import { QrScanner } from "./QrScanner.js";
@@ -56,35 +57,15 @@ function JoinStepView({
       return <Scan flow={flow} onLeave={onLeave} mediaDevices={mediaDevices} />;
     case "name":
       return (
-        <>
-          <h2>Name this device</h2>
-          <p className="locknote">
-            Your passkey will carry this name, so you can find it in your password manager later.
-          </p>
-          <fieldset className="namechoice">
-            <legend className="sr-only">Device name</legend>
-            {DEVICE_LABELS.map((option) => (
-              <label key={option} className={option === flow.label ? "on" : ""}>
-                <input
-                  type="radio"
-                  name="device-name"
-                  value={option}
-                  checked={option === flow.label}
-                  onChange={() => flow.setLabel(option)}
-                />
-                {option}
-              </label>
-            ))}
-          </fieldset>
-          <button
-            type="button"
-            className="btn primary wide"
-            onClick={() => flow.setStep("passkey")}
-            data-testid="join-name-continue"
-          >
-            Continue
-          </button>
-        </>
+        <NameStep
+          options={DEVICE_LABELS}
+          label={flow.label}
+          note="Your passkey will carry this name, so you can find it in your password manager later."
+          busy={false}
+          onLabel={flow.setLabel}
+          onContinue={() => flow.setStep("passkey")}
+          testId="join-name-continue"
+        />
       );
     case "passkey":
       return (
@@ -144,15 +125,19 @@ function JoinStepView({
       );
     case "interrupted":
     case "busy":
+      // The reason is the screen's heading, above its one button.
       return (
-        <button
-          type="button"
-          className="btn primary wide"
-          onClick={onLeave}
-          data-testid="join-leave"
-        >
-          {flow.step === "busy" ? "OK" : "Start again"}
-        </button>
+        <>
+          <h2 data-testid="join-ended">{flow.ended}</h2>
+          <button
+            type="button"
+            className="btn primary wide"
+            onClick={onLeave}
+            data-testid="join-leave"
+          >
+            {flow.step === "busy" ? "OK" : "Start again"}
+          </button>
+        </>
       );
   }
 }
@@ -171,13 +156,13 @@ function Scan({
   const [typed, setTyped] = useState("");
   return (
     <>
+      <h2>Scan the code on your other device</h2>
       <p className="locknote" data-testid="join-home-screen">
         {PAIRING_COPY.homeScreen}
       </p>
-      <h2>Scan the code on your other device</h2>
       {typing ? null : (
         <QrScanner
-          onResult={flow.scanned}
+          onResult={(text) => flow.entered(text, "scan")}
           onBlocked={() => {
             flow.setError(PAIRING_COPY.camera);
             setTyping(true);
@@ -190,7 +175,7 @@ function Scan({
           className="unlockform"
           onSubmit={(e) => {
             e.preventDefault();
-            flow.scanned(typed);
+            flow.entered(typed, "typed");
           }}
         >
           <label className="setupfield">

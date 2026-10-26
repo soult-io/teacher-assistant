@@ -45,12 +45,7 @@ import {
   type JoinPort,
   type SetupPort,
 } from "./device/device-port.js";
-import {
-  DeviceCannotUnlockError,
-  PassphraseRequiredError,
-  UnlockBackoffError,
-  WrongPassphraseError,
-} from "./device/vault.js";
+import { unlockFailureCopy } from "./device/unlock-copy.js";
 import {
   AutoLock,
   HIDDEN_DEFAULT_MS,
@@ -205,16 +200,7 @@ function unlockErrorMessage(err: unknown): string {
   if (err instanceof SyncError) {
     return "Couldn't reach the sync server. Your local data is unaffected — try again.";
   }
-  if (err instanceof UnlockBackoffError) {
-    return `Too many tries. Try again in ${Math.ceil(err.retryAfterMs / 1000)} seconds.`;
-  }
-  if (err instanceof WrongPassphraseError || err instanceof DeviceCannotUnlockError) {
-    return err.message;
-  }
-  if (err instanceof PassphraseRequiredError) {
-    return "Type your passphrase, then unlock with your passkey.";
-  }
-  return PASSKEY_RETRY;
+  return unlockFailureCopy(err, "Type your passphrase, then unlock with your passkey.");
 }
 
 /** Where a set-up device's resume opens (flows §2 screen map). */
@@ -356,6 +342,7 @@ export function App({
           const heldJoin = joinRef.current;
           joinRef.current = null;
           if (heldJoin !== null) {
+            // A failed wipe leaves a `pairing` record no window runs: the status read wipes it.
             pendingWipeRef.current = heldJoin.discard().catch(() => {});
           }
           flushSync(() => {
@@ -430,7 +417,7 @@ export function App({
               setTier(status.tier);
             }
           },
-          () => {},
+          () => {}, // unreadable: keep the style already known; the next lock reads it again
         );
       } catch (err) {
         teacher?.lock(); // never leave MK and the period keys behind a failed unlock
@@ -494,6 +481,7 @@ export function App({
     deviceRef.current = null;
     setDeviceOpen(false);
     setJoin(null);
+    // A failed wipe leaves a `pairing` record no window runs: the status read wipes it.
     pendingWipeRef.current = (held?.discard() ?? Promise.resolve()).catch(() => {});
     void pendingWipeRef.current.then(() => startNewSetup(false));
   }, [startNewSetup]);
@@ -646,7 +634,7 @@ function BusyScreen({ onRetry }: { readonly onRetry: () => void }) {
           </span>
           <h1>Teacher Assistant</h1>
           <p className="locknote" data-testid="setup-busy">
-            {PAIRING_COPY.busy}
+            {PAIRING_COPY.busyRetry}
           </p>
           <button
             type="button"
@@ -1024,6 +1012,7 @@ function ReadyApp({
     go: setTrackView,
   });
 
+  const thisDevice = isDesktop ? "laptop" : "phone";
   const track = (() => {
     if (trackView === "devices") {
       return (
@@ -1040,6 +1029,7 @@ function ReadyApp({
           openApprover={openApprover}
           tier={tier}
           online={online}
+          deviceWord={thisDevice}
           autoStart={addAutoStart}
           onClose={() => {
             setAddAutoStart(false);

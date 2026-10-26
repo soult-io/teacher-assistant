@@ -5,13 +5,10 @@
 import type { VaultTier } from "@teacher-assistant/crypto";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { DeviceHandle, JoinPort } from "../../device/device-port.js";
-import type { DeviceLabel } from "../../device/passkey-prf.js";
+import { type DeviceLabel, defaultDeviceLabel } from "../../device/passkey-prf.js";
 import { PAIRING_COPY } from "../../device/pairing-copy.js";
-import { SETUP_ERRORS } from "../../device/setup-copy.js";
-import { POLL_MS } from "./useAddDevice.js";
-
-/** The relay's pairing lifetime, counted on this device from the scan. */
-const PAIRING_TTL_MS = 10 * 60 * 1000;
+import { passkeyErrorCopy } from "../../device/setup-copy.js";
+import { PAIRING_TTL_MS, POLL_MS } from "../../device/pairing-limits.js";
 
 export type JoinStep =
   | "scan"
@@ -22,17 +19,6 @@ export type JoinStep =
   | "done"
   | "interrupted"
   | "busy";
-
-/** B2 errors (the passkey), mirroring first setup's E-S4/E-S5 with the generic provider copy. */
-function passkeyError(err: unknown): string {
-  const name = err instanceof Error ? err.name : "";
-  if (name === "SetupNeedsHomeScreenError") {
-    return SETUP_ERRORS.homeScreen;
-  }
-  return name === "NotSupportedError" || name === "TypeError"
-    ? SETUP_ERRORS.noPasskey
-    : PAIRING_COPY.passkeyNew;
-}
 
 export interface JoinOptions {
   readonly port: JoinPort;
@@ -45,34 +31,38 @@ export interface JoinOptions {
 
 export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions) {
   const [step, setStep] = useState<JoinStep>("scan");
-  const [label, setLabel] = useState<DeviceLabel>(
-    deviceWord === "phone" ? "Phone" : "School computer",
-  );
+  const [label, setLabel] = useState<DeviceLabel>(defaultDeviceLabel(deviceWord));
   const [tier, setTier] = useState<VaultTier | null>(null);
   const [code, setCode] = useState<string | null>(null);
   const [expiresAt, setExpiresAt] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Why the pairing ended (interrupted, or another window is setting this device up). */
+  const [ended, setEnded] = useState<string | null>(null);
   // The App may pass a new callback on each render; the post must still run exactly once.
   const doneRef = useRef(onDone);
   doneRef.current = onDone;
 
   const interrupt = useCallback((message: string) => {
     setCode(null);
-    setError(message);
+    setEnded(message);
     setStep("interrupted");
   }, []);
 
-  /** B1: a scanned or typed square code. */
-  const scanned = useCallback(
-    (text: string) => {
+  /**
+   * B1: a scanned or typed square code. Returns false for one that does not decode, so the
+   * scanner keeps the camera running after a stray QR.
+   */
+  const entered = useCallback(
+    (text: string, how: "scan" | "typed"): boolean => {
       setError(null);
       if (!port.begin(text)) {
-        setError(PAIRING_COPY.badSquareCode);
-        return;
+        setError(how === "scan" ? PAIRING_COPY.badScan : PAIRING_COPY.badSquareCode);
+        return false;
       }
       setExpiresAt(Date.now() + PAIRING_TTL_MS);
       setStep("name");
+      return true;
     },
     [port],
   );
@@ -102,11 +92,11 @@ export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions
       sealed((await port.sealVault()).code);
     } catch (err) {
       if (err instanceof Error && err.name === "SetupBusyError") {
-        setError(PAIRING_COPY.busy);
+        setEnded(PAIRING_COPY.busy);
         setStep("busy");
         return;
       }
-      setError(passkeyError(err));
+      setError(passkeyErrorCopy(err, PAIRING_COPY.passkeyNew));
     } finally {
       setBusy(false);
     }
@@ -121,7 +111,7 @@ export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions
         sealed((await port.sealVault(passphrase)).code);
       } catch (err) {
         const weak = err instanceof Error && err.name === "WeakPassphraseError";
-        setError(weak ? err.message : passkeyError(err));
+        setError(weak ? err.message : passkeyErrorCopy(err, PAIRING_COPY.passkeyNew));
       } finally {
         setBusy(false);
       }
@@ -152,14 +142,14 @@ export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions
       }
     };
     void (async () => {
-      const posted = await port.postRequest().catch(() => "offline" as const);
+      const posted = await port.postRequest().catch(() => "interrupted" as const);
       if (!live) {
         return;
       }
       if (posted === "waiting") {
         void wait();
       } else {
-        interrupt(posted === "offline" ? PAIRING_COPY.needsInternet : PAIRING_COPY.interruptedNew);
+        interrupt(PAIRING_COPY.interruptedNew);
       }
     })();
     return () => {
@@ -179,7 +169,8 @@ export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions
     busy,
     error,
     setError,
-    scanned,
+    ended,
+    entered,
     savePasskey,
     savePassphrase,
   };

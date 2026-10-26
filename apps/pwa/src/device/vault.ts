@@ -235,15 +235,23 @@ export class UnlockedDevice implements RequestSigner {
     return { publicKey: this.#boxPk, privateKey: this.#secrets.boxSk };
   }
 
-  /** Store the enrollment grant, AEAD-sealed under the vault's record key. */
-  async storeGrant(store: DeviceStore, grant: StoredGrant): Promise<void> {
+  /** The grant AEAD-sealed under the vault's record key (base64url), for the record. */
+  #sealGrant(grant: StoredGrant): string {
     this.#assertUnlocked();
     if (grant.role !== this.role) {
       throw new Error("the grant is for the other role");
     }
     const plaintext = utf8(JSON.stringify(grant));
-    const sealed = toBase64(sealGrantAtRest(this.#secrets.recordKey, this.publicKey, plaintext));
-    zeroize(plaintext);
+    try {
+      return toBase64(sealGrantAtRest(this.#secrets.recordKey, this.publicKey, plaintext));
+    } finally {
+      zeroize(plaintext);
+    }
+  }
+
+  /** Store the enrollment grant, AEAD-sealed under the vault's record key. */
+  async storeGrant(store: DeviceStore, grant: StoredGrant): Promise<void> {
+    const sealed = this.#sealGrant(grant);
     await store.update((record) => ({ ...record, grant: sealed }));
   }
 
@@ -272,13 +280,7 @@ export class UnlockedDevice implements RequestSigner {
    * device never holds a grant while its stage still says the pairing is unfinished.
    */
   async storePairedGrant(store: DeviceStore, grant: StoredGrant, now: number): Promise<void> {
-    this.#assertUnlocked();
-    if (grant.role !== this.role) {
-      throw new Error("the grant is for the other role");
-    }
-    const plaintext = utf8(JSON.stringify(grant));
-    const sealed = toBase64(sealGrantAtRest(this.#secrets.recordKey, this.publicKey, plaintext));
-    zeroize(plaintext);
+    const sealed = this.#sealGrant(grant);
     await store.update((record) => ({
       ...record,
       grant: sealed,

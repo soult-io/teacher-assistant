@@ -60,6 +60,8 @@ export interface ApprovePort {
   /** The fresh unlock ceremony, then the grant. Throws on a failed unlock (retry on A3). */
   approve(passphrase?: string): Promise<ApproveOutcome>;
   abandon(): void;
+  /** True once the session can do nothing more (approve() ended it, or abandon()). */
+  readonly over: boolean;
 }
 
 /** Pairing on the new device, B1–B4 (pairing.ts PairingJoin). */

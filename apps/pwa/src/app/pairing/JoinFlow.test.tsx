@@ -71,6 +71,35 @@ function fakeJoin(
   return port;
 }
 
+// A stand-in scanner: a button that "decodes" a poster QR and records what the flow answered.
+const scanResults: boolean[] = [];
+const scanningCamera = { getUserMedia: () => new Promise<MediaStream>(() => {}) };
+vi.mock("./QrScanner.js", () => ({
+  QrScanner: ({
+    onResult,
+    onBlocked,
+    mediaDevices,
+  }: {
+    readonly onResult: (text: string) => boolean;
+    readonly onBlocked: () => void;
+    readonly mediaDevices?: unknown;
+  }) => {
+    if (mediaDevices !== scanningCamera) {
+      queueMicrotask(onBlocked); // every other test: no camera
+      return null;
+    }
+    return (
+      <button
+        type="button"
+        data-testid="fake-scan"
+        onClick={() => scanResults.push(onResult("https://example.test/poster"))}
+      >
+        scan
+      </button>
+    );
+  },
+}));
+
 const blockedCamera = {
   getUserMedia: () => Promise.reject(new DOMException("denied", "NotAllowedError")),
 };
@@ -112,7 +141,7 @@ describe("B1 — scan or type the square code", () => {
     );
     expect(
       await screen.findByText(
-        "Camera is off for this app. Tap 'Type the code instead', or allow the camera in Settings.",
+        "Camera is off for this app. Type the code below, or allow the camera in Settings and start again.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("join-typed-code")).toBeInTheDocument();
@@ -126,6 +155,30 @@ describe("B1 — scan or type the square code", () => {
       screen.getByText("That code isn't right. Check it on your other device and type it again."),
     ).toBeInTheDocument();
     expect(screen.queryByTestId("join-name-continue")).toBeNull();
+  });
+});
+
+describe("B1 — a stray QR (UX review fix)", () => {
+  it("a scanned QR that is not a pairing code says so and keeps the camera running", async () => {
+    const port = fakeJoin({ begin: false });
+    render(
+      <JoinFlow
+        port={port}
+        deviceWord="phone"
+        onDone={vi.fn()}
+        onVaultSealed={vi.fn()}
+        onLeave={vi.fn()}
+        mediaDevices={scanningCamera}
+      />,
+    );
+    fireEvent.click(await screen.findByTestId("fake-scan"));
+    expect(
+      screen.getByText(
+        "That isn't the code from your other device. Point the camera at the square code on its screen.",
+      ),
+    ).toBeInTheDocument();
+    expect(scanResults).toEqual([false]); // false: the scanner does not turn the camera off
+    expect(screen.getByTestId("fake-scan")).toBeInTheDocument();
   });
 });
 

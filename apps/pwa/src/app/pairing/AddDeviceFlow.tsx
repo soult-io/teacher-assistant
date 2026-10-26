@@ -21,6 +21,8 @@ export interface AddDeviceFlowProps {
   readonly openApprover: () => ApprovePort;
   readonly tier: VaultTier;
   readonly online: boolean;
+  /** This device's word, "laptop" or "phone" (flows §0: from screen size). */
+  readonly deviceWord: string;
   /** Skip A0 and open the square code at once (S6 "Add my phone now" jumps to A1). */
   readonly autoStart?: boolean;
   /** Leave the flow (Cancel or Done). Unmounting abandons any open session. */
@@ -31,6 +33,7 @@ export function AddDeviceFlow({
   openApprover,
   tier,
   online,
+  deviceWord,
   autoStart = false,
   onClose,
 }: AddDeviceFlowProps) {
@@ -38,7 +41,13 @@ export function AddDeviceFlow({
   return (
     <div className="lock pairing" data-testid={`add-step-${flow.step}`}>
       <div className="lockbody">
-        <AddStepView flow={flow} tier={tier} online={online} onClose={onClose} />
+        <AddStepView
+          flow={flow}
+          tier={tier}
+          online={online}
+          deviceWord={deviceWord}
+          onClose={onClose}
+        />
         <p className="err" role="alert">
           {flow.error ?? ""}
         </p>
@@ -51,11 +60,13 @@ function AddStepView({
   flow,
   tier,
   online,
+  deviceWord,
   onClose,
 }: {
   readonly flow: AddDeviceState;
   readonly tier: VaultTier;
   readonly online: boolean;
+  readonly deviceWord: string;
   readonly onClose: () => void;
 }): ReactNode {
   const word = deviceWordOf(flow.label);
@@ -71,7 +82,12 @@ function AddStepView({
       );
     case "show":
       return flow.squareCode === null ? null : (
-        <ShowSquareCode code={flow.squareCode} expiresAt={flow.expiresAt} onCancel={onClose} />
+        <ShowSquareCode
+          code={flow.squareCode}
+          expiresAt={flow.expiresAt}
+          copy={squareCodeCopy(deviceWord)}
+          onCancel={onClose}
+        />
       );
     case "match":
       return (
@@ -121,8 +137,10 @@ function AddStepView({
         </>
       );
     case "stopped":
+      // The reason is the screen's heading, above Start again (a new square code).
       return (
         <>
+          <h2 data-testid="pair-ended">{flow.ended}</h2>
           <button
             type="button"
             className="btn primary wide"
@@ -160,7 +178,7 @@ function Whose({
   return (
     <>
       <h2>Add a device</h2>
-      <p className="locknote">Whose device is it?</p>
+      {/* Release 1 has one choice, so no "Whose device is it?" until release 2 adds one. */}
       <button
         type="button"
         className="btn primary wide choice"
@@ -177,32 +195,69 @@ function Whose({
   );
 }
 
+interface SquareCodeCopy {
+  readonly heading: string;
+  readonly steps: readonly [string, string, string];
+  readonly typeInstead: string;
+  readonly waiting: string;
+}
+
+/**
+ * A1's lines, from the device showing the code (UX fidelity review, EU-8). Step 2 names the
+ * S0 button the OTHER device shows, which carries that device's own word.
+ */
+function squareCodeCopy(deviceWord: string): SquareCodeCopy {
+  return deviceWord === "phone"
+    ? {
+        heading: "Add another device",
+        steps: [
+          "On the other device, open Teacher Assistant.",
+          'Tap "Add this laptop to my account".',
+          "Point its camera at this code.",
+        ],
+        typeInstead: "Can't scan? Type this on the other device instead",
+        waiting: "Waiting for the other device…",
+      }
+    : {
+        heading: "Add your phone",
+        steps: [
+          "On your phone, open Teacher Assistant.",
+          'Tap "Add this phone to my account".',
+          "Point your phone's camera at this code.",
+        ],
+        typeInstead: "Can't scan? Type this on your phone instead",
+        waiting: "Waiting for your phone…",
+      };
+}
+
 /** [A1] The square code, the collapsed typed code, and the time left. */
 function ShowSquareCode({
   code,
   expiresAt,
+  copy,
   onCancel,
 }: {
   readonly code: string;
   readonly expiresAt: number;
+  readonly copy: SquareCodeCopy;
   readonly onCancel: () => void;
 }) {
   return (
     <>
-      <h2>Add your phone</h2>
+      <h2>{copy.heading}</h2>
       <ol className="pairsteps">
-        <li>On your phone, open Teacher Assistant.</li>
-        <li>Tap "Add this device to my account".</li>
-        <li>Point your phone's camera at this code.</li>
+        {copy.steps.map((step) => (
+          <li key={step}>{step}</li>
+        ))}
       </ol>
       <QrCode code={code} />
       <details className="typedcode">
-        <summary>Can't scan? Type this on your phone instead</summary>
+        <summary>{copy.typeInstead}</summary>
         <p className="mono squarecode" data-testid="pair-typed-code">
           {code.replace(/-/g, " ")}
         </p>
       </details>
-      <Countdown until={expiresAt} waiting="Waiting for your phone…" />
+      <Countdown until={expiresAt} waiting={copy.waiting} />
       <button type="button" className="btn wide" onClick={onCancel} data-testid="pair-cancel">
         Cancel
       </button>
@@ -239,7 +294,9 @@ function ConfirmItsYou({
           className="unlockform"
           onSubmit={(e) => {
             e.preventDefault();
-            onConfirm(passphrase);
+            if (!busy) {
+              onConfirm(passphrase); // Enter while a confirm is running does nothing
+            }
           }}
         >
           {/* Not focused on load: a password manager fills it only when she taps it (C10). */}

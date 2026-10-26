@@ -97,6 +97,18 @@ describe("labelled enrollment request (label inside AEAD_K)", () => {
   });
 });
 
+describe("a zeroized pairing key (EU-8 FERPA B-1)", () => {
+  it("never seals or opens anything", () => {
+    const { key, sid } = mailbox();
+    const { request: req } = request();
+    const blob = sealLabelledEnrollmentRequest(key, sid, req, "Phone");
+    key.fill(0); // what abandon() does to K in place
+    expect(() => sealLabelledEnrollmentRequest(key, sid, req, "Phone")).toThrow(PairingError);
+    expect(() => sealPairing(key, sid, "grant", utf8("{}"))).toThrow(PairingError);
+    expect(() => openLabelledEnrollmentRequest(key, sid, blob)).toThrow(PairingError);
+  });
+});
+
 describe("verificationCodeMatches", () => {
   it("accepts the code in any case, with or without dashes and spaces", () => {
     const { request: req, verificationCode } = request();

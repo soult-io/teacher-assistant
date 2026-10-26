@@ -46,6 +46,7 @@ function recordingApprover(calls: string[]): ApprovePort {
     abandon: () => {
       calls.push("abandon");
     },
+    over: false,
   };
 }
 

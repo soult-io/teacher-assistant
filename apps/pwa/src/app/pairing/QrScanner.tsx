@@ -1,7 +1,8 @@
 // [B1] The in-app scanner (spec §13 A-5): the camera through getUserMedia and the QR
 // decoder bundled in the app shell (jsQR, pinned). Frames are read into a canvas in
-// memory, never stored or sent; the first decoded text goes to the pairing and the camera
-// is turned off. A blocked or missing camera hands over to the typed code.
+// memory, never stored or sent. Each decoded text goes to the pairing; the camera turns off
+// at the first one that is a pairing code. A blocked or missing camera hands over to the
+// typed code.
 
 import jsQR from "jsqr";
 import { useEffect, useRef } from "react";
@@ -9,7 +10,8 @@ import { useEffect, useRef } from "react";
 const SCAN_EVERY_MS = 250;
 
 export interface QrScannerProps {
-  readonly onResult: (text: string) => void;
+  /** A decoded QR. True: it was the pairing code, turn the camera off. False: keep scanning. */
+  readonly onResult: (text: string) => boolean;
   /** The camera is blocked, missing, or the browser has none for this app. */
   readonly onBlocked: () => void;
   /** Test seam: the media devices (defaults to navigator.mediaDevices). */
@@ -53,9 +55,8 @@ export function QrScanner({ onResult, onBlocked, mediaDevices }: QrScannerProps)
         inversionAttempts: "dontInvert",
       });
       frame.data.fill(0);
-      if (found !== null && found.data.length > 0) {
+      if (found !== null && found.data.length > 0 && handlers.current.onResult(found.data)) {
         stop();
-        handlers.current.onResult(found.data);
       }
     };
     media.getUserMedia({ video: { facingMode: "environment" }, audio: false }).then(

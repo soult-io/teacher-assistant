@@ -8,11 +8,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApprovePort } from "../../device/device-port.js";
 import type { DeviceLabel } from "../../device/passkey-prf.js";
 import { PAIRING_COPY, wrongMatchingCode } from "../../device/pairing-copy.js";
-import { SETUP_ERRORS } from "../../device/setup-copy.js";
+import { POLL_MS } from "../../device/pairing-limits.js";
+import { unlockFailureCopy } from "../../device/unlock-copy.js";
 import { EMPTY_MATCHING_CODE, matchingCodeComplete } from "./MatchingCodeInput.js";
-
-/** How often the laptop asks the relay whether the phone checked in (well under its 30/min limit). */
-export const POLL_MS = 3000;
 
 export type AddStep = "whose" | "show" | "match" | "confirm" | "done" | "stopped";
 
@@ -29,22 +27,6 @@ export function deviceWordOf(label: DeviceLabel | null): string {
   return label === null ? "device" : label.toLowerCase();
 }
 
-/** A3 errors: the unlock failed, the session stays (flows Flow 3 errors). */
-function confirmError(err: unknown): string {
-  const name = err instanceof Error ? err.name : "";
-  if (name === "WrongPassphraseError") {
-    return "That passphrase didn't match. Try again.";
-  }
-  if (name === "UnlockBackoffError") {
-    const ms = (err as { readonly retryAfterMs?: number }).retryAfterMs ?? 0;
-    return `Too many tries. Try again in ${Math.ceil(ms / 1000)} seconds.`;
-  }
-  if (name === "PassphraseRequiredError") {
-    return "Type your passphrase, then confirm with your passkey.";
-  }
-  return SETUP_ERRORS.passkey;
-}
-
 export function useAddDevice({ openApprover, tier, autoStart = false }: AddDeviceOptions) {
   const portRef = useRef<ApprovePort | null>(null);
   const [step, setStep] = useState<AddStep>("whose");
@@ -54,6 +36,8 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
   const [parts, setParts] = useState<readonly string[]>(EMPTY_MATCHING_CODE);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /** Why the session ended (shown as the stopped screen's heading). */
+  const [ended, setEnded] = useState<string | null>(null);
 
   const end = useCallback(() => {
     portRef.current?.abandon();
@@ -61,13 +45,13 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
   }, []);
   useEffect(() => end, [end]); // unmount (leaving, or a lock) abandons the session
 
-  /** The session is over: one line, then Start again from A0. */
+  /** The session is over: one line, then Start again (a new square code, flows Flow 3 errors). */
   const stop = useCallback(
     (message: string) => {
       end();
       setSquareCode(null);
       setParts(EMPTY_MATCHING_CODE);
-      setError(message);
+      setEnded(message);
       setStep("stopped");
     },
     [end],
@@ -78,6 +62,7 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
     end();
     setBusy(true);
     setError(null);
+    setEnded(null);
     const port = openApprover();
     portRef.current = port;
     try {
@@ -190,7 +175,12 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
             stop(PAIRING_COPY.needsInternet);
         }
       } catch (err) {
-        setError(confirmError(err)); // stays on A3; the matching code is kept
+        if (port.over) {
+          stop(PAIRING_COPY.interrupted); // the session ended after the unlock: no retry
+          return;
+        }
+        // The unlock failed: stay on A3, the matching code is kept.
+        setError(unlockFailureCopy(err, "Type your passphrase, then confirm with your passkey."));
       } finally {
         setBusy(false);
       }
@@ -207,13 +197,11 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
     setParts,
     busy,
     error,
+    ended,
     start,
     checkCode,
     confirm,
-    restart: () => {
-      setError(null);
-      setStep("whose");
-    },
+    restart: () => void start(),
     end,
   };
 }

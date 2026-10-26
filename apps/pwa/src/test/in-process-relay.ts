@@ -7,12 +7,9 @@ import { buildApp } from "@teacher-assistant/sync-relay/app";
 import { newOwnerCode, ownerCodeHash } from "@teacher-assistant/sync-relay/owner-code";
 import { InMemoryRelayStore } from "@teacher-assistant/sync-relay/store";
 
-type RelayApp = ReturnType<typeof buildApp>;
-
 export interface Relay {
   readonly store: InMemoryRelayStore;
-  readonly app: RelayApp;
-  /** Every request the devices sent: path + parsed body. */
+  /** Every request the devices sent: path + decoded body text. */
   readonly sent: { readonly path: string; readonly body: string }[];
   transport(options?: {
     readonly dropResponse?: (path: string) => boolean;
@@ -30,7 +27,6 @@ export function relay(): Relay {
   const sent: { path: string; body: string }[] = [];
   return {
     store,
-    app,
     sent,
     transport:
       (options = {}) =>

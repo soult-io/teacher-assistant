@@ -17,3 +17,17 @@ export const SETUP_ERRORS = {
 /** The S2 result line on a device whose passkey gives no PRF output (Style W, DN-1a). */
 export const STYLE_W_LINE =
   "Your password manager's passkey can't unlock the app by itself yet, so you'll also set a passphrase.";
+
+/**
+ * The copy for a failed passkey step (E-S4 retry, E-S5 cannot save one at all, or the A-3
+ * install line). `retry` is the E-S4 line for this flow: Bitwarden on her first device,
+ * generic on a device being added (A-13).
+ */
+export function passkeyErrorCopy(err: unknown, retry: string): string {
+  const name = err instanceof Error ? err.name : "";
+  if (name === "SetupNeedsHomeScreenError") {
+    return SETUP_ERRORS.homeScreen;
+  }
+  // WebAuthn missing (no navigator.credentials) or the platform refuses the ceremony.
+  return name === "NotSupportedError" || name === "TypeError" ? SETUP_ERRORS.noPasskey : retry;
+}

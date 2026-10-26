@@ -57,6 +57,7 @@ import {
   type PasskeyPrfPort,
 } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
+import { PAIRING_TTL_MS } from "./pairing-limits.js";
 import { type ReleaseSetupLock, SetupBusyError, type SetupLockPort } from "./setup-lock.js";
 import {
   createDeviceVault,
@@ -66,8 +67,7 @@ import {
   type UnlockedDevice,
 } from "./vault.js";
 
-/** A pairing session lives this long from open (the relay's PAIRING_TTL_MS). */
-export const PAIRING_TTL_MS = 10 * 60 * 1000;
+export { PAIRING_TTL_MS };
 /** Wrong matching codes allowed per session; the 3rd abandons it (spec §13 A-4). */
 export const MATCH_TRIES = 3;
 
@@ -139,6 +139,7 @@ export class PairingApprover {
   #arrived: ArrivedRequest | null = null;
   #matched: string | null = null;
   #misses = 0;
+  #approving = false;
   #over = false;
 
   constructor(deps: ApproverDeps) {
@@ -166,7 +167,9 @@ export class PairingApprover {
     const secret = newPairingSecret();
     const sid = pairingSid(secret);
     const outcome = await control(this.#deps.transport, this.#deps.device).openPairingSession(sid);
-    if (outcome !== "ok") {
+    if (outcome !== "ok" || this.#over) {
+      // Refused, no answer, or abandoned (a lock, Cancel) while the relay answered: S never
+      // lands on this object. An opened mailbox simply expires on the relay.
       zeroize(secret);
       this.#over = true;
       return { kind: outcome === "refused" ? "too_many" : "offline" };
@@ -190,7 +193,8 @@ export class PairingApprover {
     if (this.#arrived !== null && !this.#over) {
       return { kind: "arrived", label: this.#arrived.label };
     }
-    if (this.#over || this.#key === null || this.#sid === null) {
+    const session = this.#live();
+    if (session === null) {
       return { kind: "interrupted" };
     }
     if (this.#expired()) {
@@ -198,17 +202,18 @@ export class PairingApprover {
       return { kind: "expired" };
     }
     const read = await control(this.#deps.transport, this.#deps.device).getPairingRequest(
-      this.#sid,
+      session.sid,
     );
     if (read.kind !== "blob") {
       return { kind: "waiting" }; // not posted yet, or no answer: the TTL decides
     }
-    if (this.#over || this.#key === null || this.#sid === null) {
+    const live = this.#live();
+    if (live === null) {
       return { kind: "interrupted" }; // abandoned while the read was in flight
     }
     let opened: { readonly request: EnrollmentRequest; readonly label: string };
     try {
-      opened = openLabelledEnrollmentRequest(this.#key, this.#sid, fromBase64(read.blob));
+      opened = openLabelledEnrollmentRequest(live.key, live.sid, fromBase64(read.blob));
     } catch {
       this.abandon();
       return { kind: "interrupted" };
@@ -255,16 +260,26 @@ export class PairingApprover {
     if (this.#over || arrived === null || matched === null) {
       throw new Error("type the matching code first");
     }
+    if (this.#approving) {
+      throw new Error("an approval is already running"); // one approve per session
+    }
     if (this.#expired()) {
       this.abandon();
       return { kind: "expired" };
     }
-    const fresh = await unlockDevice({
-      store: this.#deps.store,
-      passkey: this.#deps.passkey,
-      ...(passphrase === undefined ? {} : { passphrase }),
-      now: () => this.#now(),
-    });
+    this.#approving = true;
+    let fresh: UnlockedDevice;
+    try {
+      fresh = await unlockDevice({
+        store: this.#deps.store,
+        passkey: this.#deps.passkey,
+        ...(passphrase === undefined ? {} : { passphrase }),
+        now: () => this.#now(),
+      });
+    } catch (err) {
+      this.#approving = false; // a failed unlock leaves the session as it was: retry on A3
+      throw err;
+    }
     try {
       return await this.#grant(fresh, arrived, matched);
     } finally {
@@ -273,19 +288,42 @@ export class PairingApprover {
     }
   }
 
+  /**
+   * The session's key and sid while it is live, else null. Checked after every wait in
+   * #grant: abandon() zeroizes K in place, so a lock that lands during a wait must stop
+   * the grant before anything is sealed or sent.
+   */
+  #live(): { readonly key: Uint8Array; readonly sid: string } | null {
+    return this.#over || this.#key === null || this.#sid === null
+      ? null
+      : { key: this.#key, sid: this.#sid };
+  }
+
   async #grant(
     fresh: UnlockedDevice,
     arrived: ArrivedRequest,
     matched: string,
   ): Promise<ApproveOutcome> {
-    const key = this.#key;
-    const sid = this.#sid;
-    if (this.#over || key === null || sid === null) {
+    if (this.#live() === null) {
       return { kind: "interrupted" }; // abandoned (a lock) during the unlock ceremony
     }
     const stored = await fresh.readGrant(this.#deps.store);
     if (stored?.role !== "teacher") {
       throw new Error("only a teacher device can add a device");
+    }
+    // The name goes into the master `devices` map BEFORE grant-put, so a device the relay
+    // enrolls is always named, even if a lock lands while grant-put is out. If grant-put is
+    // then refused, the entry names a key the relay never enrolled; the Devices screen
+    // lists relay keys only (EU-9), so it never shows.
+    const device = arrived.request.signingPublicKeyB64;
+    await this.#deps.session.addDevice(device, {
+      label: arrived.label,
+      role: this.#role,
+      enrolledAt: asTimestamp(this.#now()),
+    });
+    const live = this.#live();
+    if (live === null) {
+      return { kind: "interrupted" }; // a lock during the reads: K is zeroized, send nothing
     }
     const keyring = teacherKeyringFromGrant(fresh.boxKeypair(), stored.grant);
     let blob: string;
@@ -296,28 +334,26 @@ export class PairingApprover {
         matched,
         stored.grant.masterDocId,
       );
-      blob = toBase64(sealTeacherGrant(key, sid, grant));
+      blob = toBase64(sealTeacherGrant(live.key, live.sid, grant));
     } finally {
       keyring.destroy();
     }
-    const device = arrived.request.signingPublicKeyB64;
+    // No wait between the check above and this send: nothing can zeroize K in between.
     const outcome = await control(this.#deps.transport, fresh).putPairingGrant({
-      sid,
+      sid: live.sid,
       device,
       role: this.#role,
       scopes: this.#deps.session.pairingScopes(),
       blob,
     });
-    if (outcome === "refused") {
-      return { kind: "interrupted" };
+    switch (outcome) {
+      case "ok":
+        return { kind: "added", label: arrived.label };
+      case "refused":
+        return { kind: "interrupted" };
+      case "ambiguous":
+        return { kind: "offline" };
     }
-    // `ambiguous` may have enrolled B: record its name too, so it never shows as unknown.
-    await this.#deps.session.addDevice(device, {
-      label: arrived.label,
-      role: this.#role,
-      enrolledAt: asTimestamp(this.#now()),
-    });
-    return outcome === "ok" ? { kind: "added", label: arrived.label } : { kind: "offline" };
   }
 
   /** End the session: zeroize S and K, drop the request and the counter. Idempotent. */
@@ -348,7 +384,7 @@ export interface JoinDeps {
   readonly now?: () => number;
 }
 
-export type PostOutcome = "waiting" | "interrupted" | "offline";
+export type PostOutcome = "waiting" | "interrupted";
 export type JoinPollOutcome = "waiting" | "done" | "interrupted";
 
 /**
@@ -366,6 +402,7 @@ export class PairingJoin {
   #device: UnlockedDevice | null = null;
   #request: EnrollmentRequest | null = null;
   #release: ReleaseSetupLock | null = null;
+  #posted: Promise<PostOutcome> | null = null;
   #over = false;
 
   constructor(deps: JoinDeps) {
@@ -465,7 +502,14 @@ export class PairingJoin {
   }
 
   /** F2 step 2: post the sealed, labelled request. A refusal or no answer discards the device. */
-  async postRequest(): Promise<PostOutcome> {
+  postRequest(): Promise<PostOutcome> {
+    // Once per pairing: the relay refuses a second put for a slot (first write wins), and a
+    // screen effect that runs twice must not turn that refusal into a discard.
+    this.#posted ??= this.#post();
+    return this.#posted;
+  }
+
+  async #post(): Promise<PostOutcome> {
     const key = this.#key;
     const sid = this.#sid;
     const request = this.#request;
@@ -475,11 +519,13 @@ export class PairingJoin {
     }
     const blob = toBase64(sealLabelledEnrollmentRequest(key, sid, request, label));
     const outcome = await control(this.#deps.transport, this.device).putPairingRequest(sid, blob);
-    if (outcome === "ok") {
-      return "waiting";
+    if (outcome === "refused") {
+      await this.discard(); // taken, expired or unknown
+      return "interrupted";
     }
-    await this.discard();
-    return outcome === "refused" ? "interrupted" : "offline";
+    // `ambiguous` (no answer) may still have landed, and her matching code is already on
+    // screen: keep waiting for the grant. If it never comes, the 10 minutes end it.
+    return "waiting";
   }
 
   /**

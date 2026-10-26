@@ -3,7 +3,7 @@
 // pairing layer (tested in process in device/pairing.test.ts).
 
 import type { VaultTier } from "@teacher-assistant/crypto";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ApprovePort } from "../../device/device-port.js";
 import type {
@@ -12,6 +12,7 @@ import type {
   OpenOutcome,
   PollOutcome,
 } from "../../device/pairing.js";
+import { WrongPassphraseError } from "../../device/vault.js";
 import { AddDeviceFlow } from "./AddDeviceFlow.js";
 import { qrPayload } from "./QrCode.js";
 
@@ -20,6 +21,7 @@ const CODE = "3f9a0c71be24d58e";
 
 interface FakeApprover extends ApprovePort {
   readonly calls: string[];
+  over: boolean;
 }
 
 function fakeApprover(
@@ -58,13 +60,20 @@ function fakeApprover(
     abandon: () => {
       calls.push("abandon");
     },
+    over: false,
   };
 }
 
 function renderFlow(port: ApprovePort, tier: VaultTier = "prf", online = true) {
   const onClose = vi.fn();
   const view = render(
-    <AddDeviceFlow openApprover={() => port} tier={tier} online={online} onClose={onClose} />,
+    <AddDeviceFlow
+      openApprover={() => port}
+      tier={tier}
+      online={online}
+      deviceWord="laptop"
+      onClose={onClose}
+    />,
   );
   return { onClose, ...view };
 }
@@ -201,9 +210,7 @@ describe("A3 — confirm it's you (fresh unlock) and A4", () => {
       approve: () => {
         if (first) {
           first = false;
-          const err = new Error("That passphrase didn't match. Try again.");
-          err.name = "WrongPassphraseError";
-          return Promise.reject(err);
+          return Promise.reject(new WrongPassphraseError());
         }
         return Promise.resolve({ kind: "added", label: "Phone" });
       },
@@ -239,6 +246,57 @@ describe("A3 — confirm it's you (fresh unlock) and A4", () => {
   });
 });
 
+describe("UX review fixes", () => {
+  it("A1 on a phone says 'Add another device' and names the laptop's S0 button", async () => {
+    const port = fakeApprover({ poll: { kind: "waiting" } });
+    render(
+      <AddDeviceFlow
+        openApprover={() => port}
+        tier="prf"
+        online
+        deviceWord="phone"
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("add-mine"));
+    expect(await screen.findByText("Add another device")).toBeInTheDocument();
+    expect(screen.getByText('Tap "Add this laptop to my account".')).toBeInTheDocument();
+    expect(screen.getByText(/Waiting for the other device…/)).toBeInTheDocument();
+  });
+
+  it("A1 on a laptop names the phone's S0 button", async () => {
+    renderFlow(fakeApprover({ poll: { kind: "waiting" } }));
+    fireEvent.click(screen.getByTestId("add-mine"));
+    expect(await screen.findByText('Tap "Add this phone to my account".')).toBeInTheDocument();
+  });
+
+  it("an ended session shows its reason as the heading; Start again opens a new square code", async () => {
+    const port = fakeApprover({ poll: { kind: "expired" } });
+    renderFlow(port);
+    fireEvent.click(screen.getByTestId("add-mine"));
+    expect(await screen.findByTestId("pair-ended")).toHaveTextContent("Time ran out. Start again.");
+    fireEvent.click(screen.getByTestId("pair-restart"));
+    await waitFor(() => expect(port.calls.filter((c) => c === "open")).toHaveLength(2));
+  });
+
+  it("a session that ended after the unlock (A3) stops instead of asking to retry", async () => {
+    const port = fakeApprover({
+      approve: () => {
+        (port as { over: boolean }).over = true;
+        return Promise.reject(new Error("the master doc write failed"));
+      },
+    });
+    renderFlow(port);
+    await toMatch(port);
+    typeCode(CODE);
+    fireEvent.click(screen.getByTestId("pair-approve"));
+    fireEvent.click(screen.getByTestId("pair-confirm"));
+    expect(await screen.findByTestId("pair-ended")).toHaveTextContent(
+      "Pairing interrupted. Start again.",
+    );
+  });
+});
+
 describe("leaving", () => {
   it("Cancel or unmount abandons the session (S, K and the request are dropped)", async () => {
     const port = fakeApprover({ poll: { kind: "waiting" } });
@@ -254,7 +312,14 @@ describe("leaving", () => {
   it("autoStart (S6 'Add my phone now') opens the square code at once", async () => {
     const port = fakeApprover({ poll: { kind: "waiting" } });
     render(
-      <AddDeviceFlow openApprover={() => port} tier="prf" online autoStart onClose={vi.fn()} />,
+      <AddDeviceFlow
+        openApprover={() => port}
+        tier="prf"
+        online
+        deviceWord="laptop"
+        autoStart
+        onClose={vi.fn()}
+      />,
     );
     expect(await screen.findByTestId("pair-qr")).toBeInTheDocument();
     expect(port.calls[0]).toBe("open");

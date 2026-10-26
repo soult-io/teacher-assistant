@@ -48,6 +48,11 @@ export const TEACHER_DEVICE_LABELS = [
 ] as const;
 export type TeacherDeviceLabel = (typeof TEACHER_DEVICE_LABELS)[number];
 
+/** The name preselected on a name screen, from screen size (flows S1a, B1a). */
+export function defaultDeviceLabel(deviceWord: string): TeacherDeviceLabel {
+  return deviceWord === "phone" ? "Phone" : "School computer";
+}
+
 /** The names a para device can take (release 2 pairs one). */
 export const PARA_DEVICE_LABELS = ["Para phone", "Para tablet"] as const;
 

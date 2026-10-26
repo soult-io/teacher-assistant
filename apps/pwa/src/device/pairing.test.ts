@@ -163,6 +163,15 @@ async function prepareB(join: PairingJoin, code: string, label: DeviceLabel = "P
   return join.sealVault(tier === "passphrase" ? PASSPHRASE : undefined);
 }
 
+/** Open a session on A and return its square code. */
+async function openCode(pa: PairingApprover): Promise<string> {
+  const opened = await pa.open();
+  if (opened.kind !== "open") {
+    throw new Error(`open failed: ${opened.kind}`);
+  }
+  return opened.code;
+}
+
 function bodiesTo(r: Relay, suffix: string): string[] {
   return r.sent.filter((s) => s.path.endsWith(suffix)).map((s) => s.body);
 }
@@ -184,14 +193,11 @@ describe("F2 pairing, in process, end to end", () => {
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
 
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    expect(opened.code.replace(/-/g, "")).toHaveLength(52);
-    expect(opened.code).not.toMatch(/[:/]/); // A-5: the raw secret, never a link
+    const square = await openCode(pa);
+    expect(square.replace(/-/g, "")).toHaveLength(52);
+    expect(square).not.toMatch(/[:/]/); // A-5: the raw secret, never a link
 
-    const { code } = await prepareB(join, opened.code);
+    const { code } = await prepareB(join, square);
     // B shows the code before anything is posted (§4.2 step 2).
     expect(bodiesTo(r, "/request-put")).toHaveLength(0);
     expect((await b.store.load())?.setupStage?.stage).toBe("pairing");
@@ -240,7 +246,13 @@ describe("F2 pairing, in process, end to end", () => {
       label: "School computer",
       role: "teacher",
     });
-    expect(manifest.devices.get(bKey)).toMatchObject({ label: "Phone", role: "teacher" });
+    expect(manifest.devices.get(bKey)).toEqual({
+      label: "Phone",
+      role: "teacher",
+      enrolledAt: clock,
+    });
+    expect(manifest.periodKeys.size).toBe(1);
+    expect([...manifest.periodKeys.keys()]).toEqual([...manifest.streams.keys()]);
     const keyring = teacherKeyringFromGrant(join.device.boxKeypair(), bGrant.grant);
     for (const [tag, wrapped] of manifest.periodKeys) {
       keyring.addWrappedPeriodKey(tag, fromBase64(wrapped));
@@ -265,11 +277,8 @@ describe("F2 pairing, in process, end to end", () => {
     const b = newDevice(PRF_B);
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    const { code } = await prepareB(join, opened.code, "Home computer");
+    const square = await openCode(pa);
+    const { code } = await prepareB(join, square, "Home computer");
     await join.postRequest();
     expect((await pa.poll()).kind).toBe("arrived");
     pa.checkCode(code);
@@ -283,7 +292,7 @@ describe("F2 pairing, in process, end to end", () => {
       expect(sent.body).not.toContain("Home computer");
       expect(sent.body).not.toContain("School computer");
       expect(sent.body).not.toContain("label");
-      expect(sent.path).not.toContain(pairingSid(decodePairingSecret(opened.code)));
+      expect(sent.path).not.toContain(pairingSid(decodePairingSecret(square)));
     }
     a.session.lock();
   });
@@ -295,11 +304,8 @@ describe("F2 pairing, in process, end to end", () => {
     const b = newDevice(PRF_B);
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    const { code } = await prepareB(join, opened.code);
+    const square = await openCode(pa);
+    const { code } = await prepareB(join, square);
     await join.postRequest();
     await pa.poll();
     expect(pa.checkCode(code)).toBe("match");
@@ -353,11 +359,8 @@ describe("A refuses before grant-put (spec §4.2 step 3, §11 EU-8)", () => {
       const r = relay();
       const a = await trustedDevice(r);
       const pa = approver(a, r.transport());
-      const opened = await pa.open();
-      if (opened.kind !== "open") {
-        throw new Error("open failed");
-      }
-      await postCrafted(r, opened.code, label);
+      const square = await openCode(pa);
+      await postCrafted(r, square, label);
       expect(await pa.poll()).toEqual({ kind: "interrupted" });
       expect(pa.over).toBe(true);
       expect(pa.checkCode("0000-0000-0000-0000")).toBe("stopped");
@@ -393,12 +396,9 @@ describe("A refuses before grant-put (spec §4.2 step 3, §11 EU-8)", () => {
       session: a.session,
       now,
     });
-    const opened = await tampered.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(tampered);
     const join = joiner(b, r.transport());
-    await prepareB(join, opened.code);
+    await prepareB(join, square);
     expect(await join.postRequest()).toBe("waiting");
     expect(await tampered.poll()).toEqual({ kind: "interrupted" });
     expect(bodiesTo(r, "/grant-put")).toHaveLength(0);
@@ -413,11 +413,8 @@ describe("matching code (A-4)", () => {
     const b = newDevice(PRF_B);
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    await prepareB(join, opened.code);
+    const square = await openCode(pa);
+    await prepareB(join, square);
     await join.postRequest();
     await pa.poll();
     const assertions = a.passkey.assertions;
@@ -433,11 +430,8 @@ describe("matching code (A-4)", () => {
     const b = newDevice(PRF_B);
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    const { code } = await prepareB(join, opened.code);
+    const square = await openCode(pa);
+    const { code } = await prepareB(join, square);
     await join.postRequest();
     await pa.poll();
     const requestGets = bodiesTo(r, "/request-get").length;
@@ -466,11 +460,8 @@ describe("matching code (A-4)", () => {
     const b = newDevice(PRF_B);
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    const { code } = await prepareB(join, opened.code);
+    const square = await openCode(pa);
+    const { code } = await prepareB(join, square);
     await join.postRequest();
     await pa.poll();
     await pa.poll();
@@ -513,11 +504,8 @@ describe("timeouts, cancels and locks", () => {
     const b = newDevice(PRF_B);
     const pa = approver(a, r.transport());
     const join = joiner(b, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    await prepareB(join, opened.code);
+    const square = await openCode(pa);
+    await prepareB(join, square);
     await join.postRequest();
     pa.abandon();
     expect(await pa.poll()).toEqual({ kind: "interrupted" });
@@ -547,11 +535,8 @@ describe("timeouts, cancels and locks", () => {
       session: a.session,
       now,
     });
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
-    const { code } = await prepareB(join, opened.code);
+    const square = await openCode(pa);
+    const { code } = await prepareB(join, square);
     await join.postRequest();
     await pa.poll();
     expect(pa.checkCode(code)).toBe("match");
@@ -560,18 +545,144 @@ describe("timeouts, cancels and locks", () => {
     a.session.lock();
   });
 
+  // FERPA gate B-1: abandon() zeroizes K in place. A lock that lands during any wait after
+  // the fresh unlock must stop the grant: no seal under a zeroed K, no grant-put.
+  for (const during of ["the grant read", "the name write"] as const) {
+    it(`A: a lock during ${during} sends nothing`, async () => {
+      const r = relay();
+      const a = await trustedDevice(r);
+      const b = newDevice(PRF_B);
+      const join = joiner(b, r.transport());
+      let pa: PairingApprover | null = null;
+      let armed = false;
+      const passkey = {
+        create: a.passkey.create.bind(a.passkey),
+        assert: async (id: Uint8Array) => {
+          const result = await a.passkey.assert(id);
+          armed = true; // the fresh unlock has its gesture; what follows is #grant
+          return result;
+        },
+      };
+      const load = a.store.load.bind(a.store);
+      a.store.load = async () => {
+        if (armed && during === "the grant read") {
+          pa?.abandon(); // the App's lock lands while readGrant waits on IndexedDB
+        }
+        return load();
+      };
+      const session = {
+        pairingScopes: () => a.session.pairingScopes(),
+        addDevice: async (...args: Parameters<Session["addDevice"]>) => {
+          if (during === "the name write") {
+            pa?.abandon(); // the lock lands while the name is being written
+          }
+          await a.session.addDevice(...args);
+        },
+      };
+      pa = new PairingApprover({
+        store: a.store,
+        passkey,
+        transport: r.transport(),
+        device: a.device,
+        session,
+        now,
+      });
+      const square = await openCode(pa);
+      const { code } = await prepareB(join, square);
+      await join.postRequest();
+      await pa.poll();
+      expect(pa.checkCode(code)).toBe("match");
+      expect(await pa.approve()).toEqual({ kind: "interrupted" });
+      expect(bodiesTo(r, "/grant-put")).toHaveLength(0);
+      a.session.lock();
+    });
+  }
+
+  it("A: an open() abandoned while the relay answers keeps no secret and reports over", async () => {
+    const r = relay();
+    const a = await trustedDevice(r);
+    let pa: PairingApprover | null = null;
+    const transport: Transport = async (req) => {
+      const res = await r.transport()(req);
+      if (req.path.endsWith("/pairing/open")) {
+        pa?.abandon(); // a lock or Cancel while the open call was out
+      }
+      return res;
+    };
+    pa = new PairingApprover({
+      store: a.store,
+      passkey: a.passkey,
+      transport,
+      device: a.device,
+      session: a.session,
+      now,
+    });
+    expect(await pa.open()).toEqual({ kind: "offline" });
+    expect(pa.over).toBe(true);
+    expect(await pa.poll()).toEqual({ kind: "interrupted" });
+    expect(bodiesTo(r, "/request-get")).toHaveLength(0);
+    a.session.lock();
+  });
+
+  it("A: approve runs once at a time", async () => {
+    const r = relay();
+    const a = await trustedDevice(r);
+    const b = newDevice(PRF_B);
+    const pa = approver(a, r.transport());
+    const join = joiner(b, r.transport());
+    const square = await openCode(pa);
+    const { code } = await prepareB(join, square);
+    await join.postRequest();
+    await pa.poll();
+    pa.checkCode(code);
+    const first = pa.approve();
+    await expect(pa.approve()).rejects.toThrow("already running");
+    expect((await first).kind).toBe("added");
+    expect(bodiesTo(r, "/grant-put")).toHaveLength(1);
+    a.session.lock();
+  });
+
+  it("B: request-put goes out once, however often it is asked (an effect re-run)", async () => {
+    const r = relay();
+    const a = await trustedDevice(r);
+    const pa = approver(a, r.transport());
+    const square = await openCode(pa);
+    const b = newDevice(PRF_B);
+    const join = joiner(b, r.transport());
+    await prepareB(join, square);
+    const [one, two] = await Promise.all([join.postRequest(), join.postRequest()]);
+    expect([one, two, await join.postRequest()]).toEqual(["waiting", "waiting", "waiting"]);
+    expect(bodiesTo(r, "/request-put")).toHaveLength(1);
+    expect(await b.store.load()).not.toBeNull();
+    a.session.lock();
+  });
+
+  it("B: a request-put with no answer keeps waiting (it may have landed), and pairs if it did", async () => {
+    const r = relay();
+    const a = await trustedDevice(r);
+    const pa = approver(a, r.transport());
+    const square = await openCode(pa);
+    const b = newDevice(PRF_B);
+    const join = joiner(b, r.transport({ dropResponse: (path) => path.endsWith("/request-put") }));
+    const { code } = await prepareB(join, square);
+    expect(await join.postRequest()).toBe("waiting");
+    expect(await b.store.load()).not.toBeNull();
+    await pa.poll();
+    pa.checkCode(code);
+    expect((await pa.approve()).kind).toBe("added");
+    expect(await join.poll()).toBe("done");
+    a.session.lock();
+  });
+
   it("B: a discard (lock or cancel) wipes the half-made device and releases the setup lock", async () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b = newDevice(PRF_B);
     const lock = memorySetupLock();
     const join = joiner(b, r.transport(), lock);
-    await prepareB(join, opened.code);
+    await prepareB(join, square);
     expect(await lock.held()).toBe(true);
     await join.discard();
     expect(await b.store.load()).toBeNull();
@@ -592,16 +703,13 @@ describe("two setups or pairings at the same time (TEACH-75 decision)", () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b1 = newDevice(PRF_B);
     const b2 = newDevice(new Uint8Array(32).fill(3));
     const j1 = joiner(b1, r.transport());
     const j2 = joiner(b2, r.transport());
-    const first = await prepareB(j1, opened.code);
-    const second = await prepareB(j2, opened.code, "Tablet");
+    const first = await prepareB(j1, square);
+    const second = await prepareB(j2, square, "Tablet");
     expect(await j1.postRequest()).toBe("waiting");
     expect(await j2.postRequest()).toBe("interrupted");
     expect(await b2.store.load()).toBeNull();
@@ -637,16 +745,13 @@ describe("two setups or pairings at the same time (TEACH-75 decision)", () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b = newDevice(PRF_B);
     const lock = memorySetupLock(); // one profile: both windows see the same lock
     const window1 = joiner(b, r.transport(), lock);
     const window2 = joiner(b, r.transport(), lock);
-    await prepareB(window1, opened.code);
-    expect(window2.begin(opened.code)).toBe(true);
+    await prepareB(window1, square);
+    expect(window2.begin(square)).toBe(true);
     window2.setLabel("Tablet");
     await expect(window2.createPasskey()).rejects.toThrow(SetupBusyError);
     expect(b.passkey.names).toHaveLength(1); // no second, orphan passkey
@@ -660,13 +765,10 @@ describe("two setups or pairings at the same time (TEACH-75 decision)", () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b = newDevice(PRF_B);
     const lock = memorySetupLock();
-    await prepareB(joiner(b, r.transport(), lock), opened.code);
+    await prepareB(joiner(b, r.transport(), lock), square);
     const crashed = memorySetupLock(); // the browser released the dead window's lock
     expect(await readDeviceStatus(b.store, now(), crashed)).toEqual({
       kind: "none",
@@ -681,10 +783,7 @@ describe("two setups or pairings at the same time (TEACH-75 decision)", () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b = newDevice(PRF_B);
     const lock = memorySetupLock();
     const f1 = new FirstSetup({
@@ -700,7 +799,7 @@ describe("two setups or pairings at the same time (TEACH-75 decision)", () => {
     f1.setLabel("Phone");
     await f1.createPasskey();
     const join = joiner(b, r.transport(), lock);
-    join.begin(opened.code);
+    join.begin(square);
     join.setLabel("Phone");
     await expect(join.createPasskey()).rejects.toThrow(SetupBusyError);
     f1.end();
@@ -749,21 +848,18 @@ describe("the pairing record", () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b = newDevice(PRF_B);
     const join = joiner(b, r.transport());
-    const { code } = await prepareB(join, opened.code);
+    const { code } = await prepareB(join, square);
     const record = await b.store.load();
     const text = JSON.stringify(record, (_k, v: unknown) =>
       v instanceof Uint8Array ? toBase64(v) : v,
     );
-    const secret = decodePairingSecret(opened.code);
+    const secret = decodePairingSecret(square);
     for (const needle of [
-      opened.code,
-      opened.code.replace(/-/g, ""),
+      square,
+      square.replace(/-/g, ""),
       toBase64(secret),
       toBase64(pairingKey(secret)),
       pairingSid(secret),
@@ -780,10 +876,7 @@ describe("the pairing record", () => {
     const r = relay();
     const a = await trustedDevice(r);
     const pa = approver(a, r.transport());
-    const opened = await pa.open();
-    if (opened.kind !== "open") {
-      throw new Error("open failed");
-    }
+    const square = await openCode(pa);
     const b = newDevice(PRF_B);
     const writes: unknown[] = [];
     const update = b.store.update.bind(b.store);
@@ -793,7 +886,7 @@ describe("the pairing record", () => {
       return next;
     };
     const join = joiner(b, r.transport());
-    const { code } = await prepareB(join, opened.code);
+    const { code } = await prepareB(join, square);
     await join.postRequest();
     await pa.poll();
     pa.checkCode(code);

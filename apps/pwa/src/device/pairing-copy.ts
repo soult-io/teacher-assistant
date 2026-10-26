@@ -13,11 +13,18 @@ export const PAIRING_COPY = {
   offlineAdd: "Adding a device needs the internet. Connect and try again.",
   tooMany: "Too many devices waiting. Wait 10 minutes, then try again.",
   camera:
-    "Camera is off for this app. Tap 'Type the code instead', or allow the camera in Settings.",
+    "Camera is off for this app. Type the code below, or allow the camera in Settings and start again.",
+  /** A typed square code that does not decode. */
   badSquareCode: "That code isn't right. Check it on your other device and type it again.",
+  /** A scanned QR that is not a pairing code (a poster on the wall); the camera keeps going. */
+  badScan:
+    "That isn't the code from your other device. Point the camera at the square code on its screen.",
   passkeyNew:
     "Try your passkey again. If your password manager doesn't pop up, choose it in the window that appears.",
   busy: "This device is being set up in another window. Finish there, or close that window and open the app again.",
+  /** The App's busy screen, whose button is "Try again". */
+  busyRetry:
+    "This device is being set up in another window. Finish there, or close that window and tap Try again.",
   homeScreen:
     "Using the app from your Home Screen? Add it there first, then open it from the icon.",
 } as const;
