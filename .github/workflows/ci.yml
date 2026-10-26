@@ -87,9 +87,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Build + Trivy-scan the four deployable images on every run (PRs included). Only
-  # on main does publish-images push the scanned image as sha-<commit> + latest (the
-  # stack repo pins by sha/tag). The job name prefix is read by the verify dashboard.
+  # Build + Trivy-scan the four deployable images on every run (PRs included), plus
+  # pwa-qa: the same pwa Dockerfile built with VITE_TA_SYNTHETIC=1 (TEACH-74), the only
+  # image that carries the synthetic caseload. Only on main does publish-images push the
+  # scanned images (the stack repo pins by sha/tag). The job name prefix is read by the
+  # verify dashboard.
   build-images:
     needs: [verify]
     runs-on: ubuntu-latest
@@ -101,8 +103,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # seed: what tools/synthetic-seed-check.sh must find in the built bundle.
           - name: pwa
             dockerfile: apps/pwa/Dockerfile
+            seed: absent
+          - name: pwa-qa
+            dockerfile: apps/pwa/Dockerfile
+            build-args: VITE_TA_SYNTHETIC=1
+            seed: present
           - name: sync-relay
             dockerfile: services/sync-relay/Dockerfile
           - name: content-api
@@ -123,12 +131,28 @@ jobs:
         with:
           context: .
           file: ${{ matrix.dockerfile }}
+          build-args: ${{ matrix.build-args }}
           pull: true
           load: true
           push: false
           tags: teacher-assistant-${{ matrix.name }}:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # TEACH-74: read the bundle out of the built image itself. The prod pwa must not
+      # carry the synthetic seed; pwa-qa must carry all of it (proves the markers still
+      # match the seed, so the prod side cannot pass by matching nothing).
+      - name: Synthetic seed check
+        if: matrix.seed != ''
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+          SEED: ${{ matrix.seed }}
+        run: |
+          set -euo pipefail
+          id=$(docker create "$SCAN_IMAGE")
+          docker cp "$id:/usr/share/nginx/html" "$RUNNER_TEMP/html"
+          docker rm "$id" >/dev/null
+          tools/synthetic-seed-check.sh "$RUNNER_TEMP/html" "$SEED"
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -157,8 +181,9 @@ jobs:
           retention-days: 1
 
   # The only job with packages: write. Runs no third-party action; it pushes the image
-  # build-images scanned. needs: waits for every matrix leg, so one failed scan blocks
-  # all four pushes.
+  # build-images scanned. needs: waits for every matrix leg, so one failed scan or seed
+  # check blocks every push. pwa-qa goes to the pwa repository as qa-sha-<commit> only:
+  # never `latest`, never a plain sha- tag, so nothing that pins the prod pwa can pick it up.
   publish-images:
     needs: [build-images]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
@@ -168,7 +193,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        name: [pwa, sync-relay, content-api, diff-orchestrator]
+        include:
+          - { name: pwa, image: pwa, tag-prefix: sha-, latest: true }
+          - { name: pwa-qa, image: pwa, tag-prefix: qa-sha-, latest: false }
+          - { name: sync-relay, image: sync-relay, tag-prefix: sha-, latest: true }
+          - { name: content-api, image: content-api, tag-prefix: sha-, latest: true }
+          - { name: diff-orchestrator, image: diff-orchestrator, tag-prefix: sha-, latest: true }
     steps:
       - name: Download the scanned image
         uses: actions/download-artifact@v8
@@ -188,9 +218,13 @@ jobs:
       - name: Push the scanned image
         env:
           SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
-          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.name }}
+          IMAGE: ${{ env.IMAGE_PREFIX }}-${{ matrix.image }}
+          TAG_PREFIX: ${{ matrix.tag-prefix }}
+          LATEST: ${{ matrix.latest }}
         run: |
-          for tag in "sha-$GITHUB_SHA" latest; do
+          tags=("$TAG_PREFIX$GITHUB_SHA")
+          if [ "$LATEST" = "true" ]; then tags+=(latest); fi
+          for tag in "${tags[@]}"; do
             docker tag "$SCAN_IMAGE" "$IMAGE:$tag"
             docker push "$IMAGE:$tag"
           done

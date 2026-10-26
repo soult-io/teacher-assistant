@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1
 # pwa-static — builds the PWA and serves the static app shell via an
-# unprivileged nginx. CI builds/pushes ghcr.io/nsoult-agentic/teacher-assistant-pwa:sha-<commit>.
+# unprivileged nginx. CI builds/pushes ghcr.io/soult-io/teacher-assistant-pwa:sha-<commit>
+# (prod) and, from the same Dockerfile with VITE_TA_SYNTHETIC=1, :qa-sha-<commit> (ta-qa).
 #
 # SECURITY: nginx-unprivileged runs as non-root (uid 101) on port 8080; the
 # image serves only the built app shell + reference assets. No student data ever
@@ -14,6 +15,9 @@ COPY pnpm-workspace.yaml package.json pnpm-lock.yaml tsconfig.base.json ./
 COPY packages ./packages
 COPY apps ./apps
 RUN pnpm install --frozen-lockfile
+# TEACH-74: empty (the default) = a production build with no synthetic caseload. Only the
+# ta-qa variant passes VITE_TA_SYNTHETIC=1; Vite reads it from the build environment.
+ARG VITE_TA_SYNTHETIC=""
 RUN pnpm -r --filter @teacher-assistant/pwa... run build
 
 ## ---- runtime: unprivileged nginx serving the static shell ----

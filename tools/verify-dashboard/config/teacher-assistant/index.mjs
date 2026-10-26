@@ -43,7 +43,7 @@ export const ciPillSpecs = [
     workflow: "ci.yml",
     jobs: [
       { label: "verify", equals: "verify" },
-      { label: "build-images ×4", startsWith: "build-images" },
+      { label: "build-images ×5", startsWith: "build-images" },
     ],
   },
   { workflow: "ferpa-guard.yml", label: "ferpa-guard" },

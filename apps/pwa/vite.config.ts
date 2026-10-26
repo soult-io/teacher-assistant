@@ -1,6 +1,34 @@
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+// TEACH-74: the synthetic caseload ships ONLY in a QA/synthetic build (VITE_TA_SYNTHETIC=1,
+// the ta-qa image). Every other build (the prod image, a release) replaces the seed
+// module with a stub, so the seed's records are not in the bundle at all. The flag alone
+// is not enough: first setup takes `synthetic` as a runtime argument, so the bundler
+// cannot drop the seed as dead code. CI checks the built image (tools/synthetic-seed-check.sh).
+const PWA_ROOT = fileURLToPath(new URL(".", import.meta.url));
+// realpath: Vite's module ids are symlink-resolved, so a checkout under a symlink still matches.
+const SYNTHETIC_SEED = realpathSync(
+  fileURLToPath(new URL("./src/data/synthetic-seed.ts", import.meta.url)),
+);
+
+function stubSyntheticSeed(): Plugin {
+  return {
+    name: "ta-stub-synthetic-seed",
+    apply: "build",
+    enforce: "pre",
+    load(id) {
+      if (id.split("?")[0] !== SYNTHETIC_SEED) {
+        return null;
+      }
+      // Must export every runtime symbol non-test code imports from synthetic-seed.ts.
+      return 'export function buildSyntheticSeed() { throw new Error("This build has no synthetic data."); }';
+    },
+  };
+}
 
 // Offline-first is MANDATORY (architecture §1.2): Niah's device is often without
 // connectivity (taking probes home; school networks). The service worker precaches
@@ -15,50 +43,54 @@ import { VitePWA } from "vite-plugin-pwa";
 // normal reload without losing offline-first. generateSW's declarative navigation
 // options cannot express "network-first online, durable-precache fallback offline",
 // and the hand-written SW also makes the exact cache boundary auditable for FERPA.
-export default defineConfig({
-  plugins: [
-    react(),
-    VitePWA({
-      strategies: "injectManifest",
-      srcDir: "src",
-      filename: "sw.ts",
-      // The new SW takes over promptly (skipWaiting/clientsClaim in sw.ts) and the
-      // registration reloads the page when it does. Inline the registration into
-      // index.html (no separate registerSW.js) so it rides index.html's no-cache and
-      // can never itself be served stale.
-      registerType: "autoUpdate",
-      injectRegister: "inline",
-      // Precache the app shell only. Do NOT add anything here that would cache a
-      // student-data response.
-      injectManifest: {
-        globPatterns: ["**/*.{js,css,html,svg,ico,woff2}"],
+export default defineConfig(({ mode }) => {
+  const synthetic = loadEnv(mode, PWA_ROOT, "VITE_").VITE_TA_SYNTHETIC === "1";
+  return {
+    plugins: [
+      ...(synthetic ? [] : [stubSyntheticSeed()]),
+      react(),
+      VitePWA({
+        strategies: "injectManifest",
+        srcDir: "src",
+        filename: "sw.ts",
+        // The new SW takes over promptly (skipWaiting/clientsClaim in sw.ts) and the
+        // registration reloads the page when it does. Inline the registration into
+        // index.html (no separate registerSW.js) so it rides index.html's no-cache and
+        // can never itself be served stale.
+        registerType: "autoUpdate",
+        injectRegister: "inline",
+        // Precache the app shell only. Do NOT add anything here that would cache a
+        // student-data response.
+        injectManifest: {
+          globPatterns: ["**/*.{js,css,html,svg,ico,woff2}"],
+        },
+        devOptions: {
+          // Keep `vite dev` free of the service worker; SW behaviour is exercised
+          // against the built shell (`vite preview`) and in e2e.
+          enabled: false,
+        },
+        manifest: {
+          name: "Teacher Assistant",
+          short_name: "TeachAsst",
+          description: "Offline-first planning + IEP goal tracking",
+          theme_color: "#1f2937",
+          background_color: "#ffffff",
+          display: "standalone",
+          start_url: "/",
+        },
+      }),
+    ],
+    server: {
+      port: 5173,
+      proxy: {
+        // Dev-only: forward to the local services (see .env.example ports).
+        "/sync": "http://localhost:8931",
+        "/reference": "http://localhost:8932",
+        "/differentiate": "http://localhost:8933",
       },
-      devOptions: {
-        // Keep `vite dev` free of the service worker; SW behaviour is exercised
-        // against the built shell (`vite preview`) and in e2e.
-        enabled: false,
-      },
-      manifest: {
-        name: "Teacher Assistant",
-        short_name: "TeachAsst",
-        description: "Offline-first planning + IEP goal tracking",
-        theme_color: "#1f2937",
-        background_color: "#ffffff",
-        display: "standalone",
-        start_url: "/",
-      },
-    }),
-  ],
-  server: {
-    port: 5173,
-    proxy: {
-      // Dev-only: forward to the local services (see .env.example ports).
-      "/sync": "http://localhost:8931",
-      "/reference": "http://localhost:8932",
-      "/differentiate": "http://localhost:8933",
     },
-  },
-  build: {
-    outDir: "dist",
-  },
+    build: {
+      outDir: "dist",
+    },
+  };
 });
