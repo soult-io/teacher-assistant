@@ -55,6 +55,7 @@ jobs:
         include:
           - name: pwa
             dockerfile: apps/pwa/Dockerfile
+            seed: absent
           - name: sync-relay
             dockerfile: services/sync-relay/Dockerfile
           - name: content-api
@@ -81,6 +82,20 @@ jobs:
           tags: teacher-assistant-${{ matrix.name }}:scan
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # TEACH-74: a release is a prod image; its bundle must not carry the synthetic seed.
+      # (ci.yml's pwa-qa leg proves on every commit that the markers still match the seed.)
+      - name: Synthetic seed check
+        if: matrix.seed != ''
+        env:
+          SCAN_IMAGE: teacher-assistant-${{ matrix.name }}:scan
+          SEED: ${{ matrix.seed }}
+        run: |
+          set -euo pipefail
+          id=$(docker create "$SCAN_IMAGE")
+          docker cp "$id:/usr/share/nginx/html" "$RUNNER_TEMP/html"
+          docker rm "$id" >/dev/null
+          tools/synthetic-seed-check.sh "$RUNNER_TEMP/html" "$SEED"
 
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0

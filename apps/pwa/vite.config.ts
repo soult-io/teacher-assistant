@@ -1,6 +1,29 @@
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv, type Plugin } from "vite";
 import { VitePWA } from "vite-plugin-pwa";
+
+// TEACH-74: the synthetic caseload ships ONLY in a QA/synthetic build (VITE_TA_SYNTHETIC=1,
+// the ta-qa image). Every other build (the prod image, a release) replaces the seed
+// module with a stub, so the seed's records are not in the bundle at all. The flag alone
+// is not enough: first setup takes `synthetic` as a runtime argument, so the bundler
+// cannot drop the seed as dead code. CI checks the built image (tools/synthetic-seed-check.sh).
+const PWA_ROOT = fileURLToPath(new URL(".", import.meta.url));
+const SYNTHETIC_SEED = fileURLToPath(new URL("./src/data/synthetic-seed.ts", import.meta.url));
+
+function stubSyntheticSeed(): Plugin {
+  return {
+    name: "ta-stub-synthetic-seed",
+    apply: "build",
+    enforce: "pre",
+    load(id) {
+      if (id.split("?")[0] !== SYNTHETIC_SEED) {
+        return null;
+      }
+      return 'export function buildSyntheticSeed() { throw new Error("This build has no synthetic data."); }';
+    },
+  };
+}
 
 // Offline-first is MANDATORY (architecture §1.2): Niah's device is often without
 // connectivity (taking probes home; school networks). The service worker precaches
@@ -15,8 +38,9 @@ import { VitePWA } from "vite-plugin-pwa";
 // normal reload without losing offline-first. generateSW's declarative navigation
 // options cannot express "network-first online, durable-precache fallback offline",
 // and the hand-written SW also makes the exact cache boundary auditable for FERPA.
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   plugins: [
+    ...(loadEnv(mode, PWA_ROOT, "VITE_").VITE_TA_SYNTHETIC === "1" ? [] : [stubSyntheticSeed()]),
     react(),
     VitePWA({
       strategies: "injectManifest",
@@ -61,4 +85,4 @@ export default defineConfig({
   build: {
     outDir: "dist",
   },
-});
+}));
