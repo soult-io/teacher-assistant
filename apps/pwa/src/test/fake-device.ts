@@ -6,7 +6,13 @@
 import type { VaultTier } from "@teacher-assistant/crypto";
 import { InMemoryPersistence } from "@teacher-assistant/sync";
 import type { TeacherVault } from "../data/session.js";
-import type { DeviceHandle, DevicePort, SetupPort } from "../device/device-port.js";
+import type {
+  ApprovePort,
+  DeviceHandle,
+  DevicePort,
+  JoinPort,
+  SetupPort,
+} from "../device/device-port.js";
 import type { DeviceStatus } from "../device/first-setup.js";
 
 export interface FakeDevice extends DevicePort {
@@ -22,6 +28,8 @@ export function fakeDevicePort(
     readonly tier?: VaultTier;
     readonly setup?: (device?: DeviceHandle) => SetupPort;
     readonly unlock?: (passphrase?: string) => Promise<DeviceHandle>;
+    readonly pair?: () => JoinPort;
+    readonly approver?: () => ApprovePort;
   } = {},
 ): FakeDevice {
   let locks = 0;
@@ -58,5 +66,15 @@ export function fakeDevicePort(
       return options.unlock?.(passphrase) ?? Promise.resolve(handle());
     },
     teacherVault: () => Promise.resolve({} as TeacherVault),
+    pair:
+      options.pair ??
+      (() => {
+        throw new Error("no pairing in this fake");
+      }),
+    approver:
+      options.approver ??
+      (() => {
+        throw new Error("no pairing in this fake");
+      }),
   };
 }

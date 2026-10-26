@@ -18,6 +18,7 @@ import { TEACHER_DEVICE_LABELS, type TeacherDeviceLabel } from "../../device/pas
 import { PassphraseStep } from "./PassphraseStep.js";
 import { RecoveryCheck, RecoveryShow } from "./RecoveryCode.js";
 import { SetupCodeStep } from "./SetupCodeStep.js";
+import { STYLE_W_LINE } from "../../device/setup-copy.js";
 import { type FirstSetupFlow, SETUP_ERRORS, type Step, useFirstSetup } from "./useFirstSetup.js";
 
 export interface SetupFlowProps {
@@ -29,8 +30,13 @@ export interface SetupFlowProps {
   readonly online: boolean;
   /** "laptop" or "phone" (flows §0: from screen size). */
   readonly deviceWord: string;
-  /** Setup finished (stage `done`); the unlocked device opens the app. */
-  readonly onDone: (device: DeviceHandle) => void;
+  /**
+   * Setup finished (stage `done`); the unlocked device opens the app — then, when she chose
+   * "Add my phone now" on S6, pairing on this device (flows §5 A1).
+   */
+  readonly onDone: (device: DeviceHandle, addPhone: boolean) => void;
+  /** S0 "Add this device to my account": pairing on this new device (flows §5 B1). */
+  readonly onPair?: () => void;
   /** A line to show on the first screen (an unfinished setup was cleared, A-8). */
   readonly startNotice?: string | null;
   /** The vault was just sealed: the App takes the unlocked device under auto-lock and Lock. */
@@ -41,9 +47,6 @@ export interface SetupFlowProps {
 
 /** Where the S2 result line and the storage warning belong: the steps right after S2. */
 const NOTICE_STEPS: ReadonlySet<Step> = new Set<Step>(["passphrase", "show_code", "check_code"]);
-
-const STYLE_W_LINE =
-  "Your password manager's passkey can't unlock the app by itself yet, so you'll also set a passphrase.";
 
 export function SetupFlow(props: SetupFlowProps) {
   const flow = useFirstSetup({
@@ -81,6 +84,7 @@ function StepView({
   online,
   deviceWord,
   onDone,
+  onPair,
   homeScreenOnly = false,
 }: SetupFlowProps & { readonly flow: FirstSetupFlow }): ReactNode {
   const { busy, recoveryCode } = flow;
@@ -89,7 +93,7 @@ function StepView({
       return homeScreenOnly ? (
         <HomeScreenFirst />
       ) : (
-        <Welcome deviceWord={deviceWord} onCode={() => flow.setStep("code")} />
+        <Welcome deviceWord={deviceWord} onCode={() => flow.setStep("code")} onPair={onPair} />
       );
     case "code":
       return (
@@ -141,7 +145,11 @@ function StepView({
       );
     case "done":
       return (
-        <Done deviceWord={deviceWord} tier={flow.tier} onContinue={() => onDone(port.device)} />
+        <Done
+          deviceWord={deviceWord}
+          tier={flow.tier}
+          onContinue={(addPhone) => onDone(port.device, addPhone)}
+        />
       );
     case "recovery_mode":
       return <RecoveryMode />;
@@ -177,9 +185,11 @@ function HomeScreenFirst() {
 function Welcome({
   deviceWord,
   onCode,
+  onPair,
 }: {
   readonly deviceWord: string;
   readonly onCode: () => void;
+  readonly onPair: (() => void) | undefined;
 }) {
   return (
     <>
@@ -199,6 +209,12 @@ function Welcome({
       <button type="button" className="btn primary wide" onClick={onCode} data-testid="setup-start">
         I have a setup code from Neil ▸
       </button>
+      {onPair === undefined ? null : (
+        <button type="button" className="btn wide choice" onClick={onPair} data-testid="pair-start">
+          Add this {deviceWord} to my account ▸
+          <span className="choicenote">I already use the app on another device</span>
+        </button>
+      )}
     </>
   );
 }
@@ -303,8 +319,10 @@ function Done({
 }: {
   readonly deviceWord: string;
   readonly tier: VaultTier | null;
-  readonly onContinue: () => void;
+  /** True: "Add my phone now" (pairing next); false: "Later". */
+  readonly onContinue: (addPhone: boolean) => void;
 }) {
+  const other = deviceWord === "phone" ? "another device" : "your phone";
   return (
     <>
       <span className="mark" aria-hidden="true">
@@ -316,13 +334,22 @@ function Done({
           ? "Next time, open the app and unlock with your passkey."
           : "Next time, open the app and unlock with your passkey and passphrase."}
       </p>
+      <p className="locknote">Want the app on {other} too?</p>
       <button
         type="button"
         className="btn primary wide"
-        onClick={onContinue}
+        onClick={() => onContinue(true)}
+        data-testid="setup-add-phone"
+      >
+        {deviceWord === "phone" ? "Add another device now" : "Add my phone now"}
+      </button>
+      <button
+        type="button"
+        className="btn wide"
+        onClick={() => onContinue(false)}
         data-testid="setup-done"
       >
-        Open the app
+        Later
       </button>
     </>
   );

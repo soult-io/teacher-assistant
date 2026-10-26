@@ -72,6 +72,7 @@ describe("AppShell", () => {
     // The title and the offline/role/theme trio must live inside the capped, centered
     // inner column so the header shares the 1180px content column — not span the full
     // main-column width (the desktop-margin-polish fix).
+    vi.stubEnv("VITE_TA_SYNTHETIC", "1"); // the role switch exists only in a QA build (A-6)
     const { container } = render(<AppShell {...base({ isDesktop: true, nav })} />);
     const inner = container.querySelector(".topbar > .topbar-inner");
     expect(inner).not.toBeNull();
@@ -88,6 +89,32 @@ describe("AppShell", () => {
     expect(screen.queryByRole("button", { name: "‹ Dashboard" })).toBeNull();
     rerender(<AppShell {...base({ isDesktop: true, nav, onBack, title: "Goal Detail" })} />);
     expect(screen.getByRole("button", { name: "‹ Dashboard" })).toBeInTheDocument();
+  });
+});
+
+describe("AppShell — the Teacher/Para switch only in a QA build (A-6, EU-8)", () => {
+  it.each([false, true])("isDesktop=%s: a production build renders no switch", (isDesktop) => {
+    vi.stubEnv("VITE_TA_SYNTHETIC", "");
+    const { container } = render(<AppShell {...base({ isDesktop, nav })} />);
+    expect(container.querySelector(".roleseg")).toBeNull();
+    expect(screen.queryByText("Para (JT)")).toBeNull();
+  });
+
+  it("a QA build renders it when there is a para session", () => {
+    vi.stubEnv("VITE_TA_SYNTHETIC", "1");
+    render(<AppShell {...base({ isDesktop: false })} />);
+    expect(screen.getByTestId("role-para")).toBeInTheDocument();
+  });
+});
+
+describe("AppShell — ⚙ Devices (EU-8)", () => {
+  it.each([false, true])("isDesktop=%s: shown only when onDevices is given", (isDesktop) => {
+    const onDevices = vi.fn();
+    const { rerender } = render(<AppShell {...base({ isDesktop, nav })} />);
+    expect(screen.queryByTestId("devices")).toBeNull();
+    rerender(<AppShell {...base({ isDesktop, nav, onDevices })} />);
+    screen.getByTestId("devices").click();
+    expect(onDevices).toHaveBeenCalledOnce();
   });
 });
 

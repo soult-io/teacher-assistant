@@ -42,6 +42,7 @@ import { ControlClient } from "./control-client.js";
 import { browserDevicePort } from "./device-port.js";
 import { DeviceStore } from "./device-store.js";
 import { FirstSetup, readDeviceStatus } from "./first-setup.js";
+import type { DeviceLabel } from "./passkey-prf.js";
 import { MATCH_TRIES, PAIRING_TTL_MS, PairingApprover, PairingJoin } from "./pairing.js";
 import { memorySetupLock, SetupBusyError, type SetupLockPort } from "./setup-lock.js";
 import { unlockDevice, type UnlockedDevice, WrongPassphraseError } from "./vault.js";
@@ -155,7 +156,7 @@ function joiner(b: Device, transport: Transport, setupLock: SetupLockPort = memo
 }
 
 /** B up to the matching code: scan, name, passkey, vault. */
-async function prepareB(join: PairingJoin, code: string, label = "Phone" as const) {
+async function prepareB(join: PairingJoin, code: string, label: DeviceLabel = "Phone") {
   expect(join.begin(code)).toBe(true);
   join.setLabel(label);
   const tier = await join.createPasskey();
@@ -379,7 +380,10 @@ describe("A refuses before grant-put (spec §4.2 step 3, §11 EU-8)", () => {
       const { blob } = JSON.parse(new TextDecoder().decode(res.body)) as { blob: string };
       const bytes = fromBase64(blob);
       bytes[bytes.length - 3] = (bytes[bytes.length - 3] ?? 0) ^ 1;
-      return { status: 200, body: new TextEncoder().encode(JSON.stringify({ blob: toBase64(bytes) })) };
+      return {
+        status: 200,
+        body: new TextEncoder().encode(JSON.stringify({ blob: toBase64(bytes) })),
+      };
     };
     const tampered = new PairingApprover({
       store: a.store,

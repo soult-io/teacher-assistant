@@ -11,6 +11,8 @@ export default defineConfig({
     include: ["src/**/*.test.{ts,tsx}"],
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // vi.stubEnv (the QA build flag in the A-6 tests) is undone after every test.
+    unstubEnvs: true,
     // Coverage baseline — measure-only, no failing threshold yet (Phase 1).
     // json-summary emits coverage-summary.json (what the verification pipeline
     // reads); json emits the full map. sw.ts (service-worker globals), the

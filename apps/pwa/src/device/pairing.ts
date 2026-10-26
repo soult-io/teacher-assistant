@@ -58,7 +58,13 @@ import {
 } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
 import { type ReleaseSetupLock, SetupBusyError, type SetupLockPort } from "./setup-lock.js";
-import { createDeviceVault, probeTier, type TierProbe, unlockDevice, type UnlockedDevice } from "./vault.js";
+import {
+  createDeviceVault,
+  probeTier,
+  type TierProbe,
+  unlockDevice,
+  type UnlockedDevice,
+} from "./vault.js";
 
 /** A pairing session lives this long from open (the relay's PAIRING_TTL_MS). */
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
@@ -159,7 +165,7 @@ export class PairingApprover {
     }
     const secret = newPairingSecret();
     const sid = pairingSid(secret);
-    const outcome = await control(this.#deps.transport, this.#deps.device).openPairing(sid);
+    const outcome = await control(this.#deps.transport, this.#deps.device).openPairingSession(sid);
     if (outcome !== "ok") {
       zeroize(secret);
       this.#over = true;
@@ -432,7 +438,9 @@ export class PairingJoin {
    * `pairing`), then the matching code. No network call: the screen shows the code
    * BEFORE postRequest() sends anything (spec §4.2 step 2).
    */
-  async sealVault(passphrase?: string): Promise<{ readonly persisted: boolean; readonly code: string }> {
+  async sealVault(
+    passphrase?: string,
+  ): Promise<{ readonly persisted: boolean; readonly code: string }> {
     const label = this.#label;
     if (this.#probe === null || label === undefined) {
       throw new Error("create the passkey first");

@@ -58,6 +58,7 @@ function quickSetup(device: DeviceHandle): SetupPort {
     issueRecoveryCode: () => Promise.resolve(RECOVERY),
     confirmRecoveryCode: (typed) => Promise.resolve(typed.toUpperCase() === "2EPSK6YM"),
     discardRecoveryCode: () => {},
+    end: () => {},
     device,
   };
 }

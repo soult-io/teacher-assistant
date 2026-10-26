@@ -12,12 +12,14 @@ export const PAIRING_COPY = {
   needsInternet: "Adding a device needs the internet. Connect, then start again.",
   offlineAdd: "Adding a device needs the internet. Connect and try again.",
   tooMany: "Too many devices waiting. Wait 10 minutes, then try again.",
-  camera: "Camera is off for this app. Tap 'Type the code instead', or allow the camera in Settings.",
+  camera:
+    "Camera is off for this app. Tap 'Type the code instead', or allow the camera in Settings.",
   badSquareCode: "That code isn't right. Check it on your other device and type it again.",
   passkeyNew:
     "Try your passkey again. If your password manager doesn't pop up, choose it in the window that appears.",
   busy: "This device is being set up in another window. Finish there, or close that window and open the app again.",
-  homeScreen: "Using the app from your Home Screen? Add it there first, then open it from the icon.",
+  homeScreen:
+    "Using the app from your Home Screen? Add it there first, then open it from the icon.",
 } as const;
 
 /** Tries 1–2 of the matching code (flows Flow 3 errors), naming the device being added. */

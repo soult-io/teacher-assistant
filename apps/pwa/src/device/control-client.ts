@@ -174,7 +174,7 @@ export class ControlClient {
   // ── The pairing mailbox (F2 / EU-8). The sid travels only in these signed bodies. ──
 
   /** A, F2 step 1: open a session. `refused` (404): not an owner, or 3 sessions already waiting. */
-  async openPairing(sid: string): Promise<WriteOutcome> {
+  async openPairingSession(sid: string): Promise<WriteOutcome> {
     return writeOutcome(await call(this.#relay, CONTROL_ROUTES.pairingOpen, { sid }));
   }
 

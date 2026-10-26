@@ -283,6 +283,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
   });
 
   it("TEACH-46 E10: the para surface has no baseline Fix or Remove", async () => {
+    vi.stubEnv("VITE_TA_SYNTHETIC", "1"); // the role switch exists only in a QA build (A-6)
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "Para (JT)" }));
     expect(await screen.findByText("Your students today")).toBeInTheDocument();
@@ -292,6 +293,7 @@ describe("App — unlock, live dashboard, and M5 writes", () => {
   });
 
   it("switching to the Para role shows the period-scoped para surface", async () => {
+    vi.stubEnv("VITE_TA_SYNTHETIC", "1"); // the role switch exists only in a QA build (A-6)
     await unlock();
     fireEvent.click(screen.getByRole("button", { name: "Para (JT)" }));
     expect(await screen.findByText("Your students today")).toBeInTheDocument();

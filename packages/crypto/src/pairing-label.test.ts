@@ -78,18 +78,16 @@ describe("labelled enrollment request (label inside AEAD_K)", () => {
     const seal = (extra: Record<string, unknown>) =>
       sealPairing(key, sid, "request", utf8(JSON.stringify({ ...req, ...extra })));
     expect(() => openLabelledEnrollmentRequest(key, sid, seal({}))).toThrow(PairingError);
-    expect(() => openLabelledEnrollmentRequest(key, sid, seal({ label: 7 }))).toThrow(
-      PairingError,
-    );
+    expect(() => openLabelledEnrollmentRequest(key, sid, seal({ label: 7 }))).toThrow(PairingError);
     expect(() => openLabelledEnrollmentRequest(key, sid, seal({ label: "" }))).toThrow(
       PairingError,
     );
-    expect(() =>
-      openLabelledEnrollmentRequest(key, sid, seal({ label: "x".repeat(65) })),
-    ).toThrow(PairingError);
-    expect(() =>
-      sealLabelledEnrollmentRequest(key, sid, req, "x".repeat(65)),
-    ).toThrow(PairingError);
+    expect(() => openLabelledEnrollmentRequest(key, sid, seal({ label: "x".repeat(65) }))).toThrow(
+      PairingError,
+    );
+    expect(() => sealLabelledEnrollmentRequest(key, sid, req, "x".repeat(65))).toThrow(
+      PairingError,
+    );
   });
 
   it("the blob is bound to the request direction", () => {

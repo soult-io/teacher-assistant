@@ -14,11 +14,7 @@ import {
   TeacherKeyring,
   unwrapRecoveryBundle,
 } from "@teacher-assistant/crypto";
-import {
-  EncryptedStream,
-  InMemoryPersistence,
-  type Transport,
-} from "@teacher-assistant/sync";
+import { EncryptedStream, InMemoryPersistence, type Transport } from "@teacher-assistant/sync";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { readManifest } from "../data/manifest.js";

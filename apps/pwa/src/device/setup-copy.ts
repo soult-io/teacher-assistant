@@ -13,3 +13,7 @@ export const SETUP_ERRORS = {
     "This device can't save a passkey yet. Open Bitwarden and make sure it's unlocked, or turn on a screen lock in your device's Settings. Then come back.",
   stopped: "Setup can't finish on this device — text Neil.",
 } as const;
+
+/** The S2 result line on a device whose passkey gives no PRF output (Style W, DN-1a). */
+export const STYLE_W_LINE =
+  "Your password manager's passkey can't unlock the app by itself yet, so you'll also set a passphrase.";
