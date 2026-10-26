@@ -3,8 +3,8 @@
 // Node realm: this suite drives the real libsodium crypto path, which rejects a
 // foreign-realm Uint8Array (jsdom's TextEncoder produces one). fake-indexeddb is
 // still installed globally by the setup file, so IndexedDbPersistence works here.
-import { AuthRequiredError } from "@teacher-assistant/auth";
 import {
+  generateDeviceKeypair,
   generateMasterKey,
   generatePeriodKey,
   ParaKeyring,
@@ -13,13 +13,22 @@ import {
 } from "@teacher-assistant/crypto";
 import { asTimestamp, newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
 import { buildWeeklyDashboard, renderHeader } from "@teacher-assistant/store";
-import { EncryptedStream, InMemoryPersistence } from "@teacher-assistant/sync";
-import type { VerifiedAuthenticationResponse } from "@simplewebauthn/server";
+import {
+  EncryptedStream,
+  InMemoryPersistence,
+  type PersistenceAdapter,
+} from "@teacher-assistant/sync";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isoDateOf } from "./date.js";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
-import type { PasskeyGateway } from "./passkey.js";
-import { bootstrapParaSession, bootstrapTeacherSession } from "./session.js";
+import { firstTeacherVault } from "../test/teacher-vault.js";
+import {
+  type BootstrapOptions,
+  bootstrapParaSession,
+  bootstrapTeacherSession,
+  type ParaHandoff,
+  type Session,
+} from "./session.js";
 import { scoreMutator } from "./writes.js";
 
 const NOW = new Date("2026-09-14T12:00:00Z");
@@ -28,12 +37,26 @@ const NOW = new Date("2026-09-14T12:00:00Z");
 // appear in the at-rest bytes (FERPA hard-stop #10/#11).
 const PLAINTEXT_MARKER = "Two-step equations";
 
+/** First setup (synthetic build) then the teacher session, as the app opens it after unlock. */
+async function openTeacher(
+  persistence: PersistenceAdapter,
+  options: Omit<BootstrapOptions, "vault" | "persistence"> = {},
+) {
+  const vault = await firstTeacherVault(persistence, { now: NOW });
+  return bootstrapTeacherSession({ vault, persistence, inProcessPara: true, ...options });
+}
+
+/** The in-process para handoff (present on a QA build with a para stream). */
+function handoffOf(teacher: Session): ParaHandoff {
+  if (teacher.paraHandoff === null) {
+    throw new Error("expected the in-process para handoff");
+  }
+  return teacher.paraHandoff;
+}
+
 describe("bootstrapTeacherSession — U1 acceptance", () => {
   it("unlocks and renders live projections from the synthetic seed", async () => {
-    const session = await bootstrapTeacherSession({
-      persistence: new InMemoryPersistence(),
-      now: NOW,
-    });
+    const session = await openTeacher(new InMemoryPersistence());
 
     expect(session.role).toBe("teacher");
     expect(session.records.students).toHaveLength(4);
@@ -62,10 +85,7 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
   });
 
   it("captures a scored point through the M5 write path and re-reads it", async () => {
-    const session = await bootstrapTeacherSession({
-      persistence: new InMemoryPersistence(),
-      now: NOW,
-    });
+    const session = await openTeacher(new InMemoryPersistence());
     const goal = session.records.goals.find((g) => g.goal_text === "Multiply fractions");
     if (goal === undefined) {
       throw new Error("expected the Multiply fractions goal");
@@ -104,8 +124,8 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
 
   it("enters a para-device session that reads ONLY the para doc (roster/administer/pending)", async () => {
     const persistence = new InMemoryPersistence();
-    const teacher = await bootstrapTeacherSession({ persistence, now: NOW });
-    const para = await bootstrapParaSession(teacher.paraHandoff);
+    const teacher = await openTeacher(persistence);
+    const para = await bootstrapParaSession(handoffOf(teacher));
 
     expect(para.role).toBe("para");
     expect(para.paraRecords.roster.length).toBeGreaterThan(0); // the published 3rd-period roster
@@ -141,17 +161,16 @@ describe("bootstrapTeacherSession — U1 acceptance", () => {
     expect(JSON.stringify(paraOnMaster.doc.toJSON())).not.toContain("Two-step equations");
   });
 
-  it("refuses to unlock without a verified passkey authentication (M0-AUTH gate)", async () => {
-    const denying: PasskeyGateway = {
-      authenticate: () => Promise.resolve({ verified: false } as VerifiedAuthenticationResponse),
-    };
+  it("refuses to open with a grant sealed to another device's box key", async () => {
+    await sodiumReady();
+    const persistence = new InMemoryPersistence();
+    const vault = await firstTeacherVault(persistence, { now: NOW });
     await expect(
       bootstrapTeacherSession({
-        gateway: denying,
-        persistence: new InMemoryPersistence(),
-        now: NOW,
+        vault: { ...vault, boxKeypair: generateDeviceKeypair() },
+        persistence,
       }),
-    ).rejects.toBeInstanceOf(AuthRequiredError);
+    ).rejects.toThrow();
   });
 });
 
@@ -172,10 +191,8 @@ describe("bootstrapTeacherSession — offline-first when the relay fails", () =>
         headers: { "content-type": "application/json" },
       })) as typeof fetch;
 
-    const session = await bootstrapTeacherSession({
-      persistence: new InMemoryPersistence(),
+    const session = await openTeacher(new InMemoryPersistence(), {
       relayBaseUrl: "https://relay.example",
-      now: NOW,
     });
     // Local store opened + projections available regardless of the relay.
     expect(session.role).toBe("teacher");
@@ -190,16 +207,14 @@ describe("bootstrapTeacherSession — offline-first when the relay fails", () =>
       throw new TypeError("Failed to fetch");
     }) as typeof fetch;
 
-    const teacher = await bootstrapTeacherSession({
-      persistence: new InMemoryPersistence(),
+    const teacher = await openTeacher(new InMemoryPersistence(), {
       relayBaseUrl: "https://relay.example",
-      now: NOW,
     });
     expect(teacher.records.students).toHaveLength(4);
     await expect(teacher.sync()).resolves.toBe(false);
 
     // The para session bootstraps and degrades offline too (the second stream).
-    const para = await bootstrapParaSession(teacher.paraHandoff);
+    const para = await bootstrapParaSession(handoffOf(teacher));
     expect(para.role).toBe("para");
     expect(para.paraRecords.roster.length).toBeGreaterThan(0);
     await expect(para.sync()).resolves.toBe(false);
@@ -244,7 +259,7 @@ describe("at-rest persistence is ciphertext-only (FERPA #10/#11)", () => {
   });
 
   it("stores encrypted blobs and no plaintext student data", async () => {
-    await bootstrapTeacherSession({ persistence: new IndexedDbPersistence(), now: NOW });
+    await openTeacher(new IndexedDbPersistence());
 
     const persisted = await readAllPersisted();
     expect(persisted.length).toBeGreaterThan(0);

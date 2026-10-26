@@ -2,13 +2,15 @@
 // boundary (architecture/para-doc-topology.md, D1–D4). The confidentiality boundary
 // is KEY POSSESSION, not a UI filter:
 //
-//  - The TEACHER session unlocks a TeacherKeyring (MK) and mints + holds the Period
-//    DEK, and drives TWO encrypted streams: `master` (MK scope — full goals/goal_text,
-//    all periods, validated points, trend/history/exports) and `{period}/para-visible`
-//    (Period-DEK scope — the published roster/administer slice + para pending points +
-//    tombstones). It PUBLISHES the para-visible projection into the para stream (D2)
-//    and, on validation, writes the record → master FIRST, then the tombstone → para
-//    (D3, master-first ordering; the queue is derived from master truth).
+//  - The TEACHER session opens from the unlocked device vault (device-enrollment-spec
+//    rev 2.5 §3.4): the stored grant gives MK, the master scope tag and the master doc id;
+//    the master doc's manifest (§3.3) gives the period DEKs (wrapped under MK) and the para
+//    doc ids. Nothing is minted on unlock, so a reload reopens the SAME streams. It drives
+//    TWO encrypted streams: `master` (MK scope — full goals/goal_text, all periods,
+//    validated points, trend/history/exports) and `{period}/para-visible` (Period-DEK
+//    scope — the published roster/administer slice + para pending points + tombstones).
+//    It PUBLISHES the para-visible projection into the para stream (D2) and, on
+//    validation, writes the record → master FIRST, then the tombstone → para (D3).
 //  - The PARA session unlocks a ParaKeyring holding ONLY the Period DEK and opens ONLY
 //    the para stream. It is cryptographically incapable of decrypting master (a
 //    ParaKeyring on the master scope throws NoKeyForScopeError) — so a curious/compromised
@@ -17,29 +19,28 @@
 //
 // FERPA: student data is decrypted only IN MEMORY; each stream reaches disk solely as
 // its own ciphertext under its own scope key, a separate docId/persistence entry
-// (hard-stop #10/#11, C-1). The synthetic MK/Period DEK are generated per session; U6
-// proves the boundary + the two-doc validate flow on synthetic data. Two-DEVICE relay
-// sync is the go-live follow-on (D4); in-process the two streams share a
-// PersistenceAdapter and the teacher integrates the para snapshot as ciphertext.
+// (hard-stop #10/#11, C-1). The synthetic caseload is written only at first setup on a
+// QA/synthetic build (first-device.ts), never here. On such a build the teacher session
+// also derives an in-process para device (a throwaway identity, QA only) for the role
+// switch; a real para device pairs in EU-8.
 
 import {
-  approveDeviceEnrollment,
   approveParaEnrollment,
+  completeDeviceEnrollment,
   createEnrollmentRequest,
+  type DeviceEnrollmentGrant,
   type DeviceKeypair,
+  fromBase64,
   generateDeviceKeypair,
-  generateMasterKey,
-  generatePeriodKey,
   generateSigningKeypair,
   type ParaEnrollmentGrant,
   sodiumReady,
   TeacherKeyring,
   zeroize,
 } from "@teacher-assistant/crypto";
-import { unlockParaKeyring, unlockTeacherKeyring } from "@teacher-assistant/auth";
+import { unlockParaKeyring } from "@teacher-assistant/auth";
 import { applyEdit, type EditableFields, validateParaPoint } from "@teacher-assistant/domain-core";
-import { newOpaqueId, newScopeTag } from "@teacher-assistant/schema";
-import type { OpaqueId, ProgressDataPoint, Timestamp } from "@teacher-assistant/schema";
+import type { OpaqueId, ProgressDataPoint, ScopeTag, Timestamp } from "@teacher-assistant/schema";
 import {
   EncryptedStream,
   fetchTransport,
@@ -49,25 +50,23 @@ import {
   RelayClient,
   type RequestSigner,
   SyncEngine,
+  type Transport,
 } from "@teacher-assistant/sync";
 import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
 import { SyntheticPasskeyGateway } from "./passkey.js";
 import type { Doc as YDoc } from "yjs";
+import { activeStream, readManifest } from "./manifest.js";
 import {
   type DecryptedRecords,
-  isEmpty,
   type ParaDocRecords,
   readParaVisible,
   readRecords,
   setParaTombstone,
-  upsertParaPending,
   upsertPoint,
   writeParaVisibleProjection,
-  writeRecords,
 } from "./repository.js";
 import { deriveParaQueue, paraPeriodId, publishParaVisible } from "./para-publish.js";
-import { buildSyntheticSeed, type SyntheticSeed } from "./synthetic-seed.js";
 
 export type Role = "teacher" | "para";
 
@@ -110,8 +109,11 @@ export interface Session {
     changes: EditableFields,
     when: Timestamp,
   ): Promise<void>;
-  /** Material to enter the in-process para-device session (wrapped Period DEK only). */
-  readonly paraHandoff: ParaHandoff;
+  /**
+   * Material to enter the in-process para-device session (wrapped Period DEK only).
+   * Present only on a QA/synthetic build with a para stream; null otherwise.
+   */
+  readonly paraHandoff: ParaHandoff | null;
   /** Best-effort reconcile with the relay (offline-first: false when unreachable). */
   sync(): Promise<boolean>;
   /**
@@ -138,25 +140,32 @@ export interface ParaSession {
   lock(): void;
 }
 
+/**
+ * What the unlocked device vault gives the teacher session (spec §3.1): the persistent
+ * relay identity (it signs nothing once the device locks), the box keypair the grant is
+ * sealed to, and the stored teacher grant.
+ */
+export interface TeacherVault {
+  readonly signer: RequestSigner;
+  readonly boxKeypair: DeviceKeypair;
+  readonly grant: DeviceEnrollmentGrant;
+}
+
 export interface BootstrapOptions {
-  readonly gateway?: PasskeyGateway;
+  /** The unlocked device: the relay identity, the box key and the stored grant. */
+  readonly vault: TeacherVault;
   /** Relay base URL for the sync client. Default "" → same-origin "/sync/…". */
   readonly relayBaseUrl?: string;
+  /** Relay transport; defaults to fetch against `relayBaseUrl` (tests inject the relay in process). */
+  readonly transport?: Transport;
   /** Ciphertext persistence. Defaults to IndexedDB, falling back to in-memory (both ciphertext-only). */
   readonly persistence?: PersistenceAdapter;
-  /** Injectable clock for the synthetic seed's admin dates (tests pin it). */
-  readonly now?: Date;
-  /**
-   * The unlocked device vault: the persistent relay identity (device-enrollment-spec §3.1).
-   * Both streams sign with it, so the relay sees the same device across reloads, and it
-   * signs nothing once locked. Absent until EU-7 builds setup: the synthetic path then
-   * uses one throwaway identity per session, zeroized on lock.
-   */
-  readonly device?: RequestSigner;
+  /** QA/synthetic build only: derive the in-process para device behind the role switch. */
+  readonly inProcessPara?: boolean;
 }
 
 /** Ciphertext-only at-rest store: IndexedDB when available, else in-memory — never plaintext. */
-function defaultPersistence(): PersistenceAdapter {
+export function defaultPersistence(): PersistenceAdapter {
   try {
     return new IndexedDbPersistence();
   } catch {
@@ -168,7 +177,7 @@ function relayFor(baseUrl: string, signer: RequestSigner): RelayClient {
   return new RelayClient({ transport: fetchTransport(baseUrl), signer });
 }
 
-/** A per-session throwaway relay identity (no device vault yet). lock() zeroizes it. */
+/** A per-session throwaway relay identity for the in-process para device. lock() zeroizes it. */
 function throwawayIdentity(): { readonly signer: RequestSigner; readonly lock: () => void } {
   const keypair = generateSigningKeypair();
   return { signer: keypairSigner(keypair), lock: () => zeroize(keypair.privateKey) };
@@ -201,33 +210,34 @@ async function integrateParaSnapshot(
   }
 }
 
-/**
- * Synthesize a teacher keyring for the offline synthetic session: mint a master key,
- * enroll THIS device against it, then unlock through the real M0-AUTH gate. Exercises
- * the enrollment + key-unwrap crypto for real on a synthetic MK.
- */
-async function synthesizeTeacherKeyring(gateway: PasskeyGateway): Promise<TeacherKeyring> {
-  const deviceKeypair = generateDeviceKeypair();
-  const masterScopeTag = newScopeTag();
-  const issuing = new TeacherKeyring(masterScopeTag, generateMasterKey());
-  // EU-5 API shape only: the request now carries a signing key too, and the grant a
-  // master doc id. Both are throwaway here, as before; EU-7 replaces this synthesis
-  // with the vault-held grant and the real master doc id.
-  try {
-    const { request, verificationCode } = throwawayEnrollmentRequest(deviceKeypair.publicKey);
-    const grant = approveDeviceEnrollment(issuing, request, verificationCode, newOpaqueId());
-    const authentication = await gateway.authenticate();
-    return unlockTeacherKeyring({ authentication, deviceKeypair, grant });
-  } finally {
-    // The issuing MK copy and the throwaway box key must not outlive the unlock.
-    issuing.destroy();
-    zeroize(deviceKeypair.privateKey);
-  }
+/** The teacher keyring from the stored grant: MK, under the grant's master scope tag. */
+export function teacherKeyringFromGrant(
+  boxKeypair: DeviceKeypair,
+  grant: DeviceEnrollmentGrant,
+): TeacherKeyring {
+  const { mk, masterScopeTag } = completeDeviceEnrollment(boxKeypair, grant);
+  return new TeacherKeyring(masterScopeTag, mk);
 }
 
-/** Load an engine's persisted ciphertext (snapshot + backlog) if any exists. */
-async function loadEngine(engine: SyncEngine): Promise<void> {
+/** One stream + its engine, with its persisted ciphertext (snapshot + backlog) loaded. */
+export async function openStream(
+  docId: OpaqueId,
+  scopeTag: ScopeTag,
+  keyring: TeacherKeyring,
+  relay: RelayClient,
+  persistence: PersistenceAdapter,
+): Promise<{ readonly stream: EncryptedStream; readonly engine: SyncEngine }> {
+  const stream = new EncryptedStream(docId, scopeTag, keyring);
+  const engine = new SyncEngine(stream, relay, persistence);
   await engine.load();
+  return { stream, engine };
+}
+
+/** Add every manifest period DEK (wrapped under MK) to the keyring. */
+function addPeriodKeys(keyring: TeacherKeyring, masterDoc: YDoc): void {
+  for (const [scopeTag, wrapped] of readManifest(masterDoc).periodKeys) {
+    keyring.addWrappedPeriodKey(scopeTag, fromBase64(wrapped));
+  }
 }
 
 /**
@@ -246,52 +256,79 @@ async function reconcile(engine: SyncEngine): Promise<boolean> {
   }
 }
 
-/** Seed the master caseload into the master stream on first run (ciphertext). */
-async function seedMaster(
-  engine: SyncEngine,
-  stream: EncryptedStream,
-  seed: SyntheticSeed,
-): Promise<void> {
-  if (isEmpty(stream.doc)) {
-    await engine.capture((doc) => writeRecords(doc, seed.master));
+/**
+ * The in-process para device (QA/synthetic builds only): a throwaway box keypair and a
+ * para grant carrying ONLY the period DEK, wrapped to it.
+ */
+function inProcessParaDevice(
+  keyring: TeacherKeyring,
+  periodScopeTag: ScopeTag,
+  paraDocId: OpaqueId,
+): { readonly deviceKeypair: DeviceKeypair; readonly grant: ParaEnrollmentGrant } {
+  const deviceKeypair = generateDeviceKeypair();
+  const { request, verificationCode } = throwawayEnrollmentRequest(deviceKeypair.publicKey);
+  const grant = approveParaEnrollment(
+    keyring,
+    periodScopeTag,
+    request,
+    verificationCode,
+    paraDocId,
+  );
+  return { deviceKeypair, grant };
+}
+
+/**
+ * Open the teacher session from the unlocked device vault: the grant's master stream,
+ * then the para stream and period keys from the master manifest. Nothing is minted and
+ * nothing is seeded here. The keyring is destroyed if any step fails.
+ */
+export async function bootstrapTeacherSession(options: BootstrapOptions): Promise<Session> {
+  await sodiumReady();
+  const keyring = teacherKeyringFromGrant(options.vault.boxKeypair, options.vault.grant);
+  try {
+    return await openTeacherSession(keyring, options);
+  } catch (err) {
+    keyring.destroy(); // never leave MK behind a failed bootstrap
+    throw err;
   }
 }
 
-/** Run the full unlock → two-stream bootstrap → decrypt → publish pipeline for a teacher session. */
-export async function bootstrapTeacherSession(options: BootstrapOptions = {}): Promise<Session> {
-  await sodiumReady();
-  const gateway = options.gateway ?? new SyntheticPasskeyGateway();
+async function openTeacherSession(
+  keyring: TeacherKeyring,
+  options: BootstrapOptions,
+): Promise<Session> {
+  const { vault } = options;
   const persistence = options.persistence ?? defaultPersistence();
   const relayBaseUrl = options.relayBaseUrl ?? "";
-  const now = options.now ?? new Date();
-  const seed = buildSyntheticSeed(now);
-  // The unlocked device signs; without one, a throwaway identity that lock() zeroizes.
-  // The device itself is locked by the caller, so its lock here is a no-op.
-  const identity =
-    options.device === undefined ? throwawayIdentity() : { signer: options.device, lock: () => {} };
-  const { signer } = identity;
+  // Both streams sign with the device identity, so the relay sees one device across reloads.
+  const relay = new RelayClient({
+    transport: options.transport ?? fetchTransport(relayBaseUrl),
+    signer: vault.signer,
+  });
 
-  // Keys: MK (TeacherKeyring) + a minted Period DEK the teacher also holds.
-  const keyring = await synthesizeTeacherKeyring(gateway);
-  const periodKey = generatePeriodKey(newScopeTag());
-  keyring.addPeriodKey(periodKey);
-
-  // The two streams — distinct docIds → distinct ciphertext-at-rest entries (C-1).
-  const masterDocId = newOpaqueId();
-  const paraDocId = newOpaqueId();
-  const masterStream = new EncryptedStream(masterDocId, keyring.masterScopeTag, keyring);
-  const paraStream = new EncryptedStream(paraDocId, periodKey.scopeTag, keyring);
-  const masterEngine = new SyncEngine(masterStream, relayFor(relayBaseUrl, signer), persistence);
-  const paraEngine = new SyncEngine(paraStream, relayFor(relayBaseUrl, signer), persistence);
-
-  await loadEngine(masterEngine);
-  await loadEngine(paraEngine);
-  await seedMaster(masterEngine, masterStream, seed);
+  const master = await openStream(
+    vault.grant.masterDocId,
+    keyring.masterScopeTag,
+    keyring,
+    relay,
+    persistence,
+  );
+  const masterStream = master.stream;
+  const masterEngine = master.engine;
+  addPeriodKeys(keyring, masterStream.doc);
+  const active = activeStream(readManifest(masterStream.doc));
+  const para =
+    active === null
+      ? null
+      : await openStream(active.entry.paraDocId, active.scopeTag, keyring, relay, persistence);
 
   // Integrate any para-device captures held in shared persistence into the teacher's
   // para stream, WITHOUT touching the engine's own backlog (integrate is idempotent).
-  const refreshPara = (): Promise<void> =>
-    integrateParaSnapshot(persistence, paraDocId, paraStream);
+  const refreshPara = async (): Promise<void> => {
+    if (para !== null && active !== null) {
+      await integrateParaSnapshot(persistence, active.entry.paraDocId, para.stream);
+    }
+  };
 
   // Publish (materialize) the para-visible slice from master into the para stream (D2).
   // Deterministic + idempotent (the diff is a no-op when nothing changed), so it is
@@ -299,43 +336,34 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
   const republishPara = async (): Promise<void> => {
     const records = readRecords(masterStream.doc);
     const periodId = paraPeriodId(records);
-    if (periodId === null) {
+    if (para === null || periodId === null) {
       return;
     }
     await refreshPara(); // never clobber a para-device write with a stale projection
     const projection = publishParaVisible(records, periodId);
-    await paraEngine.capture((doc) => writeParaVisibleProjection(doc, projection));
+    await para.engine.capture((doc) => writeParaVisibleProjection(doc, projection));
   };
-
-  // Seed the two synthetic para pending captures into the PARA doc (never master).
   await republishPara();
-  if (readParaVisible(paraStream.doc).pending.length === 0) {
-    for (const pending of seed.paraPending) {
-      await paraEngine.capture((doc) => upsertParaPending(doc, pending));
-    }
-  }
 
   // A para-device write to the master stream — the confidentiality boundary — is by
   // key possession: the teacher holds both keys; the para handoff carries only the
   // Period DEK, wrapped to the para device.
-  const paraDeviceKeypair = generateDeviceKeypair();
-  const { request, verificationCode } = throwawayEnrollmentRequest(paraDeviceKeypair.publicKey);
-  const grant = approveParaEnrollment(
-    keyring,
-    periodKey.scopeTag,
-    request,
-    verificationCode,
-    paraDocId,
-  );
+  const paraDevice =
+    options.inProcessPara === true && active !== null
+      ? inProcessParaDevice(keyring, active.scopeTag, active.entry.paraDocId)
+      : null;
 
   const masterFirstThenTombstone = async (
     validated: ProgressDataPoint,
     dataPointId: OpaqueId,
     when: Timestamp,
   ): Promise<void> => {
+    if (para === null) {
+      throw new Error("this device has no para stream");
+    }
     await masterEngine.capture((doc) => upsertPoint(doc, validated)); // 1. MASTER (system of record)
     await refreshPara();
-    await paraEngine.capture((doc) => setParaTombstone(doc, dataPointId, when)); // 2. then para cleanup
+    await para.engine.capture((doc) => setParaTombstone(doc, dataPointId, when)); // 2. then para cleanup
   };
 
   return {
@@ -348,10 +376,12 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
     readRecords: () => readRecords(masterStream.doc),
     refreshPara,
     readParaQueue: () =>
-      deriveParaQueue(
-        readRecords(masterStream.doc).points,
-        readParaVisible(paraStream.doc).pending,
-      ),
+      para === null
+        ? []
+        : deriveParaQueue(
+            readRecords(masterStream.doc).points,
+            readParaVisible(para.stream.doc).pending,
+          ),
     validatePara: async (pending, when) => {
       const { validated } = validateParaPoint(pending, { who: "teacher", when });
       await masterFirstThenTombstone(validated, pending.data_point_id, when);
@@ -361,25 +391,29 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
       const { validated } = validateParaPoint(corrected, { who: "teacher", when });
       await masterFirstThenTombstone(validated, pending.data_point_id, when);
     },
-    paraHandoff: {
-      deviceKeypair: paraDeviceKeypair,
-      grant,
-      paraDocId,
-      persistence,
-      relayBaseUrl,
-      gateway,
-    },
+    paraHandoff:
+      paraDevice === null || active === null
+        ? null
+        : {
+            deviceKeypair: paraDevice.deviceKeypair,
+            grant: paraDevice.grant,
+            paraDocId: active.entry.paraDocId,
+            persistence,
+            relayBaseUrl,
+            gateway: new SyntheticPasskeyGateway(),
+          },
     sync: async () => {
       // Reconcile BOTH streams best-effort + independently (offline-first): one stream's
       // relay failure must not skip the other, and degrades to offline rather than throw.
       const masterOk = await reconcile(masterEngine);
-      const paraOk = await reconcile(paraEngine);
+      const paraOk = para === null ? true : await reconcile(para.engine);
       return masterOk && paraOk;
     },
     lock: () => {
       keyring.destroy(); // MK + every period DEK, zeroized in place
-      zeroize(paraDeviceKeypair.privateKey); // the in-process para device's box key
-      identity.lock();
+      if (paraDevice !== null) {
+        zeroize(paraDevice.deviceKeypair.privateKey); // the in-process para device's box key
+      }
     },
   };
 }
@@ -388,7 +422,8 @@ export async function bootstrapTeacherSession(options: BootstrapOptions = {}): P
  * Enter the PARA-device session from the teacher handoff. Unlocks a ParaKeyring
  * holding ONLY the Period DEK and opens ONLY the para stream — it cannot decrypt the
  * master stream (NoKeyForScopeError). On a real para device the handoff arrives via
- * physical OOB-QR enrollment; in-process it is derived from the teacher session.
+ * physical OOB-QR enrollment (EU-8); in-process (QA builds) it is derived from the
+ * teacher session.
  */
 export async function bootstrapParaSession(handoff: ParaHandoff): Promise<ParaSession> {
   await sodiumReady();

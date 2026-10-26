@@ -6,6 +6,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
+import { fakeDevicePort } from "./test/fake-device.js";
 import type { BootstrapOptions, ParaHandoff, ParaSession, Session } from "./data/session.js";
 import { buildSyntheticSeed } from "./data/synthetic-seed.js";
 import { makeFakeParaSession, makeFakeSession } from "./test/fake-session.js";
@@ -14,8 +15,8 @@ const MIN = 60_000;
 
 function harness() {
   const locks = { teacher: 0, para: 0 };
-  const bootstrap = (options: BootstrapOptions): Promise<Session> => {
-    const session = makeFakeSession(buildSyntheticSeed(options.now));
+  const bootstrap = (_options: BootstrapOptions): Promise<Session> => {
+    const session = makeFakeSession(buildSyntheticSeed(new Date()));
     return Promise.resolve({
       ...session,
       lock: () => {
@@ -36,7 +37,7 @@ function harness() {
 }
 
 async function unlockApp(h: ReturnType<typeof harness>) {
-  render(<App bootstrap={h.bootstrap} bootstrapPara={h.bootstrapPara} />);
+  render(<App device={fakeDevicePort()} bootstrap={h.bootstrap} bootstrapPara={h.bootstrapPara} />);
   fireEvent.click(screen.getByTestId("unlock"));
   await screen.findByTestId("header-line");
 }
@@ -77,12 +78,13 @@ describe("App — a failed para bootstrap", () => {
     const h = harness();
     render(
       <App
+        device={fakeDevicePort()}
         bootstrap={h.bootstrap}
         bootstrapPara={() => Promise.reject(new Error("para failed"))}
       />,
     );
     fireEvent.click(screen.getByTestId("unlock"));
-    await screen.findByText("Unlock failed. Check your passkey and try again.");
+    await screen.findByText(/Try your passkey again/);
     expect(h.locks.teacher).toBe(1);
   });
 });

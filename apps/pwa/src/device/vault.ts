@@ -1,5 +1,5 @@
 // The device vault: enrollment-time tier choice, vault creation, unlock and lock
-// (device-enrollment-spec rev 2.4 DN-1, §3.1, §11 EU-6). The crypto primitives live in
+// (device-enrollment-spec rev 2.5 DN-1, DN-1a, §3.1, §11 EU-6). The crypto primitives live in
 // @teacher-assistant/crypto (vault.ts); this module binds them to the passkey, the
 // IndexedDB record and the platform gates.
 //
@@ -132,6 +132,8 @@ export interface TierProbe {
   readonly tier: VaultTier;
   /** Tier P: the PRF output from the test get(); consumed (zeroized) by createDeviceVault. */
   readonly prf: Uint8Array | null;
+  /** BE/BS from the test get(): stored in the local record only (C4). */
+  readonly credFlags: DeviceRecord["credFlags"];
 }
 
 const BACKOFF_FREE_TRIES = 2;
@@ -147,20 +149,28 @@ export function unlockBackoffMs(count: number): number {
 }
 
 /**
- * Enrollment step 1: create the passkey (UV required) and run a test get(). PRF output
- * → Tier P; none → Tier W. The tier is then fixed for this device.
+ * Enrollment step 1: create the passkey (UV required) under its display name — the
+ * device's name, chosen before this call (DN-1a) — and run a test get() against that one
+ * credential (C1). PRF output → Tier P; none → Tier W (C8). The tier is then fixed for
+ * this device.
  */
 export async function probeTier(
   passkey: PasskeyPrfPort,
+  displayName: string,
   platform: PlatformEnv = browserPlatform(),
 ): Promise<TierProbe> {
   // A-3 before the ceremony: no passkey is created in an iOS Safari tab (no orphan credential).
   if (isIosOutsideHomeScreen(platform)) {
     throw new SetupNeedsHomeScreenError();
   }
-  const { credentialId } = await passkey.create();
-  const { prf } = await passkey.assert(credentialId);
-  return { credentialId, tier: prf === null ? "passphrase" : "prf", prf };
+  const { credentialId } = await passkey.create(displayName);
+  const { prf, backupEligible, backedUp } = await passkey.assert(credentialId);
+  return {
+    credentialId,
+    tier: prf === null ? "passphrase" : "prf",
+    prf,
+    credFlags: { be: backupEligible, bs: backedUp },
+  };
 }
 
 function bindingOf(record: Pick<DeviceRecord, "tier" | "signPk" | "boxPk">) {
@@ -302,6 +312,8 @@ export interface CreateVaultInput {
   /** Required for Tier W; ignored for Tier P. */
   readonly passphrase?: string;
   readonly platform?: PlatformEnv;
+  /** Clock for the setup stage's timestamp (A-8 resume window). */
+  readonly now?: () => number;
 }
 
 /**
@@ -342,10 +354,12 @@ export async function createDeviceVault(
       boxPk: toBase64(generated.boxPk),
       tier: probe.tier,
       credentialId: toBase64(probe.credentialId),
+      credFlags: probe.credFlags,
       ...tierFields,
       vault: "",
       role: input.role,
       enrolled: false,
+      setupStage: { stage: "keys_created", at: (input.now ?? Date.now)() },
     };
     const vault = sealVault(kek, secrets, bindingOf(record));
     await input.store.create({ ...record, vault: toBase64(vault) });

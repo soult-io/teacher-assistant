@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { LockScreen } from "./LockScreen.js";
 
@@ -21,8 +21,43 @@ describe("LockScreen", () => {
     const { getByTestId, rerender } = render(
       <LockScreen onUnlock={vi.fn()} busy={false} error={null} />,
     );
-    expect(getByTestId("unlock").textContent).toBe("Unlock with passkey");
+    expect(getByTestId("unlock").textContent).toBe("Unlock with your passkey");
     rerender(<LockScreen onUnlock={vi.fn()} busy={true} error={null} />);
     expect(getByTestId("unlock").textContent).toBe("Unlocking…");
+  });
+
+  it("Style P (U1): no passphrase box; unlock passes no passphrase", () => {
+    const onUnlock = vi.fn();
+    const { getByTestId, queryByTestId } = render(
+      <LockScreen onUnlock={onUnlock} busy={false} error={null} tier="prf" />,
+    );
+    expect(queryByTestId("unlock-passphrase")).toBeNull();
+    fireEvent.click(getByTestId("unlock"));
+    expect(onUnlock).toHaveBeenCalledWith(undefined);
+  });
+
+  it("Style W (U2): the passphrase box is NOT focused on load (C10), and unlock passes it", () => {
+    const onUnlock = vi.fn();
+    const { getByTestId } = render(
+      <LockScreen onUnlock={onUnlock} busy={false} error={null} tier="passphrase" />,
+    );
+    const box = getByTestId("unlock-passphrase");
+    expect(document.activeElement).not.toBe(box);
+    expect(box).not.toHaveAttribute("autofocus");
+    expect(box).toHaveAttribute("autocomplete", "current-password");
+    fireEvent.change(box, { target: { value: "blue7kites" } });
+    fireEvent.click(getByTestId("unlock"));
+    expect(onUnlock).toHaveBeenCalledWith("blue7kites");
+  });
+
+  it("Style W: Enter in the passphrase box starts the unlock", () => {
+    const onUnlock = vi.fn();
+    const { getByTestId } = render(
+      <LockScreen onUnlock={onUnlock} busy={false} error={null} tier="passphrase" />,
+    );
+    const box = getByTestId("unlock-passphrase");
+    fireEvent.change(box, { target: { value: "blue7kites" } });
+    fireEvent.submit(box);
+    expect(onUnlock).toHaveBeenCalledWith("blue7kites");
   });
 });

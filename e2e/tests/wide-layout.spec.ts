@@ -1,4 +1,5 @@
 import { expect, type Page, test } from "@playwright/test";
+import { completeFirstSetup, prepareDeviceSetup } from "./support/device-setup";
 
 /**
  * Wide-monitor desktop layout guard.
@@ -20,8 +21,9 @@ import { expect, type Page, test } from "@playwright/test";
  */
 
 async function unlockToDesktopShell(page: Page): Promise<void> {
+  await prepareDeviceSetup(page);
   await page.goto("/");
-  await page.getByTestId("unlock").click();
+  await completeFirstSetup(page);
   // The desktop shell (sidebar + main) only exists post-unlock at >=900px.
   await expect(page.locator(".phone.shell .main")).toBeVisible();
 }

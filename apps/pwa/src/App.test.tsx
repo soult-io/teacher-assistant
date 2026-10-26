@@ -2,15 +2,16 @@ import { RelayRequestError } from "@teacher-assistant/sync";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.js";
+import { fakeDevicePort } from "./test/fake-device.js";
 import type { BootstrapOptions } from "./data/session.js";
 import { buildSyntheticSeed } from "./data/synthetic-seed.js";
 import { makeFakeParaSession, makeFakeSession } from "./test/fake-session.js";
 
 // A crypto-free two-doc device that still exercises the real write path (the M5/M13
-// mutators + the two-doc validate coordinator over Yjs docs). The seed uses the app's
-// pinned `now`, so its week matches the dashboard's evaluation week.
-function bootstrap(options: BootstrapOptions) {
-  return Promise.resolve(makeFakeSession(buildSyntheticSeed(options.now)));
+// mutators + the two-doc validate coordinator over Yjs docs). The seed is dated today, the
+// same week the app evaluates the dashboard in.
+function bootstrap(_options: BootstrapOptions) {
+  return Promise.resolve(makeFakeSession(buildSyntheticSeed(new Date())));
 }
 
 // A write settles asynchronously: the real session awaits crypto + IndexedDB, and the
@@ -22,14 +23,16 @@ async function expectTextAfterWrite(testId: string, text: string) {
 }
 
 async function unlock() {
-  render(<App bootstrap={bootstrap} bootstrapPara={makeFakeParaSession} />);
+  render(
+    <App device={fakeDevicePort()} bootstrap={bootstrap} bootstrapPara={makeFakeParaSession} />,
+  );
   fireEvent.click(screen.getByTestId("unlock"));
   await screen.findByTestId("header-line");
 }
 
 describe("App — unlock, live dashboard, and M5 writes", () => {
   it("opens locked with the app heading", () => {
-    render(<App bootstrap={bootstrap} />);
+    render(<App device={fakeDevicePort()} bootstrap={bootstrap} />);
     expect(screen.getByRole("heading", { name: "Teacher Assistant" })).toBeVisible();
     expect(screen.getByTestId("unlock")).toBeInTheDocument();
   });
@@ -380,19 +383,21 @@ describe("App — unlock error copy is passkey-only; the relay never blocks unlo
   it("shows the passkey guidance ONLY for a genuine keyring/passkey/decryption failure", async () => {
     render(
       <App
+        device={fakeDevicePort()}
         bootstrap={() => Promise.reject(new Error("keyring unwrap failed"))}
         bootstrapPara={makeFakeParaSession}
       />,
     );
     fireEvent.click(screen.getByTestId("unlock"));
     const alert = await screen.findByRole("alert");
-    await waitFor(() => expect(alert).toHaveTextContent("Check your passkey"));
+    await waitFor(() => expect(alert).toHaveTextContent("Try your passkey again"));
     expect(screen.getByTestId("unlock")).toBeInTheDocument(); // stays locked
   });
 
   it("does NOT blame the passkey when unlock fails for a relay/sync reason", async () => {
     render(
       <App
+        device={fakeDevicePort()}
         bootstrap={() => Promise.reject(new RelayRequestError(404, "doc-1", null))}
         bootstrapPara={makeFakeParaSession}
       />,
@@ -400,7 +405,7 @@ describe("App — unlock error copy is passkey-only; the relay never blocks unlo
     fireEvent.click(screen.getByTestId("unlock"));
     const alert = await screen.findByRole("alert");
     await waitFor(() => expect(alert.textContent ?? "").not.toBe(""));
-    expect(alert).not.toHaveTextContent("Check your passkey");
+    expect(alert).not.toHaveTextContent("Try your passkey again");
   });
 
   it("reaches the ready dashboard even when the post-unlock reconcile rejects (non-blocking)", async () => {
@@ -409,9 +414,15 @@ describe("App — unlock error copy is passkey-only; the relay never blocks unlo
     // still survive): unlock has already opened the local store — it must reach ready
     // and never surface the failure.
     const flaky = { ...base, sync: () => Promise.reject(new Error("relay down")) };
-    render(<App bootstrap={() => Promise.resolve(flaky)} bootstrapPara={makeFakeParaSession} />);
+    render(
+      <App
+        device={fakeDevicePort()}
+        bootstrap={() => Promise.resolve(flaky)}
+        bootstrapPara={makeFakeParaSession}
+      />,
+    );
     fireEvent.click(screen.getByTestId("unlock"));
     expect(await screen.findByTestId("header-line")).toBeInTheDocument();
-    expect(screen.queryByText(/Check your passkey/)).toBeNull();
+    expect(screen.queryByText(/Try your passkey again/)).toBeNull();
   });
 });

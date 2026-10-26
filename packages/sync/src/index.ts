@@ -9,6 +9,7 @@ export { EncryptedStream } from "./doc.js";
 export { SyncEngine } from "./engine.js";
 export {
   RelayClient,
+  CONTROL_SCOPE,
   keypairSigner,
   type RequestSigner,
   fetchTransport,

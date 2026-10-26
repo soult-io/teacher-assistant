@@ -34,7 +34,8 @@ export interface AppShellProps {
   readonly isDesktop: boolean;
   readonly online: boolean;
   readonly role: Role;
-  readonly onRole: (role: Role) => void;
+  /** The Teacher/Para demo switch; undefined on a production build, so it is not rendered (A-6). */
+  readonly onRole: ((role: Role) => void) | undefined;
   readonly theme: ThemeChoice;
   readonly onThemeCycle: () => void;
   /** The explicit Lock action (device-enrollment-spec §3.1): 1 tap, no confirm. */
@@ -64,7 +65,16 @@ function OfflineBadge({ online }: { readonly online: boolean }) {
   );
 }
 
-function RoleSeg({ role, onRole }: { readonly role: Role; readonly onRole: (role: Role) => void }) {
+function RoleSeg({
+  role,
+  onRole,
+}: {
+  readonly role: Role;
+  readonly onRole: ((role: Role) => void) | undefined;
+}) {
+  if (onRole === undefined) {
+    return null;
+  }
   return (
     <div className="roleseg">
       <button

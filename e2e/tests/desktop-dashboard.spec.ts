@@ -12,6 +12,7 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./support/journey";
 import { FIXED_NOW } from "./support/track";
+import { completeFirstSetup, prepareDeviceSetup } from "./support/device-setup";
 
 const SIZES = [
   { label: "1280×800 laptop", width: 1280, height: 800 },
@@ -21,8 +22,9 @@ const SIZES = [
 async function unlockDesktop(page: Page, size: { width: number; height: number }) {
   await page.clock.setFixedTime(FIXED_NOW);
   await page.setViewportSize(size);
+  await prepareDeviceSetup(page);
   await page.goto("/");
-  await page.getByTestId("unlock").click();
+  await completeFirstSetup(page);
   await expect(page.locator(".phone.shell .main")).toBeVisible();
 }
 
