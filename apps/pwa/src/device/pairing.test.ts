@@ -43,7 +43,8 @@ import { browserDevicePort } from "./device-port.js";
 import { DeviceStore } from "./device-store.js";
 import { FirstSetup, readDeviceStatus } from "./first-setup.js";
 import type { DeviceLabel } from "./passkey-prf.js";
-import { MATCH_TRIES, PAIRING_TTL_MS, PairingApprover, PairingJoin } from "./pairing.js";
+import { MATCH_TRIES, PairingApprover, PairingJoin } from "./pairing.js";
+import { PAIRING_TTL_MS } from "./pairing-limits.js";
 import { memorySetupLock, SetupBusyError, type SetupLockPort } from "./setup-lock.js";
 import { unlockDevice, type UnlockedDevice, WrongPassphraseError } from "./vault.js";
 
@@ -570,9 +571,11 @@ describe("timeouts, cancels and locks", () => {
         }
         return load();
       };
+      let named = 0;
       const session = {
         pairingScopes: () => a.session.pairingScopes(),
         addDevice: async (...args: Parameters<Session["addDevice"]>) => {
+          named += 1;
           if (during === "the name write") {
             pa?.abandon(); // the lock lands while the name is being written
           }
@@ -594,6 +597,8 @@ describe("timeouts, cancels and locks", () => {
       expect(pa.checkCode(code)).toBe("match");
       expect(await pa.approve()).toEqual({ kind: "interrupted" });
       expect(bodiesTo(r, "/grant-put")).toHaveLength(0);
+      // A lock during the grant read stops before the name is written, too.
+      expect(named).toBe(during === "the grant read" ? 0 : 1);
       a.session.lock();
     });
   }

@@ -1012,7 +1012,7 @@ function ReadyApp({
     go: setTrackView,
   });
 
-  const thisDevice = isDesktop ? "laptop" : "phone";
+  const deviceWord = isDesktop ? "laptop" : "phone";
   const track = (() => {
     if (trackView === "devices") {
       return (
@@ -1029,7 +1029,7 @@ function ReadyApp({
           openApprover={openApprover}
           tier={tier}
           online={online}
-          deviceWord={thisDevice}
+          deviceWord={deviceWord}
           autoStart={addAutoStart}
           onClose={() => {
             setAddAutoStart(false);

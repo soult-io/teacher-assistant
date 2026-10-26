@@ -54,7 +54,7 @@ export function defaultDeviceLabel(deviceWord: string): TeacherDeviceLabel {
 }
 
 /** The names a para device can take (release 2 pairs one). */
-export const PARA_DEVICE_LABELS = ["Para phone", "Para tablet"] as const;
+const PARA_DEVICE_LABELS = ["Para phone", "Para tablet"] as const;
 
 /**
  * The one combined list a new device picks from while pairing (flows B1a): it does not

@@ -141,7 +141,7 @@ describe("B1 — scan or type the square code", () => {
     );
     expect(
       await screen.findByText(
-        "Camera is off for this app. Type the code below, or allow the camera in Settings and start again.",
+        "Camera is off for this app. Type the code instead, or allow the camera in Settings and start again.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByTestId("join-typed-code")).toBeInTheDocument();

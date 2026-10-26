@@ -41,6 +41,7 @@ export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions
   const [ended, setEnded] = useState<string | null>(null);
   // The App may pass a new callback on each render; the post must still run exactly once.
   const doneRef = useRef(onDone);
+  const begun = useRef(false);
   doneRef.current = onDone;
 
   const interrupt = useCallback((message: string) => {
@@ -55,11 +56,15 @@ export function useJoin({ port, deviceWord, onVaultSealed, onDone }: JoinOptions
    */
   const entered = useCallback(
     (text: string, how: "scan" | "typed"): boolean => {
+      if (begun.current) {
+        return true; // Enter then a click, or a second frame: the code is already taken
+      }
       setError(null);
       if (!port.begin(text)) {
         setError(how === "scan" ? PAIRING_COPY.badScan : PAIRING_COPY.badSquareCode);
         return false;
       }
+      begun.current = true;
       setExpiresAt(Date.now() + PAIRING_TTL_MS);
       setStep("name");
       return true;

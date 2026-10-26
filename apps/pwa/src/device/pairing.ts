@@ -11,10 +11,12 @@
 //              opened with K; the label is
 //              checked HERE, before anything
 //   checkCode  3 tries (A-4), compared locally
-//   approve    FRESH unlock; grant from the
-//              freshly opened vault; grant-put ──▶ poll()      grant-get, opened with K;
-//              then the name into the master                   grant + stage done stored
-//              `devices` map                                   in one record write
+//   approve    FRESH unlock; the name into the
+//              master `devices` map; grant
+//              from the freshly opened vault;
+//              grant-put                      ──▶ poll()      grant-get, opened with K;
+//                                                              grant + stage done stored
+//                                                              in one record write
 //
 // S, K, the sid, the fetched request and the tries counter live in memory only: a reload,
 // a lock, a cancel, the 3rd miss or the end of the run zeroizes them and abandons the
@@ -67,7 +69,6 @@ import {
   type UnlockedDevice,
 } from "./vault.js";
 
-export { PAIRING_TTL_MS };
 /** Wrong matching codes allowed per session; the 3rd abandons it (spec §13 A-4). */
 export const MATCH_TRIES = 3;
 
@@ -310,6 +311,9 @@ export class PairingApprover {
     const stored = await fresh.readGrant(this.#deps.store);
     if (stored?.role !== "teacher") {
       throw new Error("only a teacher device can add a device");
+    }
+    if (this.#live() === null) {
+      return { kind: "interrupted" }; // a lock during the grant read: not even the name
     }
     // The name goes into the master `devices` map BEFORE grant-put, so a device the relay
     // enrolls is always named, even if a lock lands while grant-put is out. If grant-put is

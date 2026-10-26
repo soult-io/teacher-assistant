@@ -13,7 +13,7 @@ export const PAIRING_COPY = {
   offlineAdd: "Adding a device needs the internet. Connect and try again.",
   tooMany: "Too many devices waiting. Wait 10 minutes, then try again.",
   camera:
-    "Camera is off for this app. Type the code below, or allow the camera in Settings and start again.",
+    "Camera is off for this app. Type the code instead, or allow the camera in Settings and start again.",
   /** A typed square code that does not decode. */
   badSquareCode: "That code isn't right. Check it on your other device and type it again.",
   /** A scanned QR that is not a pairing code (a poster on the wall); the camera keeps going. */

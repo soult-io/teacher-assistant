@@ -63,9 +63,9 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
     setBusy(true);
     setError(null);
     setEnded(null);
-    const port = openApprover();
-    portRef.current = port;
     try {
+      const port = openApprover();
+      portRef.current = port;
       const opened = await port.open();
       if (portRef.current !== port) {
         return;
@@ -87,6 +87,7 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
   }, [end, openApprover]);
 
   const autoStarted = useRef(false);
+  const confirming = useRef(false);
   useEffect(() => {
     if (autoStart && !autoStarted.current) {
       autoStarted.current = true;
@@ -153,9 +154,10 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
   const confirm = useCallback(
     async (passphrase?: string) => {
       const port = portRef.current;
-      if (port === null) {
-        return;
+      if (port === null || confirming.current) {
+        return; // a second tap or Enter before the screen updates: one approve only
       }
+      confirming.current = true;
       setBusy(true);
       setError(null);
       try {
@@ -182,6 +184,7 @@ export function useAddDevice({ openApprover, tier, autoStart = false }: AddDevic
         // The unlock failed: stay on A3, the matching code is kept.
         setError(unlockFailureCopy(err, "Type your passphrase, then confirm with your passkey."));
       } finally {
+        confirming.current = false;
         setBusy(false);
       }
     },
