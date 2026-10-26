@@ -1,0 +1,7 @@
+{
+  // The production build type-checks the app only. Tests (and their dev-only workspace
+  // deps, e.g. @teacher-assistant/sync-relay, absent from the image build context) are
+  // type-checked by `typecheck` (tsconfig.json) in CI.
+  "extends": "./tsconfig.json",
+  "exclude": ["src/sw.ts", "src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**"]
+}
