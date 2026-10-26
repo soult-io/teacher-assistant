@@ -42,9 +42,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@fastify/rate-limit": "11.2.0",
+    "@fastify/rate-limit": "11.2.1",
     "@teacher-assistant/schema": "workspace:*",
-    "fastify": "~5.12.5",
+    "fastify": "~5.12.7",
     "libsodium-wrappers-sumo": "0.8.4",
     "pg": "8.23.1"
   },
