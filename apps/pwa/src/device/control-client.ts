@@ -104,11 +104,13 @@ export class ControlClient {
   /** The A-1 probe: 200 means this key is an active owner; 404 means it is not. */
   async listDevices(): Promise<ListOutcome> {
     const res = await call(this.#relay, CONTROL_ROUTES.list, {});
-    if (res === null || isAmbiguous(res)) {
-      return { kind: "ambiguous" };
-    }
-    if (res.status !== 200) {
+    // Only a definitive 404 means "not an owner" (A-1). A 401, 429 or any other answer
+    // decides nothing, so the caller keeps probing and never redeems blindly.
+    if (res?.status === 404) {
       return { kind: "not_found" };
+    }
+    if (res === null || res.status !== 200) {
+      return { kind: "ambiguous" };
     }
     const devices = (res.body as { devices?: unknown } | undefined)?.devices;
     return Array.isArray(devices)

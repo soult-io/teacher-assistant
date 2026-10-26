@@ -33,6 +33,10 @@ export interface SetupFlowProps {
   readonly onDone: (device: DeviceHandle) => void;
   /** A line to show on the first screen (an unfinished setup was cleared, A-8). */
   readonly startNotice?: string | null;
+  /** The vault was just sealed: the App takes the unlocked device under auto-lock and Lock. */
+  readonly onVaultSealed?: (device: DeviceHandle) => void;
+  /** iOS outside the Home Screen app (A-3): S0 shows only the install line. */
+  readonly homeScreenOnly?: boolean;
 }
 
 const STYLE_W_LINE =
@@ -45,18 +49,19 @@ export function SetupFlow(props: SetupFlowProps) {
     resumeTier: props.resumeTier,
     deviceWord: props.deviceWord,
     startNotice: props.startNotice ?? null,
+    onVaultSealed: () => props.onVaultSealed?.(props.port.device),
   });
   const { step, notice, error } = flow;
   return (
     <div className="lock setup" data-testid={`setup-step-${step}`}>
-      {step === "show_code" || step === "check_code" ? (
-        <p className="setupbanner" role="status" data-testid="recovery-banner">
-          Recovery code not saved yet — finish setup.
-        </p>
-      ) : null}
       <div className="lockbody">
-        <StepView flow={flow} {...props} />
+        {step === "show_code" || step === "check_code" ? (
+          <p className="setupbanner" role="status" data-testid="recovery-banner">
+            Recovery code not saved yet — finish setup.
+          </p>
+        ) : null}
         {notice !== null && step !== "done" ? <p className="locknote">{notice}</p> : null}
+        <StepView flow={flow} {...props} />
         <p className="err" role="alert">
           {error ?? ""}
         </p>
@@ -73,11 +78,16 @@ function StepView({
   online,
   deviceWord,
   onDone,
+  homeScreenOnly = false,
 }: SetupFlowProps & { readonly flow: FirstSetupFlow }): ReactNode {
   const { busy, recoveryCode } = flow;
   switch (flow.step) {
     case "welcome":
-      return <Welcome deviceWord={deviceWord} onCode={() => flow.setStep("code")} />;
+      return homeScreenOnly ? (
+        <HomeScreenFirst />
+      ) : (
+        <Welcome deviceWord={deviceWord} onCode={() => flow.setStep("code")} />
+      );
     case "code":
       return (
         <SetupCodeStep
@@ -132,7 +142,28 @@ function StepView({
       );
     case "recovery_mode":
       return <RecoveryMode />;
+    case "stopped":
+      return (
+        <p className="locknote" data-testid="setup-stopped">
+          Setup can't finish on this device — text Neil.
+        </p>
+      );
   }
+}
+
+/** A-3: on iOS outside the Home Screen app, S0 has no setup controls at all. */
+function HomeScreenFirst() {
+  return (
+    <>
+      <span className="mark" aria-hidden="true">
+        🔒
+      </span>
+      <h1>Teacher Assistant</h1>
+      <p className="locknote" data-testid="home-screen-first">
+        Add to Home Screen first, then open the app from the icon.
+      </p>
+    </>
+  );
 }
 
 function Welcome({
@@ -283,7 +314,7 @@ function Done({
         onClick={onContinue}
         data-testid="setup-done"
       >
-        Later
+        Open the app
       </button>
     </>
   );
@@ -291,9 +322,8 @@ function Done({
 
 function RecoveryMode() {
   return (
-    <>
-      <h2>You already have an account</h2>
-      <p className="locknote">You already have an account. Let's get your data back.</p>
-    </>
+    <p className="locknote" data-testid="recovery-mode">
+      You already have an account. Let's get your data back.
+    </p>
   );
 }

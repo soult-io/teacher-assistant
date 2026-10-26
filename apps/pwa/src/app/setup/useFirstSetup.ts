@@ -19,7 +19,8 @@ export type Step =
   | "show_code"
   | "check_code"
   | "done"
-  | "recovery_mode";
+  | "recovery_mode"
+  | "stopped";
 
 /** A-3: navigator.storage.persist() refused — a one-line warning, never blocking. */
 const NOT_PERSISTED = "This browser may clear this device's setup. Install the app to keep it.";
@@ -31,7 +32,21 @@ export const SETUP_ERRORS = {
   passkey:
     "Try your passkey again. If Bitwarden doesn't pop up, choose Bitwarden in the window that appears.",
   homeScreen: "Add to Home Screen first, then open the app from the icon.",
+  noPasskey:
+    "This device can't save a passkey yet. Open Bitwarden and make sure it's unlocked, or turn on a screen lock in your device's Settings. Then come back.",
 } as const;
+
+/** E-S4 (retry), E-S5 (this device cannot save a passkey at all) or the A-3 install line. */
+function passkeyError(err: unknown): string {
+  const name = err instanceof Error ? err.name : "";
+  if (name === "SetupNeedsHomeScreenError") {
+    return SETUP_ERRORS.homeScreen;
+  }
+  // WebAuthn missing (no navigator.credentials) or the platform refuses the ceremony.
+  return name === "NotSupportedError" || name === "TypeError"
+    ? SETUP_ERRORS.noPasskey
+    : SETUP_ERRORS.passkey;
+}
 
 /** The step a resumed setup opens on. */
 function resumeStep(stage: SetupStageName | null, labelKnown: boolean): Step {
@@ -54,7 +69,7 @@ const REDEEM_RESULT: Readonly<
   recovery: { step: "recovery_mode", error: null },
   refused: { step: "code", error: SETUP_ERRORS.code }, // the code stays in the field
   rate_limited: { step: "code", error: SETUP_ERRORS.tooMany },
-  offline: { step: "connect", error: SETUP_ERRORS.connect },
+  offline: { step: "connect", error: null }, // the connect screen says it
 };
 
 export interface FirstSetupOptions {
@@ -63,6 +78,8 @@ export interface FirstSetupOptions {
   readonly resumeTier: VaultTier | undefined;
   readonly deviceWord: string;
   readonly startNotice: string | null;
+  /** The vault exists: the App takes the unlocked device under its auto-lock and lock. */
+  readonly onVaultSealed: () => void;
 }
 
 export function useFirstSetup(options: FirstSetupOptions) {
@@ -101,10 +118,7 @@ export function useFirstSetup(options: FirstSetupOptions) {
           setRecoveryCode(await port.issueRecoveryCode());
           setStep("show_code");
         },
-        () => {
-          setRecoveryCode(null);
-          setError(SETUP_ERRORS.connect);
-        },
+        () => setRecoveryCode(null), // the connect screen says it
       ),
     [port, run],
   );
@@ -118,10 +132,9 @@ export function useFirstSetup(options: FirstSetupOptions) {
           setRecoveryCode(await port.issueRecoveryCode());
           setStep("show_code");
         },
-        () => {
-          setStep("connect");
-          setError(SETUP_ERRORS.connect);
-        },
+        (err) =>
+          // A definite refusal cannot be retried; anything else waits for the network.
+          setStep(err instanceof Error && err.name === "SetupRefusedError" ? "stopped" : "connect"),
       ),
     [port, run],
   );
@@ -137,6 +150,7 @@ export function useFirstSetup(options: FirstSetupOptions) {
       setError(REDEEM_RESULT[outcome].error);
       return;
     }
+    setCode(""); // spent: the relay accepted it, and a resume never needs it again
     if (port.label === undefined) {
       setStep("name"); // a resumed setup lost the name: ask again, no new passkey
       return;
@@ -177,19 +191,15 @@ export function useFirstSetup(options: FirstSetupOptions) {
             return;
           }
           const { persisted } = await port.sealVault();
+          options.onVaultSealed();
           const done = `Done. This ${deviceWord} unlocks with your passkey.`;
           setNotice(persisted ? done : `${done} ${NOT_PERSISTED}`);
           setVaultSealed(true);
           await submitCode();
         },
-        (err) =>
-          setError(
-            err instanceof Error && err.name === "SetupNeedsHomeScreenError"
-              ? SETUP_ERRORS.homeScreen
-              : SETUP_ERRORS.passkey,
-          ),
+        (err) => setError(passkeyError(err)),
       ),
-    [port, run, submitCode, deviceWord],
+    [port, run, submitCode, deviceWord, options.onVaultSealed],
   );
 
   /** S3: seal the vault under the passphrase, then check the code. */
@@ -198,15 +208,16 @@ export function useFirstSetup(options: FirstSetupOptions) {
       run(
         async () => {
           const { persisted } = await port.sealVault(passphrase);
+          options.onVaultSealed();
           if (!persisted) {
             setNotice(NOT_PERSISTED);
           }
           setVaultSealed(true);
           await submitCode();
         },
-        () => setError(SETUP_ERRORS.passkey),
+        (err) => setError(passkeyError(err)),
       ),
-    [port, run, submitCode],
+    [port, run, submitCode, options.onVaultSealed],
   );
 
   const retryConnect = useCallback(

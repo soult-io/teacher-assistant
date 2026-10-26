@@ -91,6 +91,11 @@ export function PassphraseStep({
           onChange={(e) => setSecond(e.target.value)}
         />
       </label>
+      {error !== null ? (
+        <p className="err" data-testid="passphrase-error">
+          {error}
+        </p>
+      ) : null}
       <p className="locknote">Tip: a short phrase is easiest, like "blue7kites".</p>
       <button
         type="button"
@@ -101,11 +106,6 @@ export function PassphraseStep({
       >
         Save passphrase
       </button>
-      {error !== null ? (
-        <p className="err" data-testid="passphrase-error">
-          {error}
-        </p>
-      ) : null}
     </>
   );
 }

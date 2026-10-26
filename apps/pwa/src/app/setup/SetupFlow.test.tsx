@@ -14,7 +14,14 @@ import { SetupFlow } from "./SetupFlow.js";
 const SETUP_CODE = "7KQ4-M2XD-9HTB-R0WC-4FNA-Q8VJ-2E";
 const RECOVERY = "7KQ4-M2XD-9HTB-R0WC-4FNA-Q8VJ-2EPS-K6YM";
 
-function fakePort(options: { tier?: VaultTier; redeem?: RedeemStep[] } = {}) {
+function fakePort(
+  options: {
+    tier?: VaultTier;
+    redeem?: RedeemStep[];
+    createError?: Error;
+    finishError?: Error;
+  } = {},
+) {
   const calls: string[] = [];
   const outcomes = [...(options.redeem ?? ["first"])];
   let label: TeacherDeviceLabel | undefined;
@@ -29,7 +36,9 @@ function fakePort(options: { tier?: VaultTier; redeem?: RedeemStep[] } = {}) {
     },
     createPasskey: () => {
       calls.push(`createPasskey:${label ?? "none"}`);
-      return Promise.resolve(options.tier ?? "passphrase");
+      return options.createError === undefined
+        ? Promise.resolve(options.tier ?? "passphrase")
+        : Promise.reject(options.createError);
     },
     sealVault: (passphrase) => {
       calls.push(`sealVault:${passphrase ?? "-"}`);
@@ -41,7 +50,9 @@ function fakePort(options: { tier?: VaultTier; redeem?: RedeemStep[] } = {}) {
     },
     finish: () => {
       calls.push("finish");
-      return Promise.resolve();
+      return options.finishError === undefined
+        ? Promise.resolve()
+        : Promise.reject(options.finishError);
     },
     issueRecoveryCode: () => {
       calls.push("issueRecoveryCode");
@@ -261,9 +272,10 @@ describe("F1 screens — errors", () => {
     renderFlow(port);
     await toPasskeyStep();
     fireEvent.click(screen.getByTestId("save-passkey"));
-    expect(
-      await screen.findByText("You already have an account. Let's get your data back."),
-    ).toBeInTheDocument();
+    expect(await screen.findByTestId("recovery-mode")).toHaveTextContent(
+      "You already have an account. Let's get your data back.",
+    );
+    expect(screen.queryAllByText(/You already have an account/)).toHaveLength(1);
     expect(calls).not.toContain("finish");
     expect(calls).not.toContain("issueRecoveryCode");
   });
@@ -274,7 +286,9 @@ describe("F1 screens — errors", () => {
     await toPasskeyStep();
     fireEvent.click(screen.getByTestId("save-passkey"));
     await screen.findByTestId("setup-retry");
-    expect(screen.getByRole("alert")).toHaveTextContent("Connect to the internet to finish setup.");
+    // The copy shows once, as the screen's body — never repeated as the error line.
+    expect(screen.getAllByText("Connect to the internet to finish setup.")).toHaveLength(1);
+    expect(screen.getByRole("alert")).toHaveTextContent("");
     fireEvent.click(screen.getByTestId("setup-retry"));
     await screen.findByTestId("recovery-code");
     expect(calls.filter((c) => c.startsWith("redeem"))).toHaveLength(2);
@@ -318,5 +332,90 @@ describe("F1 screens — resume (after the full unlock)", () => {
     expect(calls.some((c) => c.startsWith("createPasskey"))).toBe(false);
     expect(calls.some((c) => c.startsWith("sealVault"))).toBe(false);
     expect(calls).toContain("label:Phone");
+  });
+});
+
+describe("F1 screens — review fixes", () => {
+  it("S6's button opens the app (no unanswered 'Later')", async () => {
+    const { port } = fakePort({ tier: "prf" });
+    renderFlow(port);
+    await toPasskeyStep();
+    fireEvent.click(screen.getByTestId("save-passkey"));
+    fireEvent.click(await screen.findByTestId("wrote-it-down"));
+    fireEvent.change(screen.getByTestId("check-group-1"), { target: { value: "2EPS" } });
+    fireEvent.change(screen.getByTestId("check-group-2"), { target: { value: "K6YM" } });
+    fireEvent.click(screen.getByTestId("check-recovery"));
+    expect(await screen.findByTestId("setup-done")).toHaveTextContent("Open the app");
+  });
+
+  it("E-S5: a device that cannot save a passkey at all gets its own copy", async () => {
+    const unsupported = new Error("not supported");
+    unsupported.name = "NotSupportedError";
+    const { port } = fakePort({ createError: unsupported });
+    renderFlow(port);
+    await toPasskeyStep();
+    fireEvent.click(screen.getByTestId("save-passkey"));
+    expect(await screen.findByText(/This device can't save a passkey yet/)).toBeInTheDocument();
+  });
+
+  it("E-S4: a cancelled passkey prompt keeps the retry copy", async () => {
+    const cancelled = new Error("cancelled");
+    cancelled.name = "UserVerificationError";
+    const { port } = fakePort({ createError: cancelled });
+    renderFlow(port);
+    await toPasskeyStep();
+    fireEvent.click(screen.getByTestId("save-passkey"));
+    expect(await screen.findByText(/Try your passkey again/)).toBeInTheDocument();
+  });
+
+  it("a definite refusal of the self-grant stops with 'text Neil', not a retry loop", async () => {
+    const refused = new Error("refused");
+    refused.name = "SetupRefusedError";
+    const { port } = fakePort({ tier: "prf", finishError: refused });
+    renderFlow(port);
+    await toPasskeyStep();
+    fireEvent.click(screen.getByTestId("save-passkey"));
+    expect(await screen.findByTestId("setup-stopped")).toHaveTextContent(
+      "Setup can't finish on this device — text Neil.",
+    );
+    expect(screen.queryByTestId("setup-retry")).toBeNull();
+  });
+
+  it("the vault hand-off fires once the vault is sealed, with the setup's device", async () => {
+    const { port, device } = fakePort({ tier: "prf" });
+    const onVaultSealed = vi.fn();
+    render(
+      <SetupFlow
+        port={port}
+        resumeAt={null}
+        online={true}
+        deviceWord="laptop"
+        onDone={vi.fn()}
+        onVaultSealed={onVaultSealed}
+      />,
+    );
+    await toPasskeyStep();
+    expect(onVaultSealed).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("save-passkey"));
+    await screen.findByTestId("recovery-code");
+    expect(onVaultSealed).toHaveBeenCalledWith(device);
+  });
+
+  it("A-3: on iOS outside the Home Screen app, S0 has no setup controls", () => {
+    const { port } = fakePort();
+    render(
+      <SetupFlow
+        port={port}
+        resumeAt={null}
+        online={true}
+        deviceWord="phone"
+        onDone={vi.fn()}
+        homeScreenOnly={true}
+      />,
+    );
+    expect(screen.getByTestId("home-screen-first")).toHaveTextContent(
+      "Add to Home Screen first, then open the app from the icon.",
+    );
+    expect(screen.queryByTestId("setup-start")).toBeNull();
   });
 });

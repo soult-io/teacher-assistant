@@ -238,3 +238,31 @@ describe("TEACH-73 HARD — EU-6 carry-forward: the App's lock locks the device"
     expect(port).toContain("signer: device, boxKeypair: device.boxKeypair()");
   });
 });
+
+describe("TEACH-73 FERPA re-gate — B1, B2, B3", () => {
+  it("B1: once the vault is sealed, the App holds the setup's device under auto-lock and Lock", () => {
+    const app = code(source("App.tsx"));
+    const handOff = app.slice(app.indexOf("onVaultSealed={(handle) => {"));
+    expect(handOff.slice(0, 300)).toContain("deviceRef.current = handle;");
+    expect(handOff.slice(0, 300)).toContain("setDeviceOpen(true);");
+    const hook = code(source("app", "setup", "useFirstSetup.ts"));
+    expect(hook.match(/options\.onVaultSealed\(\);/g)).toHaveLength(2); // Tier P and Tier W
+  });
+
+  it("B2: only a definitive 404 from the list probe means 'not an owner' (A-1)", () => {
+    const control = code(source("device", "control-client.ts"));
+    const list = member(control, "async listDevices(): Promise<ListOutcome> {");
+    expect(list).toContain("res?.status === 404");
+    expect(list.indexOf("res?.status === 404")).toBeLessThan(list.indexOf('kind: "not_found"'));
+    expect(list.match(/kind: "not_found"/g)).toHaveLength(1);
+  });
+
+  it("B3: an unreadable status after unlock locks the device and never opens the session", () => {
+    const app = code(source("App.tsx"));
+    const unlock = app.slice(app.indexOf("const afterUnlock = useCallback("));
+    const failClosed = unlock.indexOf('status === null || status.kind === "none"');
+    expect(failClosed).toBeGreaterThanOrEqual(0);
+    expect(failClosed).toBeLessThan(unlock.indexOf("await openSession(handle);"));
+    expect(unlock.slice(failClosed, failClosed + 400)).toContain("handle.lock();");
+  });
+});

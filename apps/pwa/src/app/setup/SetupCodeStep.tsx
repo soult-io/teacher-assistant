@@ -41,7 +41,7 @@ export function SetupCodeStep({
       <h2>Enter your setup code</h2>
       <p className="locknote">Neil sent you this code. It works once and lasts 24 hours.</p>
       <input
-        className="setupinput mono"
+        className="setupinput mono codeinput"
         aria-label="Setup code"
         data-testid="setup-code"
         autoComplete="off"

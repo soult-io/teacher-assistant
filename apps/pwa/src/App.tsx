@@ -32,6 +32,7 @@ import { LockScreen } from "./app/LockScreen.js";
 import { SetupFlow } from "./app/setup/SetupFlow.js";
 import { isSyntheticBuild } from "./build-flags.js";
 import type { SetupStageName } from "./device/device-store.js";
+import { browserPlatform, isIosOutsideHomeScreen } from "./device/platform.js";
 import {
   browserDevicePort,
   type DeviceHandle,
@@ -224,13 +225,33 @@ export function App({
   const [lockReason, setLockReason] = useState<LockReason | null>(null);
   const [lockWarning, setLockWarning] = useState(false);
   const [deviceOpen, setDeviceOpen] = useState(false);
+  // A-3: on iOS outside the Home Screen app, setup offers no controls at all.
+  const [homeScreenOnly] = useState(() => isIosOutsideHomeScreen(browserPlatform()));
   const autoLockRef = useRef<AutoLock | null>(null);
   const nowRef = useRef<Date>(new Date());
   const sessionsRef = useRef<Sessions | null>(null);
   const deviceRef = useRef<DeviceHandle | null>(null);
   const setupRef = useRef<SetupPort | null>(null);
+  // Bumped by every lock: an async unlock or session open that started before a lock
+  // sees the change after its next await and drops what it opened.
+  const lockGenRef = useRef(0);
+  // Bumped by every lock, so the device status (style, setup stage) is read again.
+  const [statusReads, setStatusReads] = useState(0);
 
-  // Where the device stands on open: no record → first setup; a record → the lock screen.
+  const startNewSetup = useCallback(
+    (cleared: boolean) => {
+      const port = device.setup();
+      setupRef.current = port;
+      setSetup({ port, resumeAt: null });
+      setError(cleared ? "Start over with a new setup code." : null);
+      setPhase("setup");
+    },
+    [device],
+  );
+
+  // Where the device stands on open (and after each lock): no record → first setup;
+  // a record → the lock screen in its style.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: statusReads re-runs the read
   useEffect(() => {
     let live = true;
     void device.status().then(
@@ -239,11 +260,7 @@ export function App({
           return;
         }
         if (status.kind === "none") {
-          const port = device.setup();
-          setupRef.current = port;
-          setSetup({ port, resumeAt: null });
-          setError(status.cleared ? "Start over with a new setup code." : null);
-          setPhase("setup");
+          startNewSetup(status.cleared);
           return;
         }
         setTier(status.tier);
@@ -260,13 +277,14 @@ export function App({
     return () => {
       live = false;
     };
-  }, [device]);
+  }, [device, startNewSetup, statusReads]);
 
   // Lock (device-enrollment-spec §3.1): destroy BOTH sessions' keys — the para keyring
   // included — then the device's own keys, then drop everything. flushSync commits the
   // lock screen inside the triggering event, so on a resume from a hidden page nothing
   // else renders first (N2).
   const lock = useCallback((reason: LockReason) => {
+    lockGenRef.current += 1;
     const held = sessionsRef.current;
     const heldDevice = deviceRef.current;
     sessionsRef.current = null;
@@ -289,6 +307,7 @@ export function App({
             setPhase("locked");
             setLockReason(reason);
             setLockWarning(false);
+            setStatusReads((n) => n + 1);
           });
         }
       }
@@ -317,7 +336,9 @@ export function App({
   // in-process para session). Any failure locks the device again.
   const openSession = useCallback(
     async (handle: DeviceHandle) => {
+      const gen = lockGenRef.current;
       let teacher: Session | null = null;
+      let para: ParaSession | null = null;
       try {
         const vault = await device.teacherVault(handle);
         teacher = await bootstrap({
@@ -327,7 +348,13 @@ export function App({
         });
         // Enter the para-device session from the handoff (wrapped Period DEK only) —
         // it opens ONLY the para stream and cannot decrypt master.
-        const para = teacher.paraHandoff === null ? null : await bootstrapPara(teacher.paraHandoff);
+        para = teacher.paraHandoff === null ? null : await bootstrapPara(teacher.paraHandoff);
+        if (lockGenRef.current !== gen) {
+          // A lock landed while the session was opening: it never reaches the screen.
+          teacher.lock();
+          para?.lock();
+          return;
+        }
         // The local encrypted store is open — unlock has SUCCEEDED. The relay reconcile
         // is best-effort and offline-first: fire-and-forget, and swallow even a contract
         // violation so it can NEVER surface as an unlock error or an unhandled rejection.
@@ -338,6 +365,7 @@ export function App({
         void teacher.sync().catch(() => {});
       } catch (err) {
         teacher?.lock(); // never leave MK and the period keys behind a failed unlock
+        para?.lock();
         handle.lock();
         deviceRef.current = null;
         setDeviceOpen(false);
@@ -346,6 +374,41 @@ export function App({
       }
     },
     [device, bootstrap, bootstrapPara, synthetic],
+  );
+
+  // After the unlock ceremony: the stored stage decides between resuming setup and
+  // opening the session. An unreadable status fails closed (A-8: no data before `done`).
+  const afterUnlock = useCallback(
+    async (handle: DeviceHandle) => {
+      const gen = lockGenRef.current;
+      const status = await device.status().catch(() => null);
+      if (lockGenRef.current !== gen) {
+        return; // locked meanwhile: the lock already locked this handle
+      }
+      if (status === null || status.kind === "none") {
+        // Unreadable: fail closed, never open data. Gone (A-8 wipe): setup starts over.
+        handle.lock();
+        deviceRef.current = null;
+        setDeviceOpen(false);
+        if (status === null) {
+          setPhase("locked");
+          setError(PASSKEY_RETRY);
+        } else {
+          startNewSetup(status.cleared);
+        }
+        return;
+      }
+      if (status.stage !== "done") {
+        // An unfinished setup resumes only after this full unlock (A-2, A-8).
+        const port = device.setup(handle);
+        setupRef.current = port;
+        setSetup({ port, resumeAt: status.stage });
+        setPhase("setup");
+        return;
+      }
+      await openSession(handle);
+    },
+    [device, openSession, startNewSetup],
   );
 
   const unlock = useCallback(
@@ -363,19 +426,10 @@ export function App({
         }
         deviceRef.current = handle;
         setDeviceOpen(true);
-        const status = await device.status().catch(() => null);
-        if (status?.kind === "enrolled" && status.stage !== "done") {
-          // An unfinished setup resumes only after this full unlock (A-2, A-8).
-          const port = device.setup(handle);
-          setupRef.current = port;
-          setSetup({ port, resumeAt: status.stage });
-          setPhase("setup");
-          return;
-        }
-        await openSession(handle);
+        await afterUnlock(handle);
       })();
     },
-    [device, openSession],
+    [device, afterUnlock],
   );
 
   if (phase === "setup" && setup !== null) {
@@ -388,6 +442,12 @@ export function App({
           online={online}
           deviceWord={isDesktop ? "laptop" : "phone"}
           startNotice={error}
+          homeScreenOnly={homeScreenOnly}
+          onVaultSealed={(handle) => {
+            // From here the setup holds the unlocked device: auto-lock and Lock cover it.
+            deviceRef.current = handle;
+            setDeviceOpen(true);
+          }}
           onDone={(handle) => {
             deviceRef.current = handle;
             setupRef.current = null;

@@ -7,8 +7,15 @@
 // Each device gets its own IndexedDB factory, as two browser profiles would.
 // Node realm: libsodium rejects a foreign-realm Uint8Array.
 
-import { sodiumReady, unwrapRecoveryBundle } from "@teacher-assistant/crypto";
 import {
+  completeDeviceEnrollment,
+  fromBase64,
+  sodiumReady,
+  TeacherKeyring,
+  unwrapRecoveryBundle,
+} from "@teacher-assistant/crypto";
+import {
+  EncryptedStream,
   InMemoryPersistence,
   type RelayHttpRequest,
   type Transport,
@@ -18,6 +25,7 @@ import { newOwnerCode, ownerCodeHash } from "@teacher-assistant/sync-relay/owner
 import { InMemoryRelayStore } from "@teacher-assistant/sync-relay/store";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { readManifest } from "../data/manifest.js";
 import { bootstrapTeacherSession } from "../data/session.js";
 import { browserDevicePort, type DevicePort } from "./device-port.js";
 import { DeviceStore } from "./device-store.js";
@@ -26,6 +34,7 @@ import {
   readDeviceStatus,
   SETUP_CODE_TTL_MS,
   SetupOfflineError,
+  SetupRefusedError,
 } from "./first-setup.js";
 import type { PasskeyAssertion, PasskeyPrfPort } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
@@ -87,7 +96,13 @@ interface Relay {
   readonly app: RelayApp;
   /** Every request the devices sent: path + parsed body. */
   readonly sent: { readonly path: string; readonly body: string }[];
-  transport(options?: { readonly dropResponse?: (path: string) => boolean }): Transport;
+  transport(options?: {
+    readonly dropResponse?: (path: string) => boolean;
+    /** Answer this path with a fixed status instead of the relay (nothing reaches it). */
+    readonly answer?: (path: string) => number | undefined;
+    /** Runs after the relay handled the request, before the answer returns. */
+    readonly after?: (path: string) => void;
+  }): Transport;
   issueCode(): Promise<string>;
 }
 
@@ -104,12 +119,18 @@ function relay(): Relay {
       async (req: RelayHttpRequest) => {
         const body = new TextDecoder().decode(req.body);
         sent.push({ path: req.path, body });
+        const fixed = options.answer?.(req.path);
+        if (fixed !== undefined) {
+          const json = new TextEncoder().encode(JSON.stringify({ error: "x", record_id: "r" }));
+          return { status: fixed, body: json };
+        }
         const res = await app.inject({
           method: req.method,
           url: req.path,
           headers: req.headers,
           ...(req.method === "GET" ? {} : { payload: body }),
         });
+        options.after?.(req.path);
         if (options.dropResponse?.(req.path) === true) {
           throw new TypeError("Failed to fetch"); // committed on the relay, no answer here
         }
@@ -540,6 +561,96 @@ describe("Tier P (a provider that returns PRF)", () => {
     expect(await setup.redeem(await r.issueCode())).toBe("first");
     await setup.finish();
     expect((await d.store.load())?.tier).toBe("prf");
+    setup.device.lock();
+  });
+});
+
+describe("review fixes", () => {
+  it("A-1: a 429 or 401 from the list probe decides nothing — no redeem is sent", async () => {
+    for (const status of [429, 401]) {
+      const r = relay();
+      const d = device();
+      const setup = d.setup(
+        r.transport({ answer: (p) => (p === "/sync/devices/list" ? status : undefined) }),
+      );
+      await createUnlock(setup);
+      expect(await setup.redeem(await r.issueCode())).toBe("offline");
+      expect(r.sent.filter((x) => x.path === "/sync/enroll/redeem")).toHaveLength(0);
+      setup.device.lock();
+    }
+  });
+
+  it("a definite refusal of the self-grant raises SetupRefusedError, not 'offline'", async () => {
+    const r = relay();
+    const d = device();
+    const setup = d.setup(
+      r.transport({ answer: (p) => (p === "/sync/devices/grant" ? 409 : undefined) }),
+    );
+    await createUnlock(setup);
+    await setup.redeem(await r.issueCode());
+    await expect(setup.finish()).rejects.toThrow(SetupRefusedError);
+    expect((await d.store.load())?.setupStage?.stage).toBe("redeemed");
+    setup.device.lock();
+  });
+
+  it("a lock during the wrap upload keeps no recovery code", async () => {
+    const r = relay();
+    const d = device();
+    let setup: FirstSetup | null = null;
+    setup = d.setup(
+      r.transport({
+        after: (p) => {
+          if (p === "/sync/devices/recovery-wrap") {
+            setup?.discardRecoveryCode();
+            setup?.device.lock();
+          }
+        },
+      }),
+    );
+    await createUnlock(setup);
+    await setup.redeem(await r.issueCode());
+    await setup.finish();
+    await expect(setup.issueRecoveryCode()).rejects.toThrow();
+    expect(await setup.confirmRecoveryCode("AAAAAAAA")).toBe(false);
+  });
+
+  it("§3.3 manifest: one stream, this device's entry, and period_keys open under MK", async () => {
+    const r = relay();
+    const d = device();
+    const setup = d.setup(r.transport());
+    await runF1(setup, await r.issueCode());
+    const stored = await setup.device.readGrant(d.store);
+    if (stored?.role !== "teacher") {
+      throw new Error("expected a teacher grant");
+    }
+    const { mk, masterScopeTag } = completeDeviceEnrollment(
+      setup.device.boxKeypair(),
+      stored.grant,
+    );
+    const keyring = new TeacherKeyring(masterScopeTag, mk);
+    const master = new EncryptedStream(stored.grant.masterDocId, masterScopeTag, keyring);
+    const persisted = await d.persistence.load(stored.grant.masterDocId);
+    const updates = [
+      ...(persisted?.snapshot ? [persisted.snapshot] : []),
+      ...(persisted?.pending ?? []),
+    ];
+    for (const update of updates) {
+      master.integrateRemote(update);
+    }
+    const manifest = readManifest(master.doc);
+    expect(manifest.streams.size).toBe(1);
+    const [tag, entry] = [...manifest.streams][0] ?? [];
+    expect(entry?.retired).toBe(false);
+    expect(tag).toBeDefined();
+    const wrapped = manifest.periodKeys.get(tag ?? ("" as never));
+    expect(wrapped).toBeDefined();
+    expect(() =>
+      keyring.addWrappedPeriodKey(tag ?? ("" as never), fromBase64(wrapped ?? "")),
+    ).not.toThrow();
+    const self = (await d.store.load())?.signPk ?? "";
+    expect(manifest.devices.get(self)).toMatchObject({ label: "School computer", role: "teacher" });
+    expect([...manifest.devices.keys()]).toEqual([self]);
+    keyring.destroy();
     setup.device.lock();
   });
 });

@@ -41,6 +41,14 @@ export const SETUP_CODE_TTL_MS = 24 * 60 * 60 * 1000;
 /** The recovery code is re-typed by its last two groups of four (flows S5). */
 const CONFIRM_CHARS = 8;
 
+/** Thrown when the relay definitively refuses the self-grant: retrying cannot help. */
+export class SetupRefusedError extends Error {
+  constructor() {
+    super("Setup can't finish on this device — text Neil.");
+    this.name = "SetupRefusedError";
+  }
+}
+
 /** Thrown when a step needs the network and the relay gave no definite answer. */
 export class SetupOfflineError extends Error {
   constructor() {
@@ -282,6 +290,9 @@ export class FirstSetup {
       synthetic: this.#deps.synthetic,
     });
     const granted = await this.#control().grant(toBase64(device.publicKey), scopes);
+    if (granted === "refused") {
+      throw new SetupRefusedError();
+    }
     if (granted !== "ok") {
       throw new SetupOfflineError();
     }
@@ -316,6 +327,9 @@ export class FirstSetup {
     }
     if ((await this.#control().putRecoveryWrap(wrap)) !== "ok") {
       throw new SetupOfflineError();
+    }
+    if (device.locked) {
+      throw new Error("the device locked while the wrap was stored"); // a lock drops the code
     }
     this.#recoveryCode = code;
     return code;

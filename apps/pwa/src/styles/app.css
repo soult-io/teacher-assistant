@@ -615,6 +615,23 @@ button.btn:disabled {
   font-size: 1.15rem;
   margin: 0.2rem 0;
 }
+/* back links: the desktop top bar and the setup screens (phone and desktop) */
+.backlink {
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font-weight: 700;
+  font-size: 0.85rem;
+  cursor: pointer;
+  padding: 0;
+}
+/* the grouped 32-character setup code fits a 390px phone without scrolling */
+.setupinput.codeinput {
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+}
 .setupbanner {
   position: sticky;
   top: 0;
@@ -1713,16 +1730,6 @@ button.rowmain {
   .topbar .topgrow {
     flex: 1;
   }
-  .backlink {
-    border: 0;
-    background: transparent;
-    color: var(--accent);
-    font-weight: 700;
-    font-size: 0.85rem;
-    cursor: pointer;
-    padding: 0;
-  }
-
   /* The content region shows a native scrollbar (a desktop user expects one) and caps
      line length; the mobile scrollbar-hiding rule does not apply here. */
   .main .screen {
