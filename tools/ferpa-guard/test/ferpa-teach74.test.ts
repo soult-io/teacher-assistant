@@ -35,11 +35,13 @@ describe("TEACH-74 HARD — the synthetic seed never reaches a prod image", () =
 
   it("a vite build without VITE_TA_SYNTHETIC=1 stubs the seed module", () => {
     const config = code(file("apps", "pwa", "vite.config.ts"));
-    expect(config).toContain('new URL("./src/data/synthetic-seed.ts", import.meta.url)');
-    expect(config).toContain(
-      '...(loadEnv(mode, PWA_ROOT, "VITE_").VITE_TA_SYNTHETIC === "1" ? [] : [stubSyntheticSeed()])',
-    );
+    expect(config).toMatch(/new URL\(\s*"\.\/src\/data\/synthetic-seed\.ts"/);
+    expect(config).toMatch(/\.VITE_TA_SYNTHETIC\s*===\s*"1"/);
+    expect(config).toMatch(/synthetic\s*\?\s*\[\]\s*:\s*\[stubSyntheticSeed\(\)\]/);
     expect(config).toContain('apply: "build"');
+    // The stub exports buildSyntheticSeed only, so that must stay the one runtime import.
+    const firstDevice = code(file("apps", "pwa", "src", "data", "first-device.ts"));
+    expect(firstDevice).toContain('import { buildSyntheticSeed } from "./synthetic-seed.js";');
   });
 
   it("ci.yml checks the prod pwa for absence and pwa-qa for presence, and only pwa-qa is synthetic", () => {
