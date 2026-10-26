@@ -196,12 +196,30 @@ describe("App — production build has no role switch without an in-process para
 });
 
 describe("App — review fixes (FERPA B1/B3, races)", () => {
-  it("B1: once the vault exists, a hidden-page lock during setup locks the device and drops the code", async () => {
-    const handle = lockable();
-    const device = fakeDevicePort({
-      status: { kind: "none", cleared: false },
-      setup: () => quickSetup(handle),
+  it("B1: once the vault exists, a hidden-page lock during setup locks the device and drops the code; unlock resumes", async () => {
+    const first = lockable();
+    const second = lockable();
+    let reads = 0;
+    const base = fakeDevicePort({
+      setup: (handle) => quickSetup(handle ?? first),
+      unlock: () => Promise.resolve(second),
     });
+    const device = {
+      ...base,
+      status: () => {
+        reads += 1;
+        // Open: no record. After the lock: the record exists, mid-setup (recovery_pending).
+        return Promise.resolve(
+          reads === 1
+            ? { kind: "none" as const, cleared: false }
+            : {
+                kind: "enrolled" as const,
+                tier: "prf" as const,
+                stage: "recovery_pending" as const,
+              },
+        );
+      },
+    };
     render(<App device={device} bootstrap={bootstrap} bootstrapPara={makeFakeParaSession} />);
     fireEvent.click(await screen.findByTestId("setup-start"));
     fireEvent.change(screen.getByTestId("setup-code"), {
@@ -213,9 +231,12 @@ describe("App — review fixes (FERPA B1/B3, races)", () => {
     await screen.findByTestId("recovery-code"); // S4, code on screen
     await act(async () => {}); // let the auto-lock effect start
     leaveAndReturn();
-    expect(handle.count()).toBe(1);
+    expect(first.count()).toBe(1);
     expect(screen.queryByTestId("recovery-code")).toBeNull();
-    expect(screen.getByTestId("unlock")).toBeInTheDocument();
+    // The lock screen stays (the record exists); the next unlock resumes with a NEW code.
+    fireEvent.click(await screen.findByTestId("unlock"));
+    expect(await screen.findByTestId("recovery-reissued")).toBeInTheDocument();
+    expect(screen.queryByTestId("setup-start")).toBeNull();
   });
 
   it("B3: a status read that fails after unlock never opens data; the device locks again", async () => {
@@ -290,5 +311,26 @@ describe("App — review fixes (FERPA B1/B3, races)", () => {
     });
     expect(teacherLocks.count).toBe(1);
     expect(screen.queryByTestId("header-line")).toBeNull();
+  });
+});
+
+describe("App — round 2: a lock owns the failure it causes", () => {
+  it("a bootstrap that fails because of a lock shows no error and leaves later state alone", async () => {
+    let fail: (e: Error) => void = () => {};
+    const pending = (_o: BootstrapOptions) =>
+      new Promise<Session>((_resolve, reject) => {
+        fail = reject;
+      });
+    const device = fakeDevicePort();
+    render(<App device={device} bootstrap={pending} bootstrapPara={makeFakeParaSession} />);
+    fireEvent.click(await screen.findByTestId("unlock"));
+    await waitFor(() => expect(device.unlockedWith).toHaveLength(1));
+    await act(async () => {});
+    leaveAndReturn();
+    await act(async () => {
+      fail(new Error("the device is locked"));
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent("");
+    expect(screen.getByTestId("lock-reason")).toBeInTheDocument();
   });
 });

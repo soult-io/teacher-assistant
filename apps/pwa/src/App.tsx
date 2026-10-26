@@ -270,7 +270,9 @@ export function App({
       () => {
         if (live) {
           setPhase((p) => (p === "loading" ? "locked" : p));
-          setError(PASSKEY_RETRY);
+          if (statusReads === 0) {
+            setError(PASSKEY_RETRY); // only at open: a re-read after a lock is no failed attempt
+          }
         }
       },
     );
@@ -367,6 +369,11 @@ export function App({
         teacher?.lock(); // never leave MK and the period keys behind a failed unlock
         para?.lock();
         handle.lock();
+        if (lockGenRef.current !== gen) {
+          // The failure is the lock's doing (a zeroized device throws): no error to show,
+          // and a later unlock's device, state and auto-lock are not ours to touch.
+          return;
+        }
         deviceRef.current = null;
         setDeviceOpen(false);
         setPhase("locked");
@@ -435,6 +442,7 @@ export function App({
   if (phase === "setup" && setup !== null) {
     return (
       <div className="phone">
+        {lockWarning ? <LockWarning onKeepOpen={() => setLockWarning(false)} /> : null}
         <SetupFlow
           port={setup.port}
           resumeAt={setup.resumeAt}

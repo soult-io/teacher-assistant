@@ -18,7 +18,7 @@ import { TEACHER_DEVICE_LABELS, type TeacherDeviceLabel } from "../../device/pas
 import { PassphraseStep } from "./PassphraseStep.js";
 import { RecoveryCheck, RecoveryShow } from "./RecoveryCode.js";
 import { SetupCodeStep } from "./SetupCodeStep.js";
-import { type FirstSetupFlow, SETUP_ERRORS, useFirstSetup } from "./useFirstSetup.js";
+import { type FirstSetupFlow, SETUP_ERRORS, type Step, useFirstSetup } from "./useFirstSetup.js";
 
 export interface SetupFlowProps {
   readonly port: SetupPort;
@@ -38,6 +38,9 @@ export interface SetupFlowProps {
   /** iOS outside the Home Screen app (A-3): S0 shows only the install line. */
   readonly homeScreenOnly?: boolean;
 }
+
+/** Where the S2 result line and the storage warning belong: the steps right after S2. */
+const NOTICE_STEPS: ReadonlySet<Step> = new Set<Step>(["passphrase", "show_code", "check_code"]);
 
 const STYLE_W_LINE =
   "Your password manager's passkey can't unlock the app by itself yet, so you'll also set a passphrase.";
@@ -60,7 +63,7 @@ export function SetupFlow(props: SetupFlowProps) {
             Recovery code not saved yet — finish setup.
           </p>
         ) : null}
-        {notice !== null && step !== "done" ? <p className="locknote">{notice}</p> : null}
+        {notice !== null && NOTICE_STEPS.has(step) ? <p className="locknote">{notice}</p> : null}
         <StepView flow={flow} {...props} />
         <p className="err" role="alert">
           {error ?? ""}
@@ -144,9 +147,14 @@ function StepView({
       return <RecoveryMode />;
     case "stopped":
       return (
-        <p className="locknote" data-testid="setup-stopped">
-          Setup can't finish on this device — text Neil.
-        </p>
+        <>
+          <span className="mark" aria-hidden="true">
+            🔒
+          </span>
+          <p className="locknote" data-testid="setup-stopped">
+            Setup can't finish on this device — text Neil.
+          </p>
+        </>
       );
   }
 }

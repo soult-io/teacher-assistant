@@ -194,7 +194,7 @@ describe("F1 screens — Style P (a provider with PRF)", () => {
     await screen.findByTestId("recovery-code");
     expect(screen.queryByTestId("passphrase")).toBeNull();
     expect(calls).toContain("sealVault:-");
-    expect(screen.getByText(/This laptop unlocks with your passkey/)).toBeInTheDocument();
+    expect(screen.getByText(/Passkey saved. This laptop unlocks with it./)).toBeInTheDocument();
   });
 });
 
@@ -378,6 +378,8 @@ describe("F1 screens — review fixes", () => {
     expect(await screen.findByTestId("setup-stopped")).toHaveTextContent(
       "Setup can't finish on this device — text Neil.",
     );
+    // No leftover S2 result line contradicts the stop (UX N1).
+    expect(screen.queryByText(/Passkey saved/)).toBeNull();
     expect(screen.queryByTestId("setup-retry")).toBeNull();
   });
 

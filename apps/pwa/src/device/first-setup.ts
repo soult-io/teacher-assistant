@@ -159,6 +159,7 @@ export class FirstSetup {
   }
 
   async #writeStage(stage: SetupStageName, mode?: "first" | "recovery"): Promise<void> {
+    this.#unlocked(); // a lock ends this run: a late step never moves the stage
     const next: SetupStage =
       mode === undefined ? { stage, at: this.#now() } : { stage, mode, at: this.#now() };
     await this.#deps.store.update((record) => ({

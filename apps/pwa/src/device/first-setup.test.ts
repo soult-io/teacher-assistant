@@ -653,4 +653,37 @@ describe("review fixes", () => {
     keyring.destroy();
     setup.device.lock();
   });
+
+  it("a 401 or 429 on the self-grant is not a refusal: it waits for the network", async () => {
+    for (const status of [401, 429]) {
+      const r = relay();
+      const d = device();
+      const setup = d.setup(
+        r.transport({ answer: (p) => (p === "/sync/devices/grant" ? status : undefined) }),
+      );
+      await createUnlock(setup);
+      await setup.redeem(await r.issueCode());
+      await expect(setup.finish()).rejects.toThrow(SetupOfflineError);
+      setup.device.lock();
+    }
+  });
+
+  it("a step still running after a lock never moves the stage", async () => {
+    const r = relay();
+    const d = device();
+    let setup: FirstSetup | null = null;
+    setup = d.setup(
+      r.transport({
+        after: (p) => {
+          if (p === "/sync/devices/grant") {
+            setup?.device.lock();
+          }
+        },
+      }),
+    );
+    await createUnlock(setup);
+    await setup.redeem(await r.issueCode());
+    await expect(setup.finish()).rejects.toThrow();
+    expect((await d.store.load())?.setupStage?.stage).toBe("redeemed");
+  });
 });

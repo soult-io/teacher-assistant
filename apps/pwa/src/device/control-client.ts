@@ -42,6 +42,16 @@ export type ListOutcome =
 /** `refused`: a definitive 4xx (404 not an owner, 409 conflict, 400/413). */
 export type WriteOutcome = "ok" | "refused" | "ambiguous";
 
+/** Statuses that settle a write. 401 (signature, clock) and 429 (rate limit) settle nothing. */
+const DEFINITE_REFUSALS: ReadonlySet<number> = new Set([400, 404, 409, 413]);
+
+function writeOutcome(res: { readonly status: number } | null): WriteOutcome {
+  if (res?.status === 200) {
+    return "ok";
+  }
+  return res !== null && DEFINITE_REFUSALS.has(res.status) ? "refused" : "ambiguous";
+}
+
 function json(body: Uint8Array): unknown {
   try {
     return JSON.parse(new TextDecoder().decode(body));
@@ -62,10 +72,6 @@ async function call(
   } catch {
     return null;
   }
-}
-
-function isAmbiguous(res: { readonly status: number } | null): boolean {
-  return res === null || res.status >= 500;
 }
 
 function parseRedeem(body: unknown): RedeemOutcome {
@@ -127,12 +133,12 @@ export class ControlClient {
       device,
       scopes: scopes.map(({ tag, kind }) => ({ tag, kind })),
     });
-    return isAmbiguous(res) ? "ambiguous" : res?.status === 200 ? "ok" : "refused";
+    return writeOutcome(res);
   }
 
   /** F1 step 7: store (or overwrite, A-2) the recovery wrap. */
   async putRecoveryWrap(blob: string): Promise<WriteOutcome> {
     const res = await call(this.#relay, CONTROL_ROUTES.recoveryWrap, { blob });
-    return isAmbiguous(res) ? "ambiguous" : res?.status === 200 ? "ok" : "refused";
+    return writeOutcome(res);
   }
 }

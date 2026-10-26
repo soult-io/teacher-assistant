@@ -192,7 +192,7 @@ export function useFirstSetup(options: FirstSetupOptions) {
           }
           const { persisted } = await port.sealVault();
           options.onVaultSealed();
-          const done = `Done. This ${deviceWord} unlocks with your passkey.`;
+          const done = `Passkey saved. This ${deviceWord} unlocks with it.`;
           setNotice(persisted ? done : `${done} ${NOT_PERSISTED}`);
           setVaultSealed(true);
           await submitCode();
