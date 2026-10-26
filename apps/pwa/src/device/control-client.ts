@@ -26,13 +26,13 @@ export type RedeemOutcome =
   | { readonly kind: "rate_limited" }
   | { readonly kind: "ambiguous" };
 
-/** One device as the relay lists it (opaque keys and tags only). */
 /** A scope as the control routes carry it: an opaque tag and its kind. */
 export interface ScopeGrant {
   readonly tag: string;
   readonly kind: "master" | "period";
 }
 
+/** One device as the relay lists it (opaque keys and tags only). */
 export interface ListedDevice {
   readonly device: string;
   readonly role: "owner" | "member";

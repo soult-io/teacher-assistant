@@ -125,6 +125,11 @@ describe("TEACH-73 HARD — the paper recovery code", () => {
   it("setup is `done` only after the re-typed groups match", () => {
     const setup = code(source("device", "first-setup.ts"));
     expect(setup.match(/#writeStage\("done"/g)).toHaveLength(1);
+    // The one lock-free stage writer records only what the relay decided: `redeemed`.
+    expect([...setup.matchAll(/#recordStage\("(\w+)"/g)].map((m) => m[1])).toEqual([
+      "redeemed",
+      "redeemed",
+    ]);
     const confirm = member(setup, "async confirmRecoveryCode(typed: string): Promise<boolean> {");
     expect(confirm.indexOf("!== expected")).toBeLessThan(confirm.indexOf('#writeStage("done"'));
   });
