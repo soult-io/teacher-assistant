@@ -1,11 +1,14 @@
-// The device record at rest (device-enrollment-spec rev 2.4 §3.1): IndexedDB database
+// The device record at rest (device-enrollment-spec rev 2.5 §3.1, §13): IndexedDB database
 // `ta-device`, object store `device`, ONE record. Everything in it is non-secret or
 // ciphertext:
 //   - signPk / boxPk / credentialId / pwSalt: public or non-secret values;
 //   - vault: the one AEAD wrap of the device private keys under the KEK;
 //   - grant: the enrollment grant, AEAD-sealed under a key that exists only in the vault;
 //   - kdev (Tier W only): the NON-EXTRACTABLE WebCrypto HMAC key. It is the only key kept
-//     at rest; structured clone stores the CryptoKey handle, never its bytes.
+//     at rest; structured clone stores the CryptoKey handle, never its bytes;
+//   - credFlags: the passkey's BE/BS flags, local only — no relay body carries them (C4);
+//   - setupStage: how far first setup got — the stage, the mode and when it was written,
+//     nothing else. Neither the setup code nor the recovery code is ever stored (A-8).
 // The KEK, the PRF output, the Argon2id output and every private key are never stored.
 //
 // The tier and both public keys are fixed at enrollment: update() refuses to change them
@@ -20,6 +23,22 @@ const STORE = "device";
 const RECORD_KEY = "self";
 const DB_VERSION = 1;
 
+/** First-setup progress (spec §13 "Local setup state"). Written before each network step. */
+export type SetupStageName =
+  | "keys_created"
+  | "redeemed"
+  | "scopes_granted"
+  | "recovery_pending"
+  | "done";
+
+export interface SetupStage {
+  readonly stage: SetupStageName;
+  /** From the redeem response, once known. */
+  readonly mode?: "first" | "recovery";
+  /** When this stage was written (ms since epoch). */
+  readonly at: number;
+}
+
 export interface DeviceRecord {
   readonly version: 1;
   /** Ed25519 public key — the relay identity (base64url). */
@@ -27,8 +46,10 @@ export interface DeviceRecord {
   /** X25519 public key — grants are sealed to it (base64url). */
   readonly boxPk: string;
   readonly tier: VaultTier;
-  /** The passkey credential id (base64url). Not PII. */
+  /** The passkey credential id (base64url). Not PII. get() allows only this id (C1). */
   readonly credentialId: string;
+  /** BE/BS (backup eligible / backed up) read at enrollment. Local only, never sent (C4). */
+  readonly credFlags: { readonly be: boolean; readonly bs: boolean };
   /** Tier W Argon2id salt (base64url). */
   readonly pwSalt?: string;
   /** Tier W: the non-extractable HMAC key. */
@@ -42,6 +63,8 @@ export interface DeviceRecord {
   readonly enrolled: boolean;
   /** Wrong-passphrase count for the on-device backoff (Tier W). Non-secret. */
   readonly unlockFailures?: { readonly count: number; readonly lastAt: number };
+  /** First-setup progress; absent on a device that was never set up through F1. */
+  readonly setupStage?: SetupStage;
 }
 
 /** Thrown when an update would change a field fixed at enrollment. */
@@ -60,7 +83,7 @@ export class DeviceAlreadyEnrolledError extends Error {
   }
 }
 
-const IMMUTABLE = ["tier", "signPk", "boxPk", "credentialId", "kdev", "role"] as const;
+const IMMUTABLE = ["tier", "signPk", "boxPk", "credentialId", "credFlags", "kdev", "role"] as const;
 
 /** The one device record in IndexedDB. */
 export class DeviceStore {
@@ -112,6 +135,17 @@ export class DeviceStore {
       }
       throw err;
     }
+  }
+
+  /**
+   * Delete the record: the vault, Kdev and the grant go with it (A-8: an unfinished setup
+   * past the code's 24 h). Afterwards this device is not set up.
+   */
+  async wipe(): Promise<void> {
+    const db = await this.#database();
+    const tx = db.transaction(STORE, "readwrite");
+    tx.objectStore(STORE).delete(RECORD_KEY);
+    await transactionDone(tx);
   }
 
   /** Read-modify-write in one transaction. Refuses changes to fields fixed at enrollment. */

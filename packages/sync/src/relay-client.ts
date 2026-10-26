@@ -69,6 +69,9 @@ export function keypairSigner(keypair: DeviceSigningKeypair): RequestSigner {
   };
 }
 
+/** The scope tag the relay reserves for enrollment control routes; never a data scope. */
+export const CONTROL_SCOPE = "control";
+
 export interface RelayClientConfig {
   readonly transport: Transport;
   readonly signer: RequestSigner;
@@ -113,6 +116,28 @@ export class RelayClient {
       [SYNC_HEADERS.nonce]: nonce,
       [SYNC_HEADERS.signature]: toBase64(signature),
     };
+  }
+
+  /**
+   * One signed control-plane call (device-enrollment-spec §5.3): `POST <path>` under the
+   * reserved `control` scope, with every identifier in the signed JSON body, never in the
+   * URL. Returns the raw response; a transport failure throws (the caller treats it as an
+   * outcome it cannot know).
+   */
+  async control(
+    path: string,
+    payload: Readonly<Record<string, unknown>>,
+  ): Promise<RelayHttpResponse> {
+    const body = utf8(JSON.stringify(payload));
+    return this.#transport({
+      method: "POST",
+      path,
+      headers: {
+        ...this.#signedHeaders("POST", path, CONTROL_SCOPE, body),
+        "content-type": "application/json",
+      },
+      body,
+    });
   }
 
   /** Append encrypted updates for a (period,purpose) stream. Returns the new cursor. */

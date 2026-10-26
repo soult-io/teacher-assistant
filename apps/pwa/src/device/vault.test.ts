@@ -25,8 +25,8 @@ import {
   type DeviceRecord,
   DeviceStore,
 } from "./device-store.js";
-import type { PasskeyAssertion, PasskeyPrfPort } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
+import { android, FakePasskey } from "../test/fake-passkey.js";
 import {
   createDeviceVault,
   DeviceAlreadyEnrolledError,
@@ -47,27 +47,9 @@ import {
 // four per case, so the 5 s default timeout is too short. The cost itself is never lowered.
 vi.setConfig({ testTimeout: 60_000 });
 
-/** A fake authenticator: returns a fixed PRF output (or none) on every UV assertion. */
-class FakePasskey implements PasskeyPrfPort {
-  assertions = 0;
-  constructor(public prf: Uint8Array | null) {}
-  create(): Promise<{ credentialId: Uint8Array }> {
-    return Promise.resolve({ credentialId: crypto.getRandomValues(new Uint8Array(16)) });
-  }
-  assert(_credentialId: Uint8Array): Promise<PasskeyAssertion> {
-    this.assertions += 1;
-    return Promise.resolve({ prf: this.prf === null ? null : new Uint8Array(this.prf) });
-  }
-}
+const NAME = "Teacher Assistant — Phone, added Oct 26";
 
-const ANDROID: PlatformEnv = {
-  userAgent: "Mozilla/5.0 (Linux; Android 14; Pixel 8a) Chrome/130",
-  platform: "Linux armv8l",
-  maxTouchPoints: 5,
-  standaloneMedia: false,
-  navigatorStandalone: undefined,
-  persist: () => Promise.resolve(true),
-};
+const ANDROID: PlatformEnv = android();
 
 function deleteDeviceDb(): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -97,7 +79,7 @@ function rawPut(record: DeviceRecord): Promise<void> {
 
 async function enrollTierP(store: DeviceStore, prf = new Uint8Array(32).fill(9)) {
   const passkey = new FakePasskey(prf);
-  const probe = await probeTier(passkey);
+  const probe = await probeTier(passkey, NAME);
   const { device, persisted } = await createDeviceVault({
     store,
     probe,
@@ -109,7 +91,7 @@ async function enrollTierP(store: DeviceStore, prf = new Uint8Array(32).fill(9))
 
 async function enrollTierW(store: DeviceStore, passphrase = "abcd1234") {
   const passkey = new FakePasskey(null);
-  const probe = await probeTier(passkey);
+  const probe = await probeTier(passkey, NAME);
   const { device } = await createDeviceVault({
     store,
     probe,
@@ -164,8 +146,43 @@ beforeEach(async () => {
 
 describe("tier probe at enrollment", () => {
   it("is Tier P only when the test get() returns PRF output", async () => {
-    expect((await probeTier(new FakePasskey(new Uint8Array(32).fill(1)))).tier).toBe("prf");
-    expect((await probeTier(new FakePasskey(null))).tier).toBe("passphrase");
+    expect((await probeTier(new FakePasskey(new Uint8Array(32).fill(1)), NAME)).tier).toBe("prf");
+    expect((await probeTier(new FakePasskey(null), NAME)).tier).toBe("passphrase");
+  });
+
+  it("creates the passkey under the device's display name, chosen before create() (DN-1a)", async () => {
+    const passkey = new FakePasskey(null);
+    await probeTier(passkey, NAME);
+    expect(passkey.names).toEqual([NAME]);
+  });
+
+  it("stores BE/BS from the test get() in the local record only (C4), and the keys_created stage", async () => {
+    const store = new DeviceStore();
+    const passkey = new FakePasskey(null, { backupEligible: true, backedUp: false });
+    const probe = await probeTier(passkey, NAME);
+    const { device } = await createDeviceVault({
+      store,
+      probe,
+      role: "teacher",
+      passphrase: "abcd1234",
+      platform: ANDROID,
+      now: () => 1_000,
+    });
+    const record = await store.load();
+    expect(record?.credFlags).toEqual({ be: true, bs: false });
+    expect(record?.setupStage).toEqual({ stage: "keys_created", at: 1_000 });
+    await expect(
+      store.update((r) => ({ ...r, credFlags: { be: false, bs: false } })),
+    ).rejects.toThrow(DeviceRecordImmutableError);
+    device.lock();
+  });
+
+  it("wipe() deletes the record: vault, Kdev and grant together (A-8)", async () => {
+    const store = new DeviceStore();
+    const { device } = await enrollTierW(store);
+    device.lock();
+    await store.wipe();
+    expect(await store.load()).toBeNull();
   });
 });
 
@@ -219,7 +236,7 @@ describe("the tier is immutable; keys are never regenerated", () => {
     const store = new DeviceStore();
     await enrollTierP(store);
     const before = await store.load();
-    const probe = await probeTier(new FakePasskey(null));
+    const probe = await probeTier(new FakePasskey(null), NAME);
     await expect(
       createDeviceVault({
         store,
@@ -252,7 +269,7 @@ describe("Tier W", () => {
   it("rejects a 6-digit PIN and abcdefgh at setup, and stores nothing", async () => {
     for (const passphrase of ["123456", "abcdefgh"]) {
       const store = new DeviceStore();
-      const probe = await probeTier(new FakePasskey(null));
+      const probe = await probeTier(new FakePasskey(null), NAME);
       await expect(
         createDeviceVault({ store, probe, role: "teacher", passphrase, platform: ANDROID }),
       ).rejects.toThrow(WeakPassphraseError);
@@ -359,12 +376,14 @@ describe("Tier W", () => {
     expect(Object.keys(record).sort()).toEqual(
       [
         "boxPk",
+        "credFlags",
         "credentialId",
         "enrolled",
         "grant",
         "kdev",
         "pwSalt",
         "role",
+        "setupStage",
         "signPk",
         "tier",
         "vault",
@@ -533,7 +552,7 @@ describe("a refused setup zeroizes the probe's PRF output", () => {
   it("on an already-enrolled device", async () => {
     const store = new DeviceStore();
     await enrollTierP(store);
-    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(4)), ANDROID);
+    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(4)), NAME, ANDROID);
     await expect(
       createDeviceVault({ store, probe, role: "teacher", platform: ANDROID }),
     ).rejects.toThrow(DeviceAlreadyEnrolledError);
@@ -555,7 +574,7 @@ describe("setup gates (A-3)", () => {
       platform: "iPhone",
       navigatorStandalone: false,
     };
-    await expect(probeTier(passkey, ios)).rejects.toThrow(SetupNeedsHomeScreenError);
+    await expect(probeTier(passkey, NAME, ios)).rejects.toThrow(SetupNeedsHomeScreenError);
     expect(created).toBe(0);
   });
 
@@ -573,7 +592,7 @@ describe("setup gates (A-3)", () => {
       },
     };
     const store = new DeviceStore();
-    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(1)));
+    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(1)), NAME);
     await expect(
       createDeviceVault({ store, probe, role: "teacher", platform: ios }),
     ).rejects.toThrow(SetupNeedsHomeScreenError);
@@ -583,7 +602,7 @@ describe("setup gates (A-3)", () => {
 
   it("requests persistent storage at setup and reports a refusal without blocking", async () => {
     const store = new DeviceStore();
-    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(1)));
+    const probe = await probeTier(new FakePasskey(new Uint8Array(32).fill(1)), NAME);
     const { persisted, device } = await createDeviceVault({
       store,
       probe,

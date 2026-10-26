@@ -23,11 +23,29 @@ import {
   type ProgressDataPoint,
 } from "@teacher-assistant/schema";
 import { buildToScoreQueue, type DashboardLens } from "@teacher-assistant/store";
+import type { VaultTier } from "@teacher-assistant/crypto";
 import { SyncError } from "@teacher-assistant/sync";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
+import { SetupFlow } from "./app/setup/SetupFlow.js";
+import { isSyntheticBuild } from "./build-flags.js";
+import type { SetupStageName } from "./device/device-store.js";
+import { browserPlatform, isIosOutsideHomeScreen } from "./device/platform.js";
+import { SETUP_ERRORS } from "./device/setup-copy.js";
+import {
+  browserDevicePort,
+  type DeviceHandle,
+  type DevicePort,
+  type SetupPort,
+} from "./device/device-port.js";
+import {
+  DeviceCannotUnlockError,
+  PassphraseRequiredError,
+  UnlockBackoffError,
+  WrongPassphraseError,
+} from "./device/vault.js";
 import {
   AutoLock,
   HIDDEN_DEFAULT_MS,
@@ -89,7 +107,7 @@ import {
   upsertGoalMutator,
 } from "./data/writes.js";
 
-type Phase = "locked" | "unlocking" | "ready";
+type Phase = "loading" | "setup" | "locked" | "unlocking" | "ready";
 type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail" | "baseline" | "validation";
 
 /** Desktop top-bar titles per Track view (design §2). */
@@ -144,7 +162,8 @@ function buildShellProps(args: {
 
 interface Sessions {
   readonly teacher: Session;
-  readonly para: ParaSession;
+  /** The in-process para session (QA/synthetic builds only); null on a production build. */
+  readonly para: ParaSession | null;
 }
 
 export interface AppProps {
@@ -152,62 +171,156 @@ export interface AppProps {
   readonly bootstrap?: (options: BootstrapOptions) => Promise<Session>;
   /** Injectable para-device bootstrap (from the teacher handoff); defaults to the real ParaKeyring path. */
   readonly bootstrapPara?: (handoff: ParaHandoff) => Promise<ParaSession>;
+  /** The device layer: setup, unlock, session material. Tests supply a crypto-free fake. */
+  readonly device?: DevicePort;
+  /** QA/synthetic build (defaults to the VITE_TA_SYNTHETIC build flag). */
+  readonly synthetic?: boolean;
 }
 
+const PASSKEY_RETRY = SETUP_ERRORS.passkey;
+
 /**
- * Copy for a FAILED unlock. The passkey guidance is reserved for an actual
- * passkey/keyring/decryption failure — the only thing that can fail unlock, since
- * bootstrap performs no relay I/O and the reconcile is non-blocking. A relay/sync
- * error (defensive: should never reach the unlock catch) gets neutral, non-blaming
- * copy instead. Identity-clean: never echoes an error's message (no student data).
+ * Copy for a FAILED unlock (flows §4 "Unlock errors"). A relay/sync error (defensive:
+ * bootstrap does no blocking relay I/O) gets neutral, non-blaming copy. Identity-clean:
+ * never echoes an error's message unless it is the app's own fixed copy.
  */
 function unlockErrorMessage(err: unknown): string {
   // Every sync/relay failure is a SyncError (RelayRequestError extends it).
   if (err instanceof SyncError) {
     return "Couldn't reach the sync server. Your local data is unaffected — try again.";
   }
-  return "Unlock failed. Check your passkey and try again.";
+  if (err instanceof UnlockBackoffError) {
+    return `Too many tries. Try again in ${Math.ceil(err.retryAfterMs / 1000)} seconds.`;
+  }
+  if (err instanceof WrongPassphraseError || err instanceof DeviceCannotUnlockError) {
+    return err.message;
+  }
+  if (err instanceof PassphraseRequiredError) {
+    return "Type your passphrase, then unlock with your passkey.";
+  }
+  return PASSKEY_RETRY;
+}
+
+/** Where a set-up device's resume opens (flows §2 screen map). */
+interface SetupState {
+  readonly port: SetupPort;
+  readonly resumeAt: SetupStageName | null;
 }
 
 export function App({
   bootstrap = bootstrapTeacherSession,
   bootstrapPara = bootstrapParaSession,
+  device: injectedDevice,
+  synthetic = isSyntheticBuild(),
 }: AppProps = {}) {
   const theme = useTheme();
   const online = useOnline();
-  const [phase, setPhase] = useState<Phase>("locked");
+  const isDesktop = useIsDesktop();
+  const [device] = useState<DevicePort>(() => injectedDevice ?? browserDevicePort({ synthetic }));
+  const [phase, setPhase] = useState<Phase>("loading");
+  const [tier, setTier] = useState<VaultTier>("prf");
+  const [setup, setSetup] = useState<SetupState | null>(null);
   const [sessions, setSessions] = useState<Sessions | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lockReason, setLockReason] = useState<LockReason | null>(null);
   const [lockWarning, setLockWarning] = useState(false);
+  const [deviceOpen, setDeviceOpen] = useState(false);
+  // A-3: on iOS outside the Home Screen app, setup offers no controls at all.
+  const [homeScreenOnly] = useState(() => isIosOutsideHomeScreen(browserPlatform()));
   const autoLockRef = useRef<AutoLock | null>(null);
   const nowRef = useRef<Date>(new Date());
   const sessionsRef = useRef<Sessions | null>(null);
+  const deviceRef = useRef<DeviceHandle | null>(null);
+  const setupRef = useRef<SetupPort | null>(null);
+  // Bumped by every lock: an async unlock or session open that started before a lock
+  // sees the change after its next await and drops what it opened.
+  const lockGenRef = useRef(0);
+  // Bumped by every lock, so the device status (style, setup stage) is read again.
+  const [statusReads, setStatusReads] = useState(0);
+
+  // The one way into setup: lock() relies on setupRef to drop the recovery code.
+  const enterSetup = useCallback((port: SetupPort, resumeAt: SetupStageName | null) => {
+    setupRef.current = port;
+    setSetup({ port, resumeAt });
+    setPhase("setup");
+  }, []);
+
+  const startNewSetup = useCallback(
+    (cleared: boolean) => {
+      setError(cleared ? "Start over with a new setup code." : null);
+      enterSetup(device.setup(), null);
+    },
+    [device, enterSetup],
+  );
+
+  // Where the device stands on open (and after each lock): no record → first setup;
+  // a record → the lock screen in its style.
+  useEffect(() => {
+    let live = true;
+    void device.status().then(
+      (status) => {
+        if (!live) {
+          return;
+        }
+        if (status.kind === "none") {
+          startNewSetup(status.cleared);
+          return;
+        }
+        setTier(status.tier);
+        // An unlock already started from the lock screen keeps its own phase.
+        setPhase((p) => (p === "loading" ? "locked" : p));
+      },
+      () => {
+        if (live) {
+          setPhase((p) => (p === "loading" ? "locked" : p));
+          if (statusReads === 0) {
+            setError(PASSKEY_RETRY); // only at open: a re-read after a lock is no failed attempt
+          }
+        }
+      },
+    );
+    return () => {
+      live = false;
+    };
+  }, [device, startNewSetup, statusReads]);
 
   // Lock (device-enrollment-spec §3.1): destroy BOTH sessions' keys — the para keyring
-  // included — then drop the sessions. flushSync commits the lock screen inside the
-  // triggering event, so on a resume from a hidden page nothing else renders first (N2).
+  // included — then the device's own keys, then drop everything. flushSync commits the
+  // lock screen inside the triggering event, so on a resume from a hidden page nothing
+  // else renders first (N2).
   const lock = useCallback((reason: LockReason) => {
+    lockGenRef.current += 1;
     const held = sessionsRef.current;
+    const heldDevice = deviceRef.current;
     sessionsRef.current = null;
+    deviceRef.current = null;
     try {
       held?.teacher.lock();
     } finally {
       try {
-        held?.para.lock();
+        held?.para?.lock();
       } finally {
-        flushSync(() => {
-          setSessions(null);
-          setPhase("locked");
-          setLockReason(reason);
-          setLockWarning(false);
-        });
+        try {
+          heldDevice?.lock(); // signSk, boxSk, record key: nothing can sign or open a grant
+        } finally {
+          setupRef.current?.discardRecoveryCode();
+          setupRef.current = null;
+          flushSync(() => {
+            setSessions(null);
+            setSetup(null);
+            setDeviceOpen(false);
+            setPhase("locked");
+            setLockReason(reason);
+            setLockWarning(false);
+            setStatusReads((n) => n + 1);
+          });
+        }
       }
     }
   }, []);
 
   useEffect(() => {
-    if (phase !== "ready") {
+    if (!deviceOpen) {
       return;
     }
     const controller = new AutoLock({
@@ -222,21 +335,30 @@ export function App({
       controller.stop();
       autoLockRef.current = null;
     };
-  }, [phase, lock]);
+  }, [deviceOpen, lock]);
 
-  const unlock = useCallback(() => {
-    setError(null);
-    setPhase("unlocking");
-    bootstrap({ now: nowRef.current })
-      .then(async (teacher) => {
+  // The unlocked, set-up device opens the teacher session (and, on a QA build, the
+  // in-process para session). Any failure locks the device again.
+  const openSession = useCallback(
+    async (handle: DeviceHandle) => {
+      const gen = lockGenRef.current;
+      let teacher: Session | null = null;
+      let para: ParaSession | null = null;
+      try {
+        const vault = await device.teacherVault(handle);
+        teacher = await bootstrap({
+          vault,
+          persistence: device.persistence,
+          inProcessPara: synthetic,
+        });
         // Enter the para-device session from the handoff (wrapped Period DEK only) —
         // it opens ONLY the para stream and cannot decrypt master.
-        let para: ParaSession;
-        try {
-          para = await bootstrapPara(teacher.paraHandoff);
-        } catch (err) {
-          teacher.lock(); // never leave MK and the period keys behind a failed unlock
-          throw err;
+        para = teacher.paraHandoff === null ? null : await bootstrapPara(teacher.paraHandoff);
+        if (lockGenRef.current !== gen) {
+          // A lock landed while the session was opening: it never reaches the screen.
+          teacher.lock();
+          para?.lock();
+          return;
         }
         // The local encrypted store is open — unlock has SUCCEEDED. The relay reconcile
         // is best-effort and offline-first: fire-and-forget, and swallow even a contract
@@ -246,16 +368,105 @@ export function App({
         setLockReason(null);
         setPhase("ready");
         void teacher.sync().catch(() => {});
-      })
-      .catch((err: unknown) => {
-        // Only a genuine passkey/keyring/decryption failure reaches here — bootstrap does
-        // NO relay I/O and the reconcile above is non-blocking — so a relay/sync error
-        // must never masquerade as a passkey problem (identity-clean: no student data).
+      } catch (err) {
+        teacher?.lock(); // never leave MK and the period keys behind a failed unlock
+        para?.lock();
+        handle.lock();
+        if (lockGenRef.current !== gen) {
+          // The failure is the lock's doing (a zeroized device throws): no error to show,
+          // and a later unlock's device, state and auto-lock are not ours to touch.
+          return;
+        }
+        deviceRef.current = null;
+        setDeviceOpen(false);
         setPhase("locked");
         setError(unlockErrorMessage(err));
-      });
-  }, [bootstrap, bootstrapPara]);
+      }
+    },
+    [device, bootstrap, bootstrapPara, synthetic],
+  );
 
+  // After the unlock ceremony: the stored stage decides between resuming setup and
+  // opening the session. An unreadable status fails closed (A-8: no data before `done`).
+  const afterUnlock = useCallback(
+    async (handle: DeviceHandle) => {
+      const gen = lockGenRef.current;
+      const status = await device.status().catch(() => null);
+      if (lockGenRef.current !== gen) {
+        return; // locked meanwhile: the lock already locked this handle
+      }
+      if (status === null || status.kind === "none") {
+        // Unreadable: fail closed, never open data. Gone (A-8 wipe): setup starts over.
+        handle.lock();
+        deviceRef.current = null;
+        setDeviceOpen(false);
+        if (status === null) {
+          setPhase("locked");
+          setError(PASSKEY_RETRY);
+        } else {
+          startNewSetup(status.cleared);
+        }
+        return;
+      }
+      if (status.stage !== "done") {
+        // An unfinished setup resumes only after this full unlock (A-2, A-8).
+        enterSetup(device.setup(handle), status.stage);
+        return;
+      }
+      await openSession(handle);
+    },
+    [device, openSession, startNewSetup, enterSetup],
+  );
+
+  const unlock = useCallback(
+    (passphrase?: string) => {
+      setError(null);
+      setPhase("unlocking");
+      void (async () => {
+        let handle: DeviceHandle;
+        try {
+          handle = await device.unlock(passphrase);
+        } catch (err) {
+          setPhase("locked");
+          setError(unlockErrorMessage(err));
+          return;
+        }
+        deviceRef.current = handle;
+        setDeviceOpen(true);
+        await afterUnlock(handle);
+      })();
+    },
+    [device, afterUnlock],
+  );
+
+  if (phase === "setup" && setup !== null) {
+    return (
+      <div className="phone">
+        {lockWarning ? <LockWarning onKeepOpen={() => setLockWarning(false)} /> : null}
+        <SetupFlow
+          port={setup.port}
+          resumeAt={setup.resumeAt}
+          resumeTier={tier}
+          online={online}
+          deviceWord={isDesktop ? "laptop" : "phone"}
+          startNotice={error}
+          homeScreenOnly={homeScreenOnly}
+          onVaultSealed={(handle) => {
+            // From here the setup holds the unlocked device: auto-lock and Lock cover it.
+            deviceRef.current = handle;
+            setDeviceOpen(true);
+          }}
+          onDone={(handle) => {
+            deviceRef.current = handle;
+            setupRef.current = null;
+            setDeviceOpen(true);
+            setPhase("unlocking");
+            void openSession(handle);
+          }}
+        />
+      </div>
+    );
+  }
   if (phase !== "ready" || sessions === null) {
     return (
       <div className="phone">
@@ -263,6 +474,7 @@ export function App({
           onUnlock={unlock}
           busy={phase === "unlocking"}
           error={error}
+          tier={tier}
           reason={lockReason === null ? null : lockReasonCopy(lockReason)}
         />
       </div>
@@ -325,7 +537,8 @@ function ReadyApp({
   onLock,
 }: {
   readonly teacher: Session;
-  readonly para: ParaSession;
+  /** Null on a production build: no in-process para device, no role switch (A-6). */
+  readonly para: ParaSession | null;
   readonly online: boolean;
   readonly theme: ThemeControl;
   readonly now: Date;
@@ -344,7 +557,7 @@ function ReadyApp({
   const [detailGoalId, setDetailGoalId] = useState<OpaqueId | null>(null);
   const [sheetTarget, setSheetTarget] = useState<SheetTarget | null>(null);
   const [paraFix, setParaFix] = useState<ProgressDataPoint | null>(null);
-  const [paraRecords, setParaRecords] = useState<ParaDocRecords>(para.paraRecords);
+  const [paraRecords, setParaRecords] = useState<ParaDocRecords | null>(para?.paraRecords ?? null);
   const [paraQueue, setParaQueue] = useState<readonly ProgressDataPoint[]>(() =>
     teacher.readParaQueue(),
   );
@@ -366,7 +579,7 @@ function ReadyApp({
   }, [teacher]);
 
   useEffect(() => {
-    if (role === "teacher") {
+    if (role === "teacher" || para === null) {
       void refreshParaQueue();
     } else {
       // Entering the para role: integrate any teacher republish (a new/adopted goal
@@ -544,6 +757,9 @@ function ReadyApp({
 
   const capturePara = useCallback(
     async (mutator: DocMutator) => {
+      if (para === null) {
+        return;
+      }
       await para.capturePara(mutator);
       setParaRecords(para.readParaRecords());
     },
@@ -719,7 +935,7 @@ function ReadyApp({
       isDesktop={isDesktop}
       online={online}
       role={role}
-      onRole={setRole}
+      onRole={para === null ? undefined : setRole}
       theme={theme.choice}
       onThemeCycle={theme.cycle}
       onLock={onLock}
@@ -731,7 +947,7 @@ function ReadyApp({
       paraContext={PARA_CONTEXT}
       overlay={overlay}
     >
-      {role === "para" ? (
+      {role === "para" && paraRecords !== null ? (
         <ParaScreen paraRecords={paraRecords} now={now} capturePara={capturePara} />
       ) : tab === "track" ? (
         track

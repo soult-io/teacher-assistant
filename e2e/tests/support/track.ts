@@ -2,10 +2,12 @@
 // same synthetic caseload and drive the same Quick-Score surface, so the unlock + the
 // row locator live here once.
 //
-// SYNTHETIC DATA ONLY: the app boots on SyntheticPasskeyGateway + buildSyntheticSeed
-// (no real student record), which is what keeps the captured video/trace FERPA-safe.
+// SYNTHETIC DATA ONLY: the journeys run the local synthetic build, where first setup
+// writes buildSyntheticSeed (no real student record) — which is what keeps the captured
+// video/trace FERPA-safe. Setup runs on a test-harness authenticator (./device-setup).
 
 import { expect, type Locator, type Page } from "@playwright/test";
+import { completeFirstSetup, prepareDeviceSetup } from "./device-setup";
 
 /**
  * A fixed clock for the synthetic seed. buildSyntheticSeed(now) dates every seeded
@@ -20,16 +22,17 @@ export const FIXED_NOW = new Date("2026-05-13T12:00:00.000Z");
 export const PHONE = { width: 390, height: 844 } as const;
 
 /**
- * Pin the clock, put the app in the phone layout, and unlock to the Weekly Dashboard
- * on the synthetic caseload. Leaves the page on the owes-first dashboard with the
- * three-state header rendered.
+ * Pin the clock, put the app in the phone layout, set up this (fresh) device — which
+ * writes the synthetic caseload — and land on the Weekly Dashboard. Leaves the page on
+ * the owes-first dashboard with the three-state header rendered.
  */
 export async function unlockToDashboard(page: Page): Promise<void> {
   // setFixedTime must run before the app's first `new Date()` (read once at mount).
   await page.clock.setFixedTime(FIXED_NOW);
   await page.setViewportSize(PHONE);
+  await prepareDeviceSetup(page);
   await page.goto("/");
-  await page.getByTestId("unlock").click();
+  await completeFirstSetup(page);
   await expect(page.getByTestId("header-line")).toBeVisible();
 }
 

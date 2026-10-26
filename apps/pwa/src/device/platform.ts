@@ -51,13 +51,28 @@ export function isIosOutsideHomeScreen(env: PlatformEnv): boolean {
 }
 
 /** Ask the browser to keep this origin's storage. Resolves false when refused or unsupported. */
-export async function requestPersistentStorage(env: PlatformEnv): Promise<boolean> {
+/**
+ * How long setup waits for the answer. Firefox asks the user with a prompt and the
+ * promise stays pending until she answers, so setup never waits on it (A-3: not blocking).
+ */
+export const PERSIST_WAIT_MS = 2_000;
+
+export async function requestPersistentStorage(
+  env: PlatformEnv,
+  waitMs: number = PERSIST_WAIT_MS,
+): Promise<boolean> {
   if (env.persist === undefined) {
     return false;
   }
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const unanswered = new Promise<boolean>((resolve) => {
+    timer = setTimeout(() => resolve(false), waitMs);
+  });
   try {
-    return await env.persist();
-  } catch {
-    return false;
+    // An unanswered prompt reads as "not persisted": the one-line warning shows, and the
+    // browser may still grant it later.
+    return await Promise.race([env.persist().catch(() => false), unanswered]);
+  } finally {
+    clearTimeout(timer);
   }
 }

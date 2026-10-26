@@ -5,7 +5,7 @@
 // returned only when the authenticator gives one (device-enrollment-spec DN-1 Tier P).
 
 import { describe, expect, it } from "vitest";
-import { BrowserPasskeyPrf, UserVerificationError } from "./passkey-prf.js";
+import { BrowserPasskeyPrf, passkeyDisplayName, UserVerificationError } from "./passkey-prf.js";
 
 /** authenticatorData: rpIdHash (32) ‖ flags (1) ‖ signCount (4). */
 function authData(flags: number): ArrayBuffer {
@@ -16,6 +16,8 @@ function authData(flags: number): ArrayBuffer {
 
 const UP = 0x01;
 const UV = 0x04;
+const BE = 0x08;
+const BS = 0x10;
 
 function fakeContainer(opts: { prf?: Uint8Array | null; flags?: number }) {
   const calls: { create: CredentialCreationOptions[]; get: CredentialRequestOptions[] } = {
@@ -48,7 +50,7 @@ describe("BrowserPasskeyPrf", () => {
   it("create() requires UV and asks for the PRF extension", async () => {
     const { calls, container } = fakeContainer({ prf: new Uint8Array(32).fill(1) });
     const port = new BrowserPasskeyPrf({ credentials: container, rpId: "ta.example" });
-    const { credentialId } = await port.create();
+    const { credentialId } = await port.create("Teacher Assistant — Phone, added Oct 26");
     expect([...credentialId]).toEqual([1, 2, 3, 4]);
     const pk = calls.create[0]?.publicKey;
     expect(pk?.authenticatorSelection?.userVerification).toBe("required");
@@ -86,7 +88,57 @@ describe("BrowserPasskeyPrf", () => {
       get: () => Promise.resolve(null),
     } as unknown as CredentialsContainer;
     const port = new BrowserPasskeyPrf({ credentials: container, rpId: "ta.example" });
-    await expect(port.create()).rejects.toThrow(UserVerificationError);
+    await expect(port.create("x")).rejects.toThrow(UserVerificationError);
     await expect(port.assert(new Uint8Array([1]))).rejects.toThrow(UserVerificationError);
+  });
+
+  it("create() sets no authenticatorAttachment, so any provider can hold the passkey (DN-1a)", async () => {
+    const { calls, container } = fakeContainer({ prf: null });
+    const port = new BrowserPasskeyPrf({ credentials: container, rpId: "ta.example" });
+    await port.create("Teacher Assistant — Phone, added Oct 26");
+    const selection = calls.create[0]?.publicKey?.authenticatorSelection;
+    expect(selection).not.toHaveProperty("authenticatorAttachment");
+  });
+
+  it("create() names the passkey after the device (DN-1a label), never with a person's name", async () => {
+    const { calls, container } = fakeContainer({ prf: null });
+    const port = new BrowserPasskeyPrf({ credentials: container, rpId: "ta.example" });
+    await port.create("Teacher Assistant — School computer, added Oct 9");
+    const user = calls.create[0]?.publicKey?.user;
+    expect(user?.name).toBe("Teacher Assistant — School computer, added Oct 9");
+    expect(user?.displayName).toBe("Teacher Assistant — School computer, added Oct 9");
+  });
+
+  it("get() allows ONLY this device's credential id (C1)", async () => {
+    const { calls, container } = fakeContainer({ prf: null });
+    const port = new BrowserPasskeyPrf({ credentials: container, rpId: "ta.example" });
+    await port.assert(new Uint8Array([9, 8, 7]));
+    const allow = calls.get[0]?.publicKey?.allowCredentials ?? [];
+    expect(allow).toHaveLength(1);
+    expect([...new Uint8Array(allow[0]?.id as ArrayBuffer)]).toEqual([9, 8, 7]);
+  });
+
+  it("reads BE/BS from the assertion's authenticator data (C4)", async () => {
+    const port = (flags: number) =>
+      new BrowserPasskeyPrf({
+        credentials: fakeContainer({ prf: null, flags }).container,
+        rpId: "x",
+      });
+    expect(await port(UP | UV | BE | BS).assert(new Uint8Array([1]))).toMatchObject({
+      backupEligible: true,
+      backedUp: true,
+    });
+    expect(await port(UP | UV).assert(new Uint8Array([1]))).toMatchObject({
+      backupEligible: false,
+      backedUp: false,
+    });
+  });
+});
+
+describe("passkeyDisplayName", () => {
+  it("is the app name, the device's name and the day it was added", () => {
+    expect(passkeyDisplayName("Phone", new Date(2026, 9, 9))).toBe(
+      "Teacher Assistant — Phone, added Oct 9",
+    );
   });
 });

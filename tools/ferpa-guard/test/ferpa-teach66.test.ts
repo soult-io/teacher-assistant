@@ -134,12 +134,15 @@ describe("TEACH-66 HARD — Tier W KEK", () => {
     expect(fields.map((f) => f.replace(/^ {2}readonly |\??:/g, "")).sort()).toEqual(
       [
         "boxPk",
+        // EU-7 (rev 2.5 C4, §13 A-8): BE/BS flags and the setup stage — neither is a key.
+        "credFlags",
         "credentialId",
         "enrolled",
         "grant",
         "kdev",
         "pwSalt",
         "role",
+        "setupStage",
         "signPk",
         "tier",
         "unlockFailures",
@@ -221,7 +224,8 @@ describe("TEACH-66 HARD — signSk only in the vault; no signing while locked (N
 
   it("the RelayClient signs through the device signer, not a fresh keypair per engine", () => {
     const session = source(pwaSrc, "data", "session.ts");
-    expect(session).toContain("readonly device?: RequestSigner;");
+    // EU-7 (TEACH-73): the vault's signer is required — no session without the device.
+    expect(session).toContain("readonly signer: RequestSigner;");
     expect(functionBody(session, "relayFor")).not.toContain("generateSigningKeypair");
     expect(session).not.toMatch(/signingKeypair:/);
   });
@@ -263,7 +267,8 @@ describe("TEACH-66 HARD — auto-lock (N2, A-10)", () => {
     const lock = app.slice(app.indexOf("const lock = useCallback("));
     const body = lock.slice(0, lock.indexOf("}, []);"));
     expect(body).toContain("held?.teacher.lock();");
-    expect(body).toContain("held?.para.lock();");
+    // EU-7: the in-process para session exists on QA builds only, hence the optional call.
+    expect(body).toContain("held?.para?.lock();");
     expect(body).toContain("flushSync(");
     expect(body).toContain("setSessions(null);");
   });
@@ -272,7 +277,9 @@ describe("TEACH-66 HARD — auto-lock (N2, A-10)", () => {
     const session = source(pwaSrc, "data", "session.ts");
     expect(session).toContain("keyring.destroy();");
     expect(session).toContain("paraKeyring.destroy();");
-    expect(session).toContain("issuing.destroy();");
+    // EU-7: MK is minted only at first setup; that minting keyring is destroyed at once.
+    const mint = functionBody(source(pwaSrc, "data", "first-device.ts"), "mintFirstDeviceGrant");
+    expect(mint).toContain("keyring.destroy();");
   });
 });
 

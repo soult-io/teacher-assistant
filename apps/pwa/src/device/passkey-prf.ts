@@ -1,4 +1,9 @@
-// The WebAuthn port for the device vault (device-enrollment-spec rev 2.4 DN-1).
+// The WebAuthn port for the device vault (device-enrollment-spec rev 2.5 DN-1, DN-1a).
+//
+// Passkeys from any provider (DN-1a): create() sets no authenticatorAttachment, so a
+// password manager (Bitwarden), a security key or a phone can hold it. Each device runs
+// its own create(), and every get() names only that device's credential (C1). The
+// passkey's display name is the device's name, chosen before create() (DN-1a label).
 //
 // Both ceremonies use `userVerification: "required"`, and an assertion whose
 // authenticator data lacks the UV flag is refused here as well, so a presence-only
@@ -17,21 +22,48 @@ export class UserVerificationError extends Error {
   }
 }
 
-/** One user-verified assertion: the PRF output, or null when the authenticator gave none. */
+/**
+ * One user-verified assertion: the PRF output (null when the authenticator gave none) and
+ * the BE/BS flags (backup eligible / backed up) from its authenticator data. The flags are
+ * kept only in the local DeviceRecord, never sent anywhere (DN-1a C4).
+ */
 export interface PasskeyAssertion {
   readonly prf: Uint8Array | null;
+  readonly backupEligible: boolean;
+  readonly backedUp: boolean;
 }
 
-/** Port: create the device passkey, and run a UV-required assertion against it. */
+/** Port: create the device passkey under a display name, and run a UV-required assertion against it. */
 export interface PasskeyPrfPort {
-  create(): Promise<{ readonly credentialId: Uint8Array }>;
+  create(displayName: string): Promise<{ readonly credentialId: Uint8Array }>;
   assert(credentialId: Uint8Array): Promise<PasskeyAssertion>;
+}
+
+/** The names a teacher device can take (flows S1a). A fixed list: no free text, no student data. */
+export const TEACHER_DEVICE_LABELS = [
+  "Phone",
+  "Tablet",
+  "Home computer",
+  "School computer",
+] as const;
+export type TeacherDeviceLabel = (typeof TEACHER_DEVICE_LABELS)[number];
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * The passkey's display name (DN-1a passkey label), e.g. "Teacher Assistant — Phone, added
+ * Oct 9", so she can find this device's passkey in her password manager later.
+ */
+export function passkeyDisplayName(label: TeacherDeviceLabel, added: Date): string {
+  return `${RP_NAME} — ${label}, added ${MONTHS[added.getMonth()]} ${added.getDate()}`;
 }
 
 // The PRF evaluation input. Constant: the PRF secret is per credential, so a fixed
 // input yields a per-device output.
 const PRF_INPUT = new TextEncoder().encode("ta-vault-prf-v1");
 const UV_FLAG = 0x04;
+const BE_FLAG = 0x08;
+const BS_FLAG = 0x10;
 const FLAGS_OFFSET = 32; // authenticatorData = rpIdHash (32) ‖ flags (1) ‖ …
 const RP_NAME = "Teacher Assistant";
 // Bounds a ceremony that never settles, so one hung prompt cannot block later unlocks.
@@ -67,15 +99,16 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
     this.#rpId = options.rpId ?? globalThis.location.hostname;
   }
 
-  async create(): Promise<{ readonly credentialId: Uint8Array }> {
+  async create(displayName: string): Promise<{ readonly credentialId: Uint8Array }> {
     const credential = (await this.#credentials.create({
       publicKey: {
         rp: { id: this.#rpId, name: RP_NAME },
-        // No PII: the user handle is random and the names are the app's own.
+        // No PII: the user handle is random; the name is the app's plus the device's
+        // name from a fixed list (passkeyDisplayName).
         user: {
           id: crypto.getRandomValues(new Uint8Array(16)),
-          name: RP_NAME,
-          displayName: RP_NAME,
+          name: displayName,
+          displayName,
         },
         challenge: randomChallenge(),
         timeout: CEREMONY_TIMEOUT_MS,
@@ -84,6 +117,7 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
           { type: "public-key", alg: -7 }, // ES256
           { type: "public-key", alg: -257 }, // RS256
         ],
+        // No authenticatorAttachment: any provider may hold the passkey (DN-1a).
         authenticatorSelection: { userVerification: "required", residentKey: "preferred" },
         extensions: { prf: {} } as AuthenticationExtensionsClientInputs,
       },
@@ -100,6 +134,7 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
         challenge: randomChallenge(),
         rpId: this.#rpId,
         timeout: CEREMONY_TIMEOUT_MS,
+        // Only this device's credential (C1): a passkey is never shared across devices.
         allowCredentials: [{ type: "public-key", id: new Uint8Array(credentialId) }],
         userVerification: "required",
         extensions: { prf: { eval: { first: PRF_INPUT } } } as AuthenticationExtensionsClientInputs,
@@ -116,6 +151,6 @@ export class BrowserPasskeyPrf implements PasskeyPrfPort {
       prf?.fill(0);
       throw new UserVerificationError();
     }
-    return { prf };
+    return { prf, backupEligible: (flags & BE_FLAG) !== 0, backedUp: (flags & BS_FLAG) !== 0 };
   }
 }

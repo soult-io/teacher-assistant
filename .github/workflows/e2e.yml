@@ -44,6 +44,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build (PWA + workspace deps)
+        # A QA/synthetic build (device-enrollment-spec §3.4): first setup writes the
+        # synthetic caseload the journeys walk. A production build never seeds it.
+        env:
+          VITE_TA_SYNTHETIC: "1"
         run: pnpm -r run build
 
       - name: Verify Playwright browsers
@@ -112,6 +116,10 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build (PWA + workspace deps)
+        # A QA/synthetic build (device-enrollment-spec §3.4): first setup writes the
+        # synthetic caseload the journeys walk. A production build never seeds it.
+        env:
+          VITE_TA_SYNTHETIC: "1"
         run: pnpm -r run build
 
       - name: Verify Playwright browsers

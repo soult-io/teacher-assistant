@@ -45,6 +45,9 @@ importers:
       '@simplewebauthn/server':
         specifier: 14.0.3
         version: 14.0.3
+      '@teacher-assistant/sync-relay':
+        specifier: workspace:*
+        version: link:../../services/sync-relay
       '@testing-library/dom':
         specifier: ^10.4.2
         version: 10.4.2
