@@ -65,4 +65,9 @@ describe("requestPersistentStorage", () => {
       await requestPersistentStorage({ ...base, persist: () => Promise.reject(new Error("x")) }),
     ).toBe(false);
   });
+
+  it("never waits on an unanswered persist() prompt (Firefox): reads as not persisted", async () => {
+    const env = { ...base, persist: () => new Promise<boolean>(() => {}) };
+    await expect(requestPersistentStorage(env, 10)).resolves.toBe(false);
+  });
 });
