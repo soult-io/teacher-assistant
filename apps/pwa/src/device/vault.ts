@@ -267,6 +267,26 @@ export class UnlockedDevice implements RequestSigner {
     }
   }
 
+  /**
+   * A paired device (F2): store the grant and mark setup done in ONE record write, so a
+   * device never holds a grant while its stage still says the pairing is unfinished.
+   */
+  async storePairedGrant(store: DeviceStore, grant: StoredGrant, now: number): Promise<void> {
+    this.#assertUnlocked();
+    if (grant.role !== this.role) {
+      throw new Error("the grant is for the other role");
+    }
+    const plaintext = utf8(JSON.stringify(grant));
+    const sealed = toBase64(sealGrantAtRest(this.#secrets.recordKey, this.publicKey, plaintext));
+    zeroize(plaintext);
+    await store.update((record) => ({
+      ...record,
+      grant: sealed,
+      enrolled: true,
+      setupStage: { stage: "done", at: now },
+    }));
+  }
+
   /** Zeroize every private key buffer in place. Idempotent. */
   lock(): void {
     if (this.#locked) {
@@ -314,6 +334,8 @@ export interface CreateVaultInput {
   readonly platform?: PlatformEnv;
   /** Clock for the setup stage's timestamp (A-8 resume window). */
   readonly now?: () => number;
+  /** The first stage: `keys_created` for first setup (default), `pairing` for a paired device. */
+  readonly stage?: "keys_created" | "pairing";
 }
 
 /**
@@ -359,7 +381,7 @@ export async function createDeviceVault(
       vault: "",
       role: input.role,
       enrolled: false,
-      setupStage: { stage: "keys_created", at: (input.now ?? Date.now)() },
+      setupStage: { stage: input.stage ?? "keys_created", at: (input.now ?? Date.now)() },
     };
     const vault = sealVault(kek, secrets, bindingOf(record));
     await input.store.create({ ...record, vault: toBase64(vault) });

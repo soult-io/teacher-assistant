@@ -197,6 +197,23 @@ function assertConfirmed(request: EnrollmentRequest, confirmedCode: string): Uin
 }
 
 /**
+ * Whether a typed code matches the request, without approving anything. The approver
+ * counts wrong entries with this before the fresh unlock (spec §13 A-4); approveX still
+ * re-checks the code itself.
+ */
+export function verificationCodeMatches(request: EnrollmentRequest, typedCode: string): boolean {
+  try {
+    assertConfirmed(request, typedCode);
+    return true;
+  } catch (err) {
+    if (err instanceof EnrollmentConfirmationError) {
+      return false;
+    }
+    throw err;
+  }
+}
+
+/**
  * On a trusted teacher device: approve enrolling a new TEACHER device by wrapping
  * the master key to its box public key. Requires the OOB verification code (gate 2)
  * and a teacher keyring holding MK (gate 1).
