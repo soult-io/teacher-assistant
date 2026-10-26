@@ -91,6 +91,8 @@ export function makeFakeSession(seed: SyntheticSeed): Session {
     },
     paraHandoff: handoff,
     sync: () => Promise.resolve(false),
+    pairingScopes: () => [],
+    addDevice: () => Promise.resolve(),
     lock: () => {},
   };
 }

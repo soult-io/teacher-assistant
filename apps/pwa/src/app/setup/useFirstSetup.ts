@@ -7,8 +7,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SetupPort } from "../../device/device-port.js";
 import type { SetupStageName } from "../../device/device-store.js";
 import type { RedeemStep } from "../../device/first-setup.js";
-import type { TeacherDeviceLabel } from "../../device/passkey-prf.js";
-import { SETUP_ERRORS } from "../../device/setup-copy.js";
+import { defaultDeviceLabel, type TeacherDeviceLabel } from "../../device/passkey-prf.js";
+import { passkeyErrorCopy, SETUP_ERRORS } from "../../device/setup-copy.js";
 
 export type Step =
   | "welcome"
@@ -27,18 +27,6 @@ export type Step =
 const NOT_PERSISTED = "This browser may clear this device's setup. Install the app to keep it.";
 
 export { SETUP_ERRORS };
-
-/** E-S4 (retry), E-S5 (this device cannot save a passkey at all) or the A-3 install line. */
-function passkeyError(err: unknown): string {
-  const name = err instanceof Error ? err.name : "";
-  if (name === "SetupNeedsHomeScreenError") {
-    return SETUP_ERRORS.homeScreen;
-  }
-  // WebAuthn missing (no navigator.credentials) or the platform refuses the ceremony.
-  return name === "NotSupportedError" || name === "TypeError"
-    ? SETUP_ERRORS.noPasskey
-    : SETUP_ERRORS.passkey;
-}
 
 /** The step a resumed setup opens on. */
 function resumeStep(stage: SetupStageName | null, labelKnown: boolean): Step {
@@ -78,9 +66,7 @@ export function useFirstSetup(options: FirstSetupOptions) {
   const { port, resumeAt, deviceWord } = options;
   const [step, setStep] = useState<Step>(() => resumeStep(resumeAt, port.label !== undefined));
   const [code, setCode] = useState("");
-  const [label, setLabel] = useState<TeacherDeviceLabel>(
-    deviceWord === "phone" ? "Phone" : "School computer",
-  );
+  const [label, setLabel] = useState<TeacherDeviceLabel>(defaultDeviceLabel(deviceWord));
   const [tier, setTier] = useState<VaultTier | null>(options.resumeTier ?? null);
   const [vaultSealed, setVaultSealed] = useState(resumeAt !== null);
   const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
@@ -189,7 +175,7 @@ export function useFirstSetup(options: FirstSetupOptions) {
           setVaultSealed(true);
           await submitCode();
         },
-        (err) => setError(passkeyError(err)),
+        (err) => setError(passkeyErrorCopy(err, SETUP_ERRORS.passkey)),
       ),
     [port, run, submitCode, deviceWord, options.onVaultSealed],
   );
@@ -207,7 +193,7 @@ export function useFirstSetup(options: FirstSetupOptions) {
           setVaultSealed(true);
           await submitCode();
         },
-        (err) => setError(passkeyError(err)),
+        (err) => setError(passkeyErrorCopy(err, SETUP_ERRORS.passkey)),
       ),
     [port, run, submitCode, options.onVaultSealed],
   );

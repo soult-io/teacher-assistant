@@ -56,7 +56,15 @@ import { IndexedDbPersistence } from "./indexeddb-persistence.js";
 import type { PasskeyGateway } from "./passkey.js";
 import { SyntheticPasskeyGateway } from "./passkey.js";
 import type { Doc as YDoc } from "yjs";
-import { activeStream, type Manifest, readManifest } from "./manifest.js";
+import type { ScopeGrant } from "../device/control-client.js";
+import {
+  activeStream,
+  addDevice,
+  type DeviceEntry,
+  isEmptyManifest,
+  type Manifest,
+  readManifest,
+} from "./manifest.js";
 import {
   type DecryptedRecords,
   type ParaDocRecords,
@@ -116,6 +124,13 @@ export interface Session {
   readonly paraHandoff: ParaHandoff | null;
   /** Best-effort reconcile with the relay (offline-first: false when unreachable). */
   sync(): Promise<boolean>;
+  /**
+   * Pairing (EU-8): every scope this device holds that a new teacher device must get, with
+   * its kind — the master tag (`master`) and each stream not retired (`period`).
+   */
+  pairingScopes(): readonly ScopeGrant[];
+  /** Pairing (EU-8): record a device's name in the master `devices` map, then sync. */
+  addDevice(signPkB64: string, entry: DeviceEntry): Promise<void>;
   /**
    * Lock (auto-lock or the Lock action): destroy the keyring (MK + period DEKs) and zeroize
    * every other private key this session made. Every later key use throws. Idempotent.
@@ -315,6 +330,12 @@ async function openTeacherSession(
   );
   const masterStream = master.stream;
   const masterEngine = master.engine;
+  // A device added by pairing (EU-8) holds no master ciphertext yet: pull master before
+  // reading the manifest, or it would find no period keys and no para stream. Offline, the
+  // pull fails quietly and the next unlock reads what the session's sync brought down.
+  if (isEmptyManifest(readManifest(masterStream.doc))) {
+    await reconcile(masterEngine);
+  }
   const manifest = readManifest(masterStream.doc);
   addPeriodKeys(keyring, manifest);
   const active = activeStream(manifest);
@@ -409,6 +430,19 @@ async function openTeacherSession(
       const masterOk = await reconcile(masterEngine);
       const paraOk = para === null ? true : await reconcile(para.engine);
       return masterOk && paraOk;
+    },
+    pairingScopes: () => {
+      const scopes: ScopeGrant[] = [{ tag: keyring.masterScopeTag, kind: "master" }];
+      for (const [tag, entry] of readManifest(masterStream.doc).streams) {
+        if (!entry.retired) {
+          scopes.push({ tag, kind: "period" });
+        }
+      }
+      return scopes;
+    },
+    addDevice: async (signPkB64, entry) => {
+      await masterEngine.capture((doc) => addDevice(doc, signPkB64, entry));
+      await reconcile(masterEngine); // best-effort: the new device pulls master next
     },
     lock: () => {
       keyring.destroy(); // MK + every period DEK, zeroized in place

@@ -23,9 +23,15 @@ const STORE = "device";
 const RECORD_KEY = "self";
 const DB_VERSION = 1;
 
-/** First-setup progress (spec §13 "Local setup state"). Written before each network step. */
+/**
+ * First-setup progress (spec §13 "Local setup state"). Written before each network step.
+ * `pairing`: a device being added by pairing (F2, EU-8) whose grant has not arrived. The
+ * pairing secret lives in memory only, so this stage never resumes: once no window is
+ * running the pairing, the next open wipes it.
+ */
 export type SetupStageName =
   | "keys_created"
+  | "pairing"
   | "redeemed"
   | "scopes_granted"
   | "recovery_pending"

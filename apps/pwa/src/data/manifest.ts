@@ -54,6 +54,13 @@ export function readManifest(doc: YDoc): Manifest {
   };
 }
 
+/** True for a master doc with no manifest at all yet (a paired device before its first pull). */
+export function isEmptyManifest(manifest: Manifest): boolean {
+  return (
+    manifest.streams.size === 0 && manifest.periodKeys.size === 0 && manifest.devices.size === 0
+  );
+}
+
 /** The para stream the session opens: the first one not retired (one period has a para today). */
 export function activeStream(
   manifest: Manifest,

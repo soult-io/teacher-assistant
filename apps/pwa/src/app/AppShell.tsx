@@ -40,6 +40,8 @@ export interface AppShellProps {
   readonly onThemeCycle: () => void;
   /** The explicit Lock action (device-enrollment-spec §3.1): 1 tap, no confirm. */
   readonly onLock: () => void;
+  /** ⚙ Devices (flows §2: next to the theme toggle). Teacher devices only; undefined hides it. */
+  readonly onDevices?: (() => void) | undefined;
   readonly tab: Tab;
   readonly onTab: (tab: Tab) => void;
   /** Desktop top-bar title (current screen). Unused on mobile. */
@@ -119,6 +121,24 @@ function ThemeToggle({
   );
 }
 
+function DevicesButton({ onDevices }: { readonly onDevices: (() => void) | undefined }) {
+  if (onDevices === undefined) {
+    return null;
+  }
+  return (
+    <button
+      type="button"
+      className="iconbtn"
+      onClick={onDevices}
+      aria-label="Devices"
+      title="Devices"
+      data-testid="devices"
+    >
+      ⚙
+    </button>
+  );
+}
+
 function LockButton({ onLock }: { readonly onLock: () => void }) {
   return (
     <button type="button" className="iconbtn" onClick={onLock} title="Lock" data-testid="lock">
@@ -150,15 +170,30 @@ function TabButton({
 
 /** MOBILE chrome — the exact prototype markup (status bar · screen · Track/Plan tab bar). */
 function MobileChrome(props: AppShellProps) {
-  const { online, role, onRole, theme, onThemeCycle, onLock, tab, onTab, children, overlay } =
-    props;
+  const {
+    online,
+    role,
+    onRole,
+    theme,
+    onThemeCycle,
+    onLock,
+    onDevices,
+    tab,
+    onTab,
+    children,
+    overlay,
+  } = props;
   return (
     <div className="phone" id="phone">
       <div className="statusbar">
         <OfflineBadge online={online} />
         <span className="grow" />
-        <RoleSeg role={role} onRole={onRole} />
+        {/* A-6: the switch exists only in a QA/synthetic build. The flag is read inline (not
+            through isSyntheticBuild()) so the build folds it to a constant and a production
+            bundle carries no RoleSeg at all. */}
+        {import.meta.env.VITE_TA_SYNTHETIC === "1" ? <RoleSeg role={role} onRole={onRole} /> : null}
         <ThemeToggle theme={theme} onThemeCycle={onThemeCycle} />
+        <DevicesButton onDevices={onDevices} />
         <LockButton onLock={onLock} />
       </div>
 
@@ -285,6 +320,7 @@ function DesktopShell(props: AppShellProps) {
     theme,
     onThemeCycle,
     onLock,
+    onDevices,
     tab,
     onTab,
     title,
@@ -316,8 +352,11 @@ function DesktopShell(props: AppShellProps) {
             <span className="title">{title}</span>
             <span className="topgrow" />
             <OfflineBadge online={online} />
-            <RoleSeg role={role} onRole={onRole} />
+            {import.meta.env.VITE_TA_SYNTHETIC === "1" ? (
+              <RoleSeg role={role} onRole={onRole} />
+            ) : null}
             <ThemeToggle theme={theme} onThemeCycle={onThemeCycle} />
+            <DevicesButton onDevices={onDevices} />
             <LockButton onLock={onLock} />
           </div>
         </div>

@@ -48,13 +48,38 @@ export const TEACHER_DEVICE_LABELS = [
 ] as const;
 export type TeacherDeviceLabel = (typeof TEACHER_DEVICE_LABELS)[number];
 
+/** The name preselected on a name screen, from screen size (flows S1a, B1a). */
+export function defaultDeviceLabel(deviceWord: string): TeacherDeviceLabel {
+  return deviceWord === "phone" ? "Phone" : "School computer";
+}
+
+/** The names a para device can take (release 2 pairs one). */
+const PARA_DEVICE_LABELS = ["Para phone", "Para tablet"] as const;
+
+/**
+ * The one combined list a new device picks from while pairing (flows B1a): it does not
+ * know yet whose device it is. The approving device checks the name against the role it
+ * is adding (spec §4.2 step 3).
+ */
+export const DEVICE_LABELS = [...TEACHER_DEVICE_LABELS, ...PARA_DEVICE_LABELS] as const;
+export type DeviceLabel = (typeof DEVICE_LABELS)[number];
+
+export function isDeviceLabel(value: unknown): value is DeviceLabel {
+  return (DEVICE_LABELS as readonly unknown[]).includes(value);
+}
+
+/** The role a name belongs to: Para phone / Para tablet are para names, the rest teacher names. */
+export function labelRole(label: DeviceLabel): "teacher" | "para" {
+  return (PARA_DEVICE_LABELS as readonly string[]).includes(label) ? "para" : "teacher";
+}
+
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 /**
  * The passkey's display name (DN-1a passkey label), e.g. "Teacher Assistant — Phone, added
  * Oct 9", so she can find this device's passkey in her password manager later.
  */
-export function passkeyDisplayName(label: TeacherDeviceLabel, added: Date): string {
+export function passkeyDisplayName(label: DeviceLabel, added: Date): string {
   return `${RP_NAME} — ${label}, added ${MONTHS[added.getMonth()]} ${added.getDate()}`;
 }
 

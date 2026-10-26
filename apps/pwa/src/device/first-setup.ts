@@ -35,6 +35,7 @@ import type { DeviceStore, SetupStage, SetupStageName } from "./device-store.js"
 import { passkeyDisplayName, type PasskeyPrfPort, type TeacherDeviceLabel } from "./passkey-prf.js";
 import type { PlatformEnv } from "./platform.js";
 import { SETUP_ERRORS } from "./setup-copy.js";
+import { type ReleaseSetupLock, SetupBusyError, type SetupLockPort } from "./setup-lock.js";
 import { createDeviceVault, probeTier, type TierProbe, type UnlockedDevice } from "./vault.js";
 
 /** How long a setup code lasts (the relay's OWNER_CODE_TTL): the A-8 resume window before redeem. */
@@ -65,6 +66,12 @@ export type DeviceStatus =
       readonly kind: "none";
       /** True when an unfinished setup was cleared just now (A-8: code expired, or an interrupted recovery). */
       readonly cleared: boolean;
+      /** The cleared setup was a pairing no window was running any more (EU-8). */
+      readonly pairing?: boolean;
+    }
+  | {
+      /** Setup or pairing is running in another window of this app: leave the record alone. */
+      readonly kind: "busy";
     }
   | {
       readonly kind: "enrolled";
@@ -77,17 +84,28 @@ export type DeviceStatus =
  * Read the device's state and apply the A-8 rules that need no unlock: a setup that never
  * got its code accepted is wiped once the code's 24 h have passed (no relay row exists), and
  * an interrupted recovery is wiped (F5 has no resume after redeem). A post-redeem first
- * setup is never wiped: that would leave an orphan owner on the relay.
+ * setup is never wiped: that would leave an orphan owner on the relay. An unfinished pairing
+ * is wiped unless another window is still running it.
  */
 export async function readDeviceStatus(
   store: DeviceStore,
   now: number = Date.now(),
+  setupLock?: SetupLockPort,
 ): Promise<DeviceStatus> {
   const record = await store.load();
   if (record === null) {
     return { kind: "none", cleared: false };
   }
   const stage = record.setupStage;
+  if (stage?.stage === "pairing") {
+    // The pairing secret was memory-only, so a pairing never resumes. A live window still
+    // running it holds the setup lock; otherwise it was closed or stopped (EU-8).
+    if ((await setupLock?.held()) === true) {
+      return { kind: "busy" };
+    }
+    await store.wipe();
+    return { kind: "none", cleared: true, pairing: true };
+  }
   const expired = stage?.stage === "keys_created" && now - stage.at > SETUP_CODE_TTL_MS;
   const interruptedRecovery = stage?.mode === "recovery" && stage.stage !== "done";
   if (expired || interruptedRecovery) {
@@ -121,6 +139,8 @@ export interface FirstSetupDeps {
   readonly synthetic: boolean;
   readonly platform?: PlatformEnv;
   readonly now?: () => number;
+  /** One setup or pairing at a time per profile (EU-8); taken before the passkey exists. */
+  readonly setupLock?: SetupLockPort;
 }
 
 /**
@@ -134,6 +154,7 @@ export class FirstSetup {
   #probe: TierProbe | null = null;
   #label: TeacherDeviceLabel | undefined;
   #recoveryCode: string | null = null;
+  #release: ReleaseSetupLock | null = null;
 
   constructor(deps: FirstSetupDeps, device: UnlockedDevice | null = null) {
     this.#deps = deps;
@@ -203,6 +224,12 @@ export class FirstSetup {
   async createPasskey(): Promise<VaultTier> {
     if (this.#label === undefined) {
       throw new Error("name the device before its passkey is created");
+    }
+    if (this.#release === null && this.#deps.setupLock !== undefined) {
+      this.#release = await this.#deps.setupLock.tryAcquire();
+      if (this.#release === null) {
+        throw new SetupBusyError(); // another window is setting this device up
+      }
     }
     const name = passkeyDisplayName(this.#label, new Date(this.#now()));
     this.#probe = await probeTier(this.#deps.passkey, name, this.#deps.platform);
@@ -356,7 +383,14 @@ export class FirstSetup {
     }
     await this.#writeStage("done", "first");
     this.discardRecoveryCode();
+    this.end();
     return true;
+  }
+
+  /** This run is over (done, or the App locked): release the setup lock. Idempotent. */
+  end(): void {
+    this.#release?.();
+    this.#release = null;
   }
 
   /** Drop the recovery code from memory (leaving S4/S5, or a lock). */

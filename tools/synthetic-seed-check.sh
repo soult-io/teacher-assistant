@@ -5,7 +5,9 @@
 #   synthetic-seed-check.sh <dir> present   — QA: fail unless EVERY seed marker is present.
 # CI runs both sides on every build, so a marker that stops matching the seed (renamed
 # goal, reworded error) fails the QA side instead of letting the prod side pass on nothing.
-# The markers are seed-only strings from apps/pwa/src/data/synthetic-seed.ts.
+# The markers are seed-only strings from apps/pwa/src/data/synthetic-seed.ts, plus the
+# label of the Teacher/Para demo switch (AppShell RoleSeg), which a production bundle
+# must not carry either (spec §13 A-6, TEACH-75).
 set -euo pipefail
 
 dir="${1:?usage: synthetic-seed-check.sh <dir> absent|present}"
@@ -15,6 +17,7 @@ markers=(
   "synthetic seed: cast is incomplete"
   "Two-step equations"
   "Scientific notation"
+  "Para (JT)"
 )
 
 if [ ! -f "$dir/index.html" ]; then

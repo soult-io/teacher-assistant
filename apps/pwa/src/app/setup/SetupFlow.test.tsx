@@ -65,6 +65,9 @@ function fakePort(
     discardRecoveryCode: () => {
       calls.push("discard");
     },
+    end: () => {
+      calls.push("end");
+    },
     device,
   };
   return { port, calls, device };
@@ -234,7 +237,7 @@ describe("F1 screens — the paper recovery code (C6, D-ARCH-1)", () => {
     expect(screen.queryByTestId("recovery-banner")).toBeNull();
     expect(calls).toContain("confirm:2epsk6ym");
     fireEvent.click(screen.getByTestId("setup-done"));
-    expect(onDone).toHaveBeenCalledWith(port.device);
+    expect(onDone).toHaveBeenCalledWith(port.device, false);
   });
 
   it("S5 'Show the code again' returns to S4 while still in this setup", async () => {
@@ -336,16 +339,19 @@ describe("F1 screens — resume (after the full unlock)", () => {
 });
 
 describe("F1 screens — review fixes", () => {
-  it("S6's button opens the app (no unanswered 'Later')", async () => {
+  it("S6 offers 'Add my phone now' and 'Later' now that pairing exists (EU-8)", async () => {
     const { port } = fakePort({ tier: "prf" });
-    renderFlow(port);
+    const onDone = renderFlow(port);
     await toPasskeyStep();
     fireEvent.click(screen.getByTestId("save-passkey"));
     fireEvent.click(await screen.findByTestId("wrote-it-down"));
     fireEvent.change(screen.getByTestId("check-group-1"), { target: { value: "2EPS" } });
     fireEvent.change(screen.getByTestId("check-group-2"), { target: { value: "K6YM" } });
     fireEvent.click(screen.getByTestId("check-recovery"));
-    expect(await screen.findByTestId("setup-done")).toHaveTextContent("Open the app");
+    expect(await screen.findByTestId("setup-done")).toHaveTextContent("Later");
+    expect(screen.getByText("Want the app on your phone too?")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("setup-add-phone"));
+    expect(onDone).toHaveBeenCalledWith(port.device, true);
   });
 
   it("E-S5: a device that cannot save a passkey at all gets its own copy", async () => {

@@ -29,23 +29,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AppShell, type ShellNav, type Tab } from "./app/AppShell.js";
 import { LockScreen } from "./app/LockScreen.js";
+import { AddDeviceFlow } from "./app/pairing/AddDeviceFlow.js";
+import { JoinFlow } from "./app/pairing/JoinFlow.js";
 import { SetupFlow } from "./app/setup/SetupFlow.js";
 import { isSyntheticBuild } from "./build-flags.js";
 import type { SetupStageName } from "./device/device-store.js";
 import { browserPlatform, isIosOutsideHomeScreen } from "./device/platform.js";
+import { PAIRING_COPY } from "./device/pairing-copy.js";
 import { SETUP_ERRORS } from "./device/setup-copy.js";
 import {
+  type ApprovePort,
   browserDevicePort,
   type DeviceHandle,
   type DevicePort,
+  type JoinPort,
   type SetupPort,
 } from "./device/device-port.js";
-import {
-  DeviceCannotUnlockError,
-  PassphraseRequiredError,
-  UnlockBackoffError,
-  WrongPassphraseError,
-} from "./device/vault.js";
+import { unlockFailureCopy } from "./device/unlock-copy.js";
 import {
   AutoLock,
   HIDDEN_DEFAULT_MS,
@@ -69,6 +69,7 @@ import {
   nowTs,
 } from "./app/screens/new-goal/assemble.js";
 import { NewGoalScreen } from "./app/screens/new-goal/NewGoalScreen.js";
+import { DevicesScreen } from "./app/screens/DevicesScreen.js";
 import { ParaScreen } from "./app/screens/para/ParaScreen.js";
 import { ValidationQueueScreen } from "./app/screens/para/ValidationQueueScreen.js";
 import { StubScreen } from "./app/screens/StubScreen.js";
@@ -107,8 +108,16 @@ import {
   upsertGoalMutator,
 } from "./data/writes.js";
 
-type Phase = "loading" | "setup" | "locked" | "unlocking" | "ready";
-type TrackView = "dashboard" | "toscore" | "new_goal" | "goal_detail" | "baseline" | "validation";
+type Phase = "loading" | "setup" | "pairing" | "busy" | "locked" | "unlocking" | "ready";
+type TrackView =
+  | "dashboard"
+  | "toscore"
+  | "new_goal"
+  | "goal_detail"
+  | "baseline"
+  | "validation"
+  | "devices"
+  | "add_device";
 
 /** Desktop top-bar titles per Track view (design §2). */
 const SCREEN_TITLES: Readonly<Record<TrackView, string>> = {
@@ -118,6 +127,8 @@ const SCREEN_TITLES: Readonly<Record<TrackView, string>> = {
   goal_detail: "Goal Detail",
   baseline: "Baseline / proposed goals",
   validation: "Para points to confirm",
+  devices: "Devices",
+  add_device: "Add a device",
 };
 
 /** The desktop sidebar roster context for the Para role (period-scoped, non-PII). */
@@ -189,16 +200,7 @@ function unlockErrorMessage(err: unknown): string {
   if (err instanceof SyncError) {
     return "Couldn't reach the sync server. Your local data is unaffected — try again.";
   }
-  if (err instanceof UnlockBackoffError) {
-    return `Too many tries. Try again in ${Math.ceil(err.retryAfterMs / 1000)} seconds.`;
-  }
-  if (err instanceof WrongPassphraseError || err instanceof DeviceCannotUnlockError) {
-    return err.message;
-  }
-  if (err instanceof PassphraseRequiredError) {
-    return "Type your passphrase, then unlock with your passkey.";
-  }
-  return PASSKEY_RETRY;
+  return unlockFailureCopy(err, "Type your passphrase, then unlock with your passkey.");
 }
 
 /** Where a set-up device's resume opens (flows §2 screen map). */
@@ -220,6 +222,9 @@ export function App({
   const [phase, setPhase] = useState<Phase>("loading");
   const [tier, setTier] = useState<VaultTier>("prf");
   const [setup, setSetup] = useState<SetupState | null>(null);
+  const [join, setJoin] = useState<JoinPort | null>(null);
+  // S6 "Add my phone now": the app opens on pairing (flows §5 A1).
+  const [addDeviceFirst, setAddDeviceFirst] = useState(false);
   const [sessions, setSessions] = useState<Sessions | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lockReason, setLockReason] = useState<LockReason | null>(null);
@@ -232,6 +237,11 @@ export function App({
   const sessionsRef = useRef<Sessions | null>(null);
   const deviceRef = useRef<DeviceHandle | null>(null);
   const setupRef = useRef<SetupPort | null>(null);
+  // Pairing, either side: a lock abandons the trusted side's session and discards a new
+  // device's half-made keys. The status is re-read only after that discard has wiped.
+  const joinRef = useRef<JoinPort | null>(null);
+  const approverRef = useRef<ApprovePort | null>(null);
+  const pendingWipeRef = useRef<Promise<void>>(Promise.resolve());
   // Bumped by every lock: an async unlock or session open that started before a lock
   // sees the change after its next await and drops what it opened.
   const lockGenRef = useRef(0);
@@ -246,39 +256,60 @@ export function App({
   }, []);
 
   const startNewSetup = useCallback(
-    (cleared: boolean) => {
-      setError(cleared ? "Start over with a new setup code." : null);
+    (cleared: boolean, pairing = false) => {
+      if (pairing) {
+        setError(PAIRING_COPY.interruptedNew); // a pairing no window was running any more
+      } else {
+        setError(cleared ? "Start over with a new setup code." : null);
+      }
       enterSetup(device.setup(), null);
     },
     [device, enterSetup],
   );
 
+  // S0 "Add this device to my account": pairing on this new device (B1).
+  const startPairing = useCallback(() => {
+    setupRef.current?.end();
+    setupRef.current = null;
+    const port = device.pair();
+    joinRef.current = port;
+    setJoin(port);
+    setError(null);
+    setPhase("pairing");
+  }, [device]);
+
   // Where the device stands on open (and after each lock): no record → first setup;
   // a record → the lock screen in its style.
   useEffect(() => {
     let live = true;
-    void device.status().then(
-      (status) => {
-        if (!live) {
-          return;
-        }
-        if (status.kind === "none") {
-          startNewSetup(status.cleared);
-          return;
-        }
-        setTier(status.tier);
-        // An unlock already started from the lock screen keeps its own phase.
-        setPhase((p) => (p === "loading" ? "locked" : p));
-      },
-      () => {
-        if (live) {
-          setPhase((p) => (p === "loading" ? "locked" : p));
-          if (statusReads === 0) {
-            setError(PASSKEY_RETRY); // only at open: a re-read after a lock is no failed attempt
+    void pendingWipeRef.current
+      .then(() => device.status())
+      .then(
+        (status) => {
+          if (!live) {
+            return;
           }
-        }
-      },
-    );
+          if (status.kind === "none") {
+            startNewSetup(status.cleared, status.pairing === true);
+            return;
+          }
+          if (status.kind === "busy") {
+            setPhase("busy"); // another window is setting this device up: leave it alone
+            return;
+          }
+          setTier(status.tier);
+          // An unlock already started from the lock screen keeps its own phase.
+          setPhase((p) => (p === "loading" ? "locked" : p));
+        },
+        () => {
+          if (live) {
+            setPhase((p) => (p === "loading" ? "locked" : p));
+            if (statusReads === 0) {
+              setError(PASSKEY_RETRY); // only at open: a re-read after a lock is no failed attempt
+            }
+          }
+        },
+      );
     return () => {
       live = false;
     };
@@ -304,10 +335,21 @@ export function App({
           heldDevice?.lock(); // signSk, boxSk, record key: nothing can sign or open a grant
         } finally {
           setupRef.current?.discardRecoveryCode();
+          setupRef.current?.end();
           setupRef.current = null;
+          approverRef.current?.abandon(); // S, K and the fetched request, zeroized
+          approverRef.current = null;
+          const heldJoin = joinRef.current;
+          joinRef.current = null;
+          if (heldJoin !== null) {
+            // A failed wipe leaves a `pairing` record no window runs: the status read wipes it.
+            pendingWipeRef.current = heldJoin.discard().catch(() => {});
+          }
           flushSync(() => {
             setSessions(null);
             setSetup(null);
+            setJoin(null);
+            setAddDeviceFirst(false);
             setDeviceOpen(false);
             setPhase("locked");
             setLockReason(reason);
@@ -368,6 +410,15 @@ export function App({
         setLockReason(null);
         setPhase("ready");
         void teacher.sync().catch(() => {});
+        // A device set up or paired just now has not had its style read yet (A3 needs it).
+        void device.status().then(
+          (status) => {
+            if (status.kind === "enrolled") {
+              setTier(status.tier);
+            }
+          },
+          () => {}, // unreadable: keep the style already known; the next lock reads it again
+        );
       } catch (err) {
         teacher?.lock(); // never leave MK and the period keys behind a failed unlock
         para?.lock();
@@ -395,16 +446,19 @@ export function App({
       if (lockGenRef.current !== gen) {
         return; // locked meanwhile: the lock already locked this handle
       }
-      if (status === null || status.kind === "none") {
+      if (status === null || status.kind === "none" || status.kind === "busy") {
         // Unreadable: fail closed, never open data. Gone (A-8 wipe): setup starts over.
+        // Busy: another window is pairing this device; it stays theirs.
         handle.lock();
         deviceRef.current = null;
         setDeviceOpen(false);
         if (status === null) {
           setPhase("locked");
           setError(PASSKEY_RETRY);
+        } else if (status.kind === "busy") {
+          setPhase("busy");
         } else {
-          startNewSetup(status.cleared);
+          startNewSetup(status.cleared, status.pairing === true);
         }
         return;
       }
@@ -417,6 +471,34 @@ export function App({
     },
     [device, openSession, startNewSetup, enterSetup],
   );
+
+  // Leave the new device's pairing (‹ Back, or Start again after an interruption): what it
+  // made is discarded, then the welcome screen.
+  const leavePairing = useCallback(() => {
+    const held = joinRef.current;
+    joinRef.current = null;
+    deviceRef.current?.lock();
+    deviceRef.current = null;
+    setDeviceOpen(false);
+    setJoin(null);
+    // A failed wipe leaves a `pairing` record no window runs: the status read wipes it.
+    pendingWipeRef.current = (held?.discard() ?? Promise.resolve()).catch(() => {});
+    void pendingWipeRef.current.then(() => startNewSetup(false));
+  }, [startNewSetup]);
+
+  // A fresh approver for one pairing session on this trusted device (A0–A4). The App keeps
+  // it so a lock abandons it.
+  const openApprover = useCallback((): ApprovePort => {
+    const handle = deviceRef.current;
+    const held = sessionsRef.current;
+    if (handle === null || held === null) {
+      throw new Error("the device is locked");
+    }
+    approverRef.current?.abandon();
+    const port = device.approver(handle, held.teacher);
+    approverRef.current = port;
+    return port;
+  }, [device]);
 
   const unlock = useCallback(
     (passphrase?: string) => {
@@ -439,16 +521,17 @@ export function App({
     [device, afterUnlock],
   );
 
+  const deviceWord = isDesktop ? "laptop" : "phone";
   if (phase === "setup" && setup !== null) {
     return (
       <div className="phone">
-        {lockWarning ? <LockWarning onKeepOpen={() => setLockWarning(false)} /> : null}
+        <LockWarning show={lockWarning} onKeepOpen={() => setLockWarning(false)} />
         <SetupFlow
           port={setup.port}
           resumeAt={setup.resumeAt}
           resumeTier={tier}
           online={online}
-          deviceWord={isDesktop ? "laptop" : "phone"}
+          deviceWord={deviceWord}
           startNotice={error}
           homeScreenOnly={homeScreenOnly}
           onVaultSealed={(handle) => {
@@ -456,15 +539,51 @@ export function App({
             deviceRef.current = handle;
             setDeviceOpen(true);
           }}
-          onDone={(handle) => {
+          onDone={(handle, addPhone) => {
             deviceRef.current = handle;
             setupRef.current = null;
             setDeviceOpen(true);
+            setAddDeviceFirst(addPhone);
             setPhase("unlocking");
             void openSession(handle);
           }}
+          onPair={startPairing}
         />
       </div>
+    );
+  }
+  if (phase === "pairing" && join !== null) {
+    return (
+      <div className="phone">
+        <LockWarning show={lockWarning} onKeepOpen={() => setLockWarning(false)} />
+        <JoinFlow
+          port={join}
+          deviceWord={deviceWord}
+          onVaultSealed={(handle) => {
+            // From here the pairing holds the unlocked device: auto-lock and Lock cover it.
+            deviceRef.current = handle;
+            setDeviceOpen(true);
+          }}
+          onDone={(handle) => {
+            // B4 stays on screen ("Getting your data…") until the session is open.
+            deviceRef.current = handle;
+            joinRef.current = null;
+            setDeviceOpen(true);
+            void openSession(handle);
+          }}
+          onLeave={leavePairing}
+        />
+      </div>
+    );
+  }
+  if (phase === "busy") {
+    return (
+      <BusyScreen
+        onRetry={() => {
+          setPhase("loading");
+          setStatusReads((n) => n + 1);
+        }}
+      />
     );
   }
   if (phase !== "ready" || sessions === null) {
@@ -488,6 +607,9 @@ export function App({
         online={online}
         theme={theme}
         now={nowRef.current}
+        tier={tier}
+        openApprover={openApprover}
+        addDeviceFirst={addDeviceFirst}
         onLock={() => {
           if (autoLockRef.current === null) {
             lock("manual");
@@ -496,8 +618,35 @@ export function App({
           }
         }}
       />
-      {lockWarning ? <LockWarning onKeepOpen={() => setLockWarning(false)} /> : null}
+      <LockWarning show={lockWarning} onKeepOpen={() => setLockWarning(false)} />
     </>
+  );
+}
+
+/** Another window of this app is setting this device up (EU-8): its record is left alone. */
+function BusyScreen({ onRetry }: { readonly onRetry: () => void }) {
+  return (
+    <div className="phone">
+      <div className="lock">
+        <div className="lockbody">
+          <span className="mark" aria-hidden="true">
+            🔒
+          </span>
+          <h1>Teacher Assistant</h1>
+          <p className="locknote" data-testid="setup-busy">
+            {PAIRING_COPY.busyRetry}
+          </p>
+          <button
+            type="button"
+            className="btn primary wide"
+            onClick={onRetry}
+            data-testid="busy-retry"
+          >
+            Try again
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -517,7 +666,16 @@ function lockReasonCopy(reason: LockReason): string {
  * The idle warning at N − 1 (flows U3). Showing it never extends the timer (A-10); the
  * tap on Keep open is ordinary input, which is what resets the timer.
  */
-function LockWarning({ onKeepOpen }: { readonly onKeepOpen: () => void }) {
+function LockWarning({
+  show,
+  onKeepOpen,
+}: {
+  readonly show: boolean;
+  readonly onKeepOpen: () => void;
+}) {
+  if (!show) {
+    return null;
+  }
   return (
     <div className="locktoast" role="status" data-testid="lock-warning">
       <span>Locking in {WARN_BEFORE_MS / 1000} seconds</span>
@@ -535,6 +693,9 @@ function ReadyApp({
   theme,
   now,
   onLock,
+  tier,
+  openApprover,
+  addDeviceFirst,
 }: {
   readonly teacher: Session;
   /** Null on a production build: no in-process para device, no role switch (A-6). */
@@ -543,12 +704,21 @@ function ReadyApp({
   readonly theme: ThemeControl;
   readonly now: Date;
   readonly onLock: () => void;
+  /** This device's unlock style: A3 asks for the passphrase again on Style W. */
+  readonly tier: VaultTier;
+  /** A fresh pairing session on this device (the App keeps it, so a lock abandons it). */
+  readonly openApprover: () => ApprovePort;
+  /** S6 "Add my phone now": open straight on the square code (flows §5 A1). */
+  readonly addDeviceFirst: boolean;
 }) {
   const { records, apply, refresh } = useSessionRecords(teacher);
   const isDesktop = useIsDesktop();
   const [role, setRole] = useState<Role>("teacher");
   const [tab, setTab] = useState<Tab>("track");
-  const [trackView, setTrackView] = useState<TrackView>("dashboard");
+  const [trackView, setTrackView] = useState<TrackView>(
+    addDeviceFirst ? "add_device" : "dashboard",
+  );
+  const [addAutoStart, setAddAutoStart] = useState(addDeviceFirst);
   // The dashboard grouping lives here, not in DashboardScreen, so it survives Goal
   // Detail, the score modal and tab switches (TEACH-43). ReadyApp mounts on unlock, so
   // each unlock starts on owes-first; it is never persisted across reloads.
@@ -842,7 +1012,32 @@ function ReadyApp({
     go: setTrackView,
   });
 
+  const deviceWord = isDesktop ? "laptop" : "phone";
   const track = (() => {
+    if (trackView === "devices") {
+      return (
+        <DevicesScreen
+          online={online}
+          onAdd={() => setTrackView("add_device")}
+          onBack={() => setTrackView("dashboard")}
+        />
+      );
+    }
+    if (trackView === "add_device") {
+      return (
+        <AddDeviceFlow
+          openApprover={openApprover}
+          tier={tier}
+          online={online}
+          deviceWord={deviceWord}
+          autoStart={addAutoStart}
+          onClose={() => {
+            setAddAutoStart(false);
+            setTrackView("dashboard");
+          }}
+        />
+      );
+    }
     if (trackView === "new_goal") {
       return (
         <NewGoalScreen
@@ -939,6 +1134,14 @@ function ReadyApp({
       theme={theme.choice}
       onThemeCycle={theme.cycle}
       onLock={onLock}
+      onDevices={
+        role === "teacher"
+          ? () => {
+              setTab("track");
+              setTrackView("devices");
+            }
+          : undefined
+      }
       tab={tab}
       onTab={onTab}
       title={shell.title}

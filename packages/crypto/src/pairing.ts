@@ -26,6 +26,7 @@ import {
   aeadDecrypt,
   aeadEncrypt,
   fromBase64,
+  isAllZero,
   keyedHash,
   randomBytes,
   sealedKeyBytes,
@@ -80,6 +81,17 @@ function pairingAad(sid: string, purpose: PairingPurpose): Uint8Array {
   return utf8(`ta-pair-v1|${purpose}|${sid}`);
 }
 
+/**
+ * A zeroized K (the session was abandoned while a caller still held it) must never seal or
+ * open anything: a blob under an all-zero key is readable by anyone. Same rule as the
+ * keyring's KeyringDestroyedError (EU-8 FERPA gate, B-1).
+ */
+function assertLiveKey(key: Uint8Array): void {
+  if (isAllZero(key)) {
+    throw new PairingError("pairing key was zeroized");
+  }
+}
+
 /** Seal a mailbox blob under K, binding the sid and the direction as AAD. */
 export function sealPairing(
   key: Uint8Array,
@@ -87,6 +99,7 @@ export function sealPairing(
   purpose: PairingPurpose,
   plaintext: Uint8Array,
 ): Uint8Array {
+  assertLiveKey(key);
   return aeadEncrypt(key, plaintext, pairingAad(sid, purpose));
 }
 
@@ -97,6 +110,7 @@ export function openPairing(
   purpose: PairingPurpose,
   blob: Uint8Array,
 ): Uint8Array {
+  assertLiveKey(key);
   try {
     return aeadDecrypt(key, blob, pairingAad(sid, purpose));
   } catch {
@@ -122,6 +136,55 @@ export function openEnrollmentRequest(
   const plaintext = openPairing(key, sid, "request", blob);
   try {
     return parseEnrollmentRequest(JSON.parse(new TextDecoder().decode(plaintext)));
+  } catch {
+    throw new PairingError("malformed request");
+  }
+}
+
+// ── The labelled request (spec rev 2.7 §4.2 step 2, EU-8) ──
+// B's device name rides inside the same AEAD_K blob as its keys, so it is never a
+// plaintext relay field and a tampered name fails AEAD like a tampered key. Here the
+// label is only bounded; the approver checks it against the fixed list and the pairing
+// role right after opening, before anything is granted (§4.2 step 3).
+
+const MAX_LABEL_LENGTH = 64;
+
+function isLabel(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_LABEL_LENGTH;
+}
+
+/** B: seal its enrollment request and its device name for the request slot. */
+export function sealLabelledEnrollmentRequest(
+  key: Uint8Array,
+  sid: string,
+  request: EnrollmentRequest,
+  label: string,
+): Uint8Array {
+  if (!isLabel(label)) {
+    throw new PairingError("malformed label");
+  }
+  return sealPairing(key, sid, "request", utf8(JSON.stringify({ ...request, label })));
+}
+
+/** A: open B's labelled request. Throws PairingError on any failure, a missing label included. */
+export function openLabelledEnrollmentRequest(
+  key: Uint8Array,
+  sid: string,
+  blob: Uint8Array,
+): { readonly request: EnrollmentRequest; readonly label: string } {
+  const plaintext = openPairing(key, sid, "request", blob);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(new TextDecoder().decode(plaintext));
+  } catch {
+    throw new PairingError("malformed request");
+  }
+  const label = (parsed as { label?: unknown } | null)?.label;
+  if (!isLabel(label)) {
+    throw new PairingError("malformed request");
+  }
+  try {
+    return { request: parseEnrollmentRequest(parsed), label };
   } catch {
     throw new PairingError("malformed request");
   }
