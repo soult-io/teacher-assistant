@@ -24,10 +24,10 @@
     "yjs": "13.6.33"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.8",
+    "@electric-sql/pglite": "0.5.12",
     "@teacher-assistant/sync-relay": "workspace:*",
-    "@vitest/coverage-v8": "~5.0.3",
+    "@vitest/coverage-v8": "~5.0.5",
     "typescript": "~7.0.2",
-    "vitest": "~5.0.3"
+    "vitest": "~5.0.5"
   }
 }
